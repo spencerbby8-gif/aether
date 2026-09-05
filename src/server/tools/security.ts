@@ -24,8 +24,15 @@ import { Agent } from "undici";
  * resolve-then-rebind (TOCTOU) window.
  */
 
-/** Authorized workspace root. Nothing outside it is reachable by tools. */
-export const WORKSPACE_ROOT = path.resolve(process.cwd(), process.env.AETHER_WORKSPACE_DIR ?? ".aether-run");
+/**
+ * Authorized workspace root. Nothing outside it is reachable by tools.
+ *
+ * Kept statically scoped on purpose: a dynamic segment here makes the bundler
+ * trace the whole project into every serverless bundle. If this ever needs to
+ * be configurable, use the `turbopackIgnore` marker rather than a bare env
+ * read inside path.resolve().
+ */
+export const WORKSPACE_ROOT = path.resolve(process.cwd(), ".aether-run");
 
 export function workspaceDir(...segments: string[]): string {
   return path.join(WORKSPACE_ROOT, ...segments);
