@@ -1,0 +1,18 @@
+# Aether — Netlify deployment configuration.
+# Engine control plane (from the verified aether-engine-runtime handoff):
+#   /.netlify/functions/ensure-alive  → wake + discover + A→B quota failover
+#   /.netlify/functions/engine-off    → one-button kill-all
+# Both Netlify Functions ship the pinned notebook via included_files.
+[build]
+  command = "next build"
+  publish = ".next"
+
+[functions]
+  directory = "netlify/functions"
+  included_files = ["netlify/functions/ensure-alive/notebook.ipynb"]
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

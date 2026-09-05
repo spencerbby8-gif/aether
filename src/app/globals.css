@@ -1,0 +1,413 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), var(--font-manrope), ui-sans-serif, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono", monospace;
+}
+
+@theme {
+  --color-ink-950: #07090c;
+  --color-ink-900: #0b0e12;
+  --color-ink-850: #0e1117;
+  --color-ink-800: #11151c;
+  --color-ink-750: #151a23;
+  --color-ink-700: #1a202b;
+  --color-ink-600: #232b38;
+
+  --color-line: rgb(255 255 255 / 0.07);
+  --color-line-strong: rgb(255 255 255 / 0.13);
+
+  --color-fog-100: #eceff4;
+  --color-fog-200: #d8dde6;
+  --color-fog-300: #b9c1cd;
+  --color-fog-400: #939eae;
+  --color-fog-500: #6e7989;
+  --color-fog-600: #4d5665;
+
+  --color-ember-200: #f6dcab;
+  --color-ember-300: #eeca86;
+  --color-ember-400: #e2b161;
+  --color-ember-500: #d3993f;
+  --color-ember-600: #a97827;
+
+  --color-ok-400: #5fc98e;
+  --color-warn-400: #e0955a;
+  --color-danger-400: #e46a72;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-ink-900 text-fog-100 font-sans antialiased;
+    font-feature-settings: "ss01" on;
+  }
+  /* Layered ambient depth — two faint field glows over the charcoal base. */
+  #root-shell {
+    background:
+      radial-gradient(52rem 30rem at 82% -12%, rgb(226 177 97 / 0.05), transparent 62%),
+      radial-gradient(44rem 26rem at -14% 108%, rgb(134 182 232 / 0.045), transparent 60%),
+      var(--color-ink-900);
+  }
+  ::selection {
+    background: rgb(226 177 97 / 0.24);
+  }
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-ink-600);
+    border-radius: 99px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink-600) transparent;
+  }
+  :focus-visible {
+    outline: 2px solid rgb(226 177 97 / 0.55);
+    outline-offset: 1px;
+  }
+}
+
+/* ---------------- motion ---------------- */
+
+@keyframes aether-rise {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes aether-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.975) translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes aether-shimmer {
+  from {
+    background-position: -420px 0;
+  }
+  to {
+    background-position: 420px 0;
+  }
+}
+@keyframes aether-blink {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes aether-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+@keyframes aether-orbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes aether-orbit-rev {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+.anim-orbit {
+  animation: aether-orbit 16s linear infinite;
+  transform-origin: center;
+}
+.anim-orbit-rev {
+  animation: aether-orbit-rev 22s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes aether-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+.anim-glow {
+  animation: aether-glow 4.5s ease-in-out infinite;
+}
+
+/* Focus frame for the composer — ember ring without glassmorphism. */
+.composer-frame {
+  transition: border-color 0.2s ease, box-shadow 0.25s ease;
+}
+.composer-frame:focus-within {
+  border-color: rgb(226 177 97 / 0.4);
+  box-shadow:
+    0 0 0 1px rgb(226 177 97 / 0.22),
+    0 12px 34px -14px rgb(226 177 97 / 0.28),
+    0 4px 18px -8px rgb(0 0 0 / 0.6);
+}
+
+.anim-rise {
+  animation: aether-rise 0.4s cubic-bezier(0.21, 1, 0.32, 1) both;
+}
+.anim-pop {
+  animation: aether-pop 0.16s ease-out both;
+}
+.anim-pulse {
+  animation: aether-pulse 1.3s ease-in-out infinite;
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-ink-750) 0%,
+    var(--color-ink-700) 45%,
+    var(--color-ink-750) 90%
+  );
+  background-size: 420px 100%;
+  animation: aether-shimmer 1.4s linear infinite;
+  border-radius: 6px;
+}
+.stream-caret::after {
+  content: "▍";
+  margin-left: 1px;
+  color: var(--color-ember-400);
+  animation: aether-blink 1.05s steps(1) infinite;
+}
+
+[data-motion="reduced"] *,
+[data-motion="reduced"] *::before,
+[data-motion="reduced"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ---------------- markdown ---------------- */
+
+.md {
+  font-size: 0.9375rem;
+  line-height: 1.72;
+  overflow-wrap: break-word;
+}
+.md > * + * {
+  margin-top: 0.8em;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--color-fog-100);
+  line-height: 1.32;
+  margin-top: 1.4em;
+}
+.md h1 {
+  font-size: 1.25rem;
+}
+.md h2 {
+  font-size: 1.125rem;
+}
+.md h3 {
+  font-size: 1rem;
+}
+.md h4 {
+  font-size: 0.9375rem;
+}
+.md h1:first-child,
+.md h2:first-child,
+.md h3:first-child {
+  margin-top: 0.2em;
+}
+.md ul,
+.md ol {
+  padding-left: 1.35em;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li {
+  margin-top: 0.32em;
+}
+.md li::marker {
+  color: var(--color-fog-500);
+}
+.md blockquote {
+  border-left: 2px solid rgb(226 177 97 / 0.5);
+  background: rgb(226 177 97 / 0.05);
+  padding: 0.55em 1em;
+  border-radius: 0 8px 8px 0;
+  color: var(--color-fog-300);
+}
+.md blockquote p + p {
+  margin-top: 0.5em;
+}
+.md a {
+  color: var(--color-ember-300);
+  text-decoration: underline;
+  text-decoration-color: rgb(226 177 97 / 0.35);
+  text-underline-offset: 3px;
+}
+.md a:hover {
+  text-decoration-color: var(--color-ember-300);
+}
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--color-line-strong);
+  margin: 1.4em 0;
+}
+.md code.md-inline {
+  font-family: var(--font-mono);
+  font-size: 0.84em;
+  background: var(--color-ink-750);
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  padding: 0.14em 0.4em;
+  color: var(--color-ember-200);
+}
+.md table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.md th {
+  text-align: left;
+  font-weight: 600;
+  background: var(--color-ink-750);
+  color: var(--color-fog-200);
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-line-strong);
+}
+.md td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-line);
+  color: var(--color-fog-300);
+}
+.md tr:last-child td {
+  border-bottom: 0;
+}
+.md .table-scroll {
+  overflow-x: auto;
+  border-radius: 8px;
+}
+.md .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.3rem 0.1rem;
+}
+.md .katex {
+  font-size: 1.04em;
+}
+
+/* code chrome */
+.code-card {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-ink-950);
+}
+.code-card pre {
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+}
+.code-card code {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.65;
+  background: transparent;
+}
+
+/* syntax — tuned to the Aether palette */
+.hljs {
+  color: #d6dce6;
+}
+.hljs-comment,
+.hljs-quote {
+  color: #5b6675;
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-template-tag,
+.hljs-deletion {
+  color: #e2b161;
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: #9ccf9f;
+}
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet {
+  color: #86b6e8;
+}
+.hljs-title,
+.hljs-section,
+.hljs-name {
+  color: #f0d9a8;
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-property {
+  color: #a9c3e2;
+}
+.hljs-built_in,
+.hljs-type,
+.hljs-selector-class {
+  color: #d3a9e8;
+}
+.hljs-meta,
+.hljs-tag,
+.hljs-link {
+  color: #8fa0b5;
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 700;
+}
