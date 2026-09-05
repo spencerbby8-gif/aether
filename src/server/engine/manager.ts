@@ -493,6 +493,24 @@ export class EngineManager {
   }
 
   /**
+   * Record a resolution performed OUTSIDE the manager (the control-plane
+   * handlers resolve through resolve.ts) so the UI and the manager can never
+   * disagree about which slot is actually serving.
+   *
+   * Without this, /api/engine/state reported every slot "off" even seconds
+   * after ensure-alive had bound a live engine to it.
+   */
+  noteAlive(slot: EngineId, url: string): void {
+    this.bind(slot, "alive", url);
+    this.store.setActive(slot);
+  }
+
+  /** Record a confirmed shutdown performed outside the manager. */
+  noteOff(slot: EngineId): void {
+    this.bind(slot, "off", null);
+  }
+
+  /**
    * Deterministic A → B → C → A failover. Each call advances exactly one step
    * from the slot that failed, so repeated failures walk the fleet in a fixed
    * order rather than oscillating.

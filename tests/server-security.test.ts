@@ -71,3 +71,27 @@ describe("secret redaction", () => {
     delete process.env.AETHER_AGENT_KEY;
   });
 });
+
+describe("tool failure classification (audit §6.7)", () => {
+  it("a policy refusal is reported as kind:'policy', not an upstream failure", async () => {
+    const { executeTool } = await import("@/server/tools");
+    const r = await executeTool("web.fetch", { url: "http://169.254.169.254/latest/meta-data/" }, "proof");
+    expect(r.ok).toBe(false);
+    expect(r.kind).toBe("policy");
+    expect(r.text).toMatch(/policy|denied/i);
+  });
+
+  it("a non-standard port is a policy refusal, not an upstream failure", async () => {
+    const { executeTool } = await import("@/server/tools");
+    const r = await executeTool("web.fetch", { url: "http://127.0.0.1:8080/" }, "proof");
+    expect(r.ok).toBe(false);
+    expect(r.kind).toBe("policy");
+  });
+
+  it("an unknown tool is reported as kind:'invalid'", async () => {
+    const { executeTool } = await import("@/server/tools");
+    const r = await executeTool("no.such.tool", {}, "proof");
+    expect(r.ok).toBe(false);
+    expect(r.kind).toBe("invalid");
+  });
+});

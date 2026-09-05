@@ -32,10 +32,8 @@ export async function POST(request: Request) {
 
   const result = await executeTool(body.tool, body.args ?? {}, body.taskId ?? "default");
 
-  /* Map tool outcomes onto honest HTTP statuses. */
-  const text = typeof result.text === "string" ? result.text : "";
-  const rejected = !result.ok && /Access denied|denied|not allowed|restricted|Invalid|escapes/i.test(text);
-  const upstream = !result.ok && /Fetch failed|timeout|ECONN|ENOTFOUND|HTTP \d{3}/i.test(text);
-  const status = result.ok ? 200 : rejected ? 400 : upstream ? 502 : 500;
+  /* Map tool outcomes onto honest HTTP statuses using the classification the
+     tool layer reports — never by pattern-matching the message text. */
+  const status = result.ok ? 200 : result.kind === "policy" || result.kind === "invalid" ? 400 : result.kind === "upstream" ? 502 : 500;
   return Response.json(result, { status });
 }

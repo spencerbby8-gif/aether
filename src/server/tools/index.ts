@@ -1,6 +1,6 @@
 import type { ToolResult, ToolSchema } from "@/lib/types";
 import { fsList, fsRead, fsRemove, fsSearch, fsWrite } from "./fs";
-import { ToolSecurityError } from "./security";
+import { PolicyViolationError, ToolSecurityError } from "./security";
 import { webScreenshot } from "./screenshot";
 import { WebProvider } from "./web";
 
@@ -94,15 +94,18 @@ const handlers: Record<string, Handler> = {
 export async function executeTool(name: string, args: Record<string, unknown>, taskId: string): Promise<ToolResult> {
   const handler = handlers[name];
   if (!handler) {
-    return { ok: false, text: `Unknown tool "${name}". Available: ${Object.keys(handlers).join(", ")}` };
+    return { ok: false, kind: "invalid", text: `Unknown tool "${name}". Available: ${Object.keys(handlers).join(", ")}` };
   }
   try {
     return await handler(args ?? {}, taskId || "default");
   } catch (error) {
+    if (error instanceof PolicyViolationError) {
+      return { ok: false, kind: "policy", text: `Blocked by network policy: ${error.message}` };
+    }
     if (error instanceof ToolSecurityError) {
-      return { ok: false, text: error.message };
+      return { ok: false, kind: "policy", text: error.message };
     }
     const message = (error as NodeJS.ErrnoException)?.message ?? "Tool execution failed.";
-    return { ok: false, text: /ENOENT/.test(message) ? "File or path not found in the workspace." : message };
+    return { ok: false, kind: "upstream", text: /ENOENT/.test(message) ? "File or path not found in the workspace." : message };
   }
 }

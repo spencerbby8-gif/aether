@@ -45,6 +45,12 @@ export async function GET(request: Request) {
   return Response.json({
     ...snapshot,
     engines,
+    /* Manager events are free text (wake verdicts, bind notes) and can carry a
+       tunnel URL, so they get the same scrub as lastError. */
+    events: (snapshot.events ?? []).map((e) => ({
+      ...e,
+      text: String(e.text ?? "").replace(/https?:\/\/\S+/g, "[url]"),
+    })),
     model: MODEL_NAME,
     live: {
       alive: live.alive,

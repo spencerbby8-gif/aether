@@ -139,6 +139,9 @@ export async function startEngineSim(opts: EngineSimOptions = {}): Promise<Engin
       });
 
       let closed = false;
+      /* True once the engine has finished normally, so a subsequent socket
+         close is not miscounted as a client abort. */
+      let finished = false;
       const t0 = Date.now();
       const emit = (obj: unknown): boolean => {
         if (closed) return false;
@@ -175,6 +178,7 @@ export async function startEngineSim(opts: EngineSimOptions = {}): Promise<Engin
         }
         emit({ message: { content: "" }, done: true, done_reason: "stop", eval_count: 42 });
         clearInterval(tick);
+        finished = true;
         try {
           res.end();
         } catch {
@@ -182,8 +186,11 @@ export async function startEngineSim(opts: EngineSimOptions = {}): Promise<Engin
         }
       }, keepAliveMs);
 
-      req.on("close", () => {
-        if (!closed) {
+      /* NOTE: this must be the RESPONSE's close event. `req.on("close")` fires as
+         soon as the request body has been consumed, which would mark every
+         single chat as a client abort and cancel the tool loop after one event. */
+      res.on("close", () => {
+        if (!finished) {
           sim.abortedChats += 1;
         }
         closed = true;

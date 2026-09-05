@@ -1,5 +1,5 @@
 import type { ToolResult } from "@/lib/types";
-import { ToolSecurityError, assertUrlAllowed, guardedFetch, redactSecrets, truncateText } from "./security";
+import { PolicyViolationError, ToolSecurityError, assertUrlAllowed, guardedFetch, redactSecrets, truncateText } from "./security";
 
 /**
  * WebProvider — controlled web access: fetch, crawl, search, extraction.
@@ -100,6 +100,9 @@ export class WebProvider {
           break;
         } catch (error) {
           clearTimeout(timer);
+          /* A policy refusal is deterministic — surface it as-is, never as a
+             transport failure, and never retry it. */
+          if (error instanceof PolicyViolationError) throw error;
           const isAbort = (error as Error)?.name === "AbortError";
           lastError = isAbort
             ? new Error(`Request timed out after ${REQUEST_TIMEOUT_MS} ms.`)
@@ -129,8 +132,12 @@ export class WebProvider {
       result = await this.fetchUrl(String(args.url ?? ""));
     } catch (error) {
       /* Deterministic failures (4xx, blocked, timeout) return an honest
-         result rather than throwing — the tool contract is always a result. */
-      return { ok: false, text: `Fetch failed: ${(error as Error).message}` };
+         result rather than throwing — the tool contract is always a result.
+         `kind` tells the caller WHICH sort of failure this was. */
+      if (error instanceof PolicyViolationError) {
+        return { ok: false, kind: "policy", text: `Blocked by network policy: ${error.message}` };
+      }
+      return { ok: false, kind: "upstream", text: `Fetch failed: ${(error as Error).message}` };
     }
     const asHtml = /html/i.test(result.contentType);
     const text = asHtml ? extractText(result.body) : result.body;

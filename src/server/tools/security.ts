@@ -65,6 +65,18 @@ export class ToolSecurityError extends Error {
   }
 }
 
+/**
+ * A request the network policy refuses outright (bad scheme/port, denied host,
+ * private or metadata address). Distinct from a transport failure so callers can
+ * return 400 instead of pretending an upstream service failed (audit §6.7).
+ */
+export class PolicyViolationError extends ToolSecurityError {
+  constructor(message: string) {
+    super(message);
+    this.name = "PolicyViolationError";
+  }
+}
+
 /* ---------------- network: address policy ---------------- */
 
 const BLOCKED_HOSTS = new Set([
@@ -169,25 +181,25 @@ export function assertUrlAllowed(raw: string): string {
   try {
     url = new URL(raw);
   } catch {
-    throw new ToolSecurityError("Invalid URL.");
+    throw new PolicyViolationError("Invalid URL.");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new ToolSecurityError("Only http and https URLs are allowed.");
+    throw new PolicyViolationError("Only http and https URLs are allowed.");
   }
   const explicitPort = url.port;
   if (explicitPort && explicitPort !== "80" && explicitPort !== "443") {
-    throw new ToolSecurityError("Only standard ports (80/443) are allowed.");
+    throw new PolicyViolationError("Only standard ports (80/443) are allowed.");
   }
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (!host) throw new ToolSecurityError("A host is required.");
+  if (!host) throw new PolicyViolationError("A host is required.");
   if (hostnameBlocked(host)) {
-    throw new ToolSecurityError("Access denied: restricted host.");
+    throw new PolicyViolationError("Access denied: restricted host.");
   }
   /* Literal IPs are checked immediately; hostnames are checked at connect time
      by the guarded dispatcher (see guardedFetch). */
   const literal = canonicalIp(host);
   if (literal && ipBlocked(literal)) {
-    throw new ToolSecurityError("Access denied: private or loopback address.");
+    throw new PolicyViolationError("Access denied: private or loopback address.");
   }
   return url.toString();
 }
@@ -199,10 +211,10 @@ export function assertUrlAllowed(raw: string): string {
 export async function assertHostResolvesAllowed(host: string): Promise<string[]> {
   const literal = canonicalIp(host);
   if (literal) {
-    if (ipBlocked(literal)) throw new ToolSecurityError("Access denied: private or loopback address.");
+    if (ipBlocked(literal)) throw new PolicyViolationError("Access denied: private or loopback address.");
     return [literal];
   }
-  if (hostnameBlocked(host)) throw new ToolSecurityError("Access denied: restricted host.");
+  if (hostnameBlocked(host)) throw new PolicyViolationError("Access denied: restricted host.");
 
   let addresses: dns.LookupAddress[];
   try {
@@ -213,7 +225,7 @@ export async function assertHostResolvesAllowed(host: string): Promise<string[]>
   if (addresses.length === 0) throw new ToolSecurityError("Could not resolve host.");
   for (const addr of addresses) {
     if (ipBlocked(addr.address)) {
-      throw new ToolSecurityError("Access denied: host resolves to a private or loopback address.");
+      throw new PolicyViolationError("Access denied: host resolves to a private or loopback address.");
     }
   }
   return addresses.map((a) => a.address);

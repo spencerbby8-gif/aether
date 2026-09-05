@@ -40,6 +40,14 @@ export interface ArtifactMeta {
 export interface ToolResult {
   ok: boolean;
   text: string;
+  /**
+   * Why a tool failed, when it did. Lets the API return an honest HTTP status
+   * instead of guessing from the message text.
+   *  - "policy"   refused by the security/network policy (client's fault -> 400)
+   *  - "invalid"  malformed request or unknown tool (-> 400)
+   *  - "upstream" the tool ran but a dependency failed (-> 502)
+   */
+  kind?: "policy" | "invalid" | "upstream";
   exitCode?: number;
   timedOut?: boolean;
   durationMs?: number;
