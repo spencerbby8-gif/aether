@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { controlAuthHeaders } from "@/lib/control-auth";
 
 /**
  * Client-side engine API. Everything goes through OUR server routes —
@@ -32,7 +33,7 @@ export interface EngineSnapshot {
 
 export async function engineState(): Promise<EngineSnapshot | null> {
   try {
-    const response = await fetch("/api/engine/state", { cache: "no-store" });
+    const response = await fetch("/api/engine/state", { cache: "no-store", headers: await controlAuthHeaders() });
     if (!response.ok) return null;
     return (await response.json()) as EngineSnapshot;
   } catch {
@@ -70,6 +71,7 @@ export async function engineWake(
   const query = engine ? `?engine=${engine}` : "";
   const response = await fetch(`/api/netlify/ensure-alive${query}`, {
     method: "GET",
+    headers: await controlAuthHeaders(),
     signal: AbortSignal.timeout(timeoutMs),
   });
   return (await response.json()) as EnsureAliveResponse;
@@ -82,13 +84,19 @@ export interface EngineOffResponse {
 }
 
 /**
- * Power control — the exact contract route:
- *   GET /api/netlify/engine-off  → kill-all (every alive engine)
- * ENGINE_OFF_KEY authorizes the engine-side shutdown server-side only.
+ * Power control:
+ *   POST /api/netlify/engine-off  → kill-all (every alive engine)
+ *
+ * This is POST because it changes server state; a GET here was reachable from
+ * any web page (no auth, no CSRF token) and was a one-click engine kill switch.
+ * ENGINE_OFF_KEY authorizes the server→engine hop only and never reaches the
+ * client — the caller presents the control token instead.
  */
 export async function engineOff(timeoutMs: number = ENGINE_REQUEST_TIMEOUT_MS): Promise<EngineOffResponse> {
   const response = await fetch("/api/netlify/engine-off", {
-    method: "GET",
+    method: "POST",
+    headers: { "content-type": "application/json", ...(await controlAuthHeaders()) },
+    body: JSON.stringify({ engine: "all" }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   return (await response.json()) as EngineOffResponse;
@@ -116,6 +124,7 @@ export interface EngineStatusResponse {
 export async function engineStatus(timeoutMs: number = 12_000): Promise<EngineStatusResponse> {
   const response = await fetch("/api/netlify/engine-status", {
     cache: "no-store",
+    headers: await controlAuthHeaders(),
     signal: AbortSignal.timeout(timeoutMs),
   });
   const body = (await response.json()) as Partial<EngineStatusResponse>;
@@ -214,6 +223,19 @@ export async function* readNdjson(response: Response, signal: AbortSignal): Asyn
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  /* Cancelling the reader is what makes an abort immediate: it settles the
+     in-flight read() instead of leaving it parked until the next chunk, and it
+     tears the HTTP connection down so the engine sees the disconnect. */
+  const onAbort = () => {
+    reader.cancel().catch(() => {
+      /* already closed */
+    });
+  };
+  if (signal.aborted) {
+    onAbort();
+    return;
+  }
+  signal.addEventListener("abort", onAbort, { once: true });
   try {
     while (true) {
       if (signal.aborted) return;
@@ -233,6 +255,7 @@ export async function* readNdjson(response: Response, signal: AbortSignal): Asyn
       }
     }
   } finally {
+    signal.removeEventListener("abort", onAbort);
     reader.releaseLock();
   }
 }

@@ -410,6 +410,87 @@ async function main() {
     check("activeOperations released after cancel", (after.json as Record<string, unknown>)?.activeOperations, 0);
   }
 
+
+  /* ============================================ P8 — the REAL client provider */
+  section("P8 (R1)", "the shipped client provider survives a >30s generation");
+  {
+    /* The browser resolves relative URLs against the origin and the native shell
+       supplies the token; reproduce both faithfully in Node. */
+    (globalThis as Record<string, unknown>).window = {
+      AetherNative: { controlToken: () => CONTROL_TOKEN },
+    };
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" && input.startsWith("/") ? BASE + input : input;
+      return realFetch(url as RequestInfo, init);
+    }) as typeof fetch;
+
+    const { runEngineChat } = await import("@/providers/engine-chat");
+    simA.healthy = true;
+    announcements = [signed("a", URL_A)];
+    const abortsBefore = simA.abortedChats;
+
+    const started = Date.now();
+    let deltas = 0;
+    const outcome = await runEngineChat({
+      turns: [{ role: "user", content: "Work through this carefully." }],
+      signal: new AbortController().signal,
+      streaming: true,
+      mode: "a",
+      onEvent: (e) => {
+        if (e.type === "delta") deltas++;
+      },
+    });
+    const elapsed = (Date.now() - started) / 1000;
+    ev(`client outcome: status=${outcome.status} deltas=${deltas} text=${JSON.stringify((outcome.text ?? "").slice(0, 60))} in ${elapsed.toFixed(1)}s`);
+    checkTrue("client did NOT abort at the old 30s connect deadline", elapsed > 30, `${elapsed.toFixed(1)}s`);
+    check("client reached a completed turn", outcome.status, "complete");
+    checkTrue("client received streamed content", (outcome.text ?? "").length > 0, `len=${(outcome.text ?? "").length}`);
+    checkTrue(
+      "engine saw no client disconnect during this turn",
+      simA.abortedChats === abortsBefore,
+      `abortedChats ${abortsBefore} -> ${simA.abortedChats}`,
+    );
+    globalThis.fetch = realFetch;
+  }
+
+  section("P9 (stop/cancel)", "Stop tears the client stream down promptly");
+  {
+    (globalThis as Record<string, unknown>).window = {
+      AetherNative: { controlToken: () => CONTROL_TOKEN },
+    };
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" && input.startsWith("/") ? BASE + input : input;
+      return realFetch(url as RequestInfo, init);
+    }) as typeof fetch;
+
+    const { runEngineChat } = await import("@/providers/engine-chat");
+    simA.healthy = true;
+    announcements = [signed("a", URL_A)];
+    const before = simA.abortedChats;
+
+    const ac = new AbortController();
+    const started = Date.now();
+    const pending = runEngineChat({
+      turns: [{ role: "user", content: "Long task" }],
+      signal: ac.signal,
+      streaming: true,
+      mode: "a",
+      onEvent: () => {},
+    });
+    await new Promise((r) => setTimeout(r, 5000));
+    ac.abort();
+    const outcome = await pending;
+    const elapsed = (Date.now() - started) / 1000;
+    ev(`after Stop at 5s: status=${outcome.status} elapsed=${elapsed.toFixed(1)}s`);
+    check("Stop resolves the turn as stopped", outcome.status, "stopped");
+    checkTrue("Stop settled promptly (well inside the 60s idle watchdog)", elapsed < 20, `${elapsed.toFixed(1)}s`);
+    await new Promise((r) => setTimeout(r, 1500));
+    checkTrue("engine observed the disconnect", simA.abortedChats > before, `abortedChats ${before} -> ${simA.abortedChats}`);
+    globalThis.fetch = realFetch;
+  }
+
   /* ------------------------------------------------------------- teardown */
   killAll("SIGTERM");
   await new Promise((r) => setTimeout(r, 1500));

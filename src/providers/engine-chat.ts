@@ -1,7 +1,11 @@
 import type { AgentEvent, AttachmentMeta, ChatTurn } from "@/lib/types";
 import { uid } from "@/lib/utils";
 import { readNdjson } from "@/lib/engine-client";
+import { controlAuthHeaders } from "@/lib/control-auth";
 import { AssetStore } from "@/storage/AssetStore";
+
+/** How long to wait for response HEADERS. Not a limit on the stream itself. */
+const CONNECT_TIMEOUT_MS = 30_000;
 
 /**
  * Real engine chat — POST /api/agent/stream (our server proxies the Kaggle
@@ -28,11 +32,18 @@ export interface EngineChatOutcome {
 const WAKE_WAIT_MS = 60_000;
 const WAKE_TICK_MS = 5_000;
 
-/* HARD ceiling on any single chat request. If the engine's stream produces
- * nothing and never closes, the Promise would hang forever — which left
- * streamingIdRef set and permanently blocked the session (the "stuck on
- * Thinking" bug). This guarantees runEngineChat ALWAYS resolves. */
-const REQUEST_TIMEOUT_MS = 120_000;
+/* Last-resort ceiling on a single chat request, so runEngineChat ALWAYS
+ * resolves even if every other guard fails — a permanently pending Promise left
+ * streamingIdRef set and blocked the session for good (the "stuck on Thinking"
+ * bug).
+ *
+ * This is deliberately NOT the mechanism that detects a hung engine: that is the
+ * 60s idle watchdog in the read loop, which fires when the engine stops sending
+ * anything. A total cap this low (it was 120s) killed perfectly healthy long
+ * generations, because the engine legitimately spends minutes in its tool loop.
+ * Aligned with the server's own stream ceiling so the client never gives up on a
+ * request the server is still honouring. */
+const REQUEST_TIMEOUT_MS = 900_000;
 
 /**
  * If the fleet is mid-boot, wait for it instead of failing. Each tick
@@ -228,16 +239,39 @@ async function runEngineChatInner(options: {
     .filter((t) => t.role === "user" || t.role === "assistant")
     .map((t) => ({ role: t.role, content: t.content }));
 
+  /**
+   * A CONNECT deadline only. `AbortSignal.timeout()` stays armed for the whole
+   * request lifetime, so wiring it straight into the fetch aborted every
+   * generation at 30s — the client-side twin of the server's old 45s deadline.
+   * Instead: arm a controller, and disarm it the moment response headers
+   * arrive. After that the stream is governed solely by the caller's Stop
+   * signal and the idle watchdog below.
+   */
+  const connectTimers: Array<ReturnType<typeof setTimeout>> = [];
+  const connectSignal = () => {
+    const ac = new AbortController();
+    connectTimers.push(setTimeout(() => ac.abort(), CONNECT_TIMEOUT_MS));
+    const relay = () => ac.abort();
+    signal.addEventListener("abort", relay, { once: true });
+    return ac.signal;
+  };
+  const disarmConnectDeadline = () => {
+    for (const t of connectTimers) clearTimeout(t);
+    connectTimers.length = 0;
+  };
+
   let response: Response;
-  /* Connection timeout so a slow/hung server can't block the request. */
-  const connectSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
-  try {
-    response = await fetch("/api/agent/stream", {
+  const authHeaders = await controlAuthHeaders();
+  const postStream = () =>
+    fetch("/api/agent/stream", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authHeaders },
       body: JSON.stringify({ messages, tools: true, engine: mode }),
-      signal: connectSignal,
+      signal: connectSignal(),
     });
+
+  try {
+    response = await postStream();
 
     /* Engine is booting: wait for it to come up, then retry once.
        A non-waking 503 (quota, misconfigured) falls through to an error. */
@@ -246,21 +280,29 @@ async function runEngineChatInner(options: {
       if (peek?.state === "waking") {
         const woke = await waitWhileWaking(signal, mode, onEvent);
         if (woke === "alive" && !signal.aborted) {
-          response = await fetch("/api/agent/stream", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ messages, tools: true, engine: mode }),
-            signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
-          });
+          response = await postStream();
         }
       }
     }
   } catch (error) {
-    if (signal.aborted || (error as Error)?.name === "AbortError") {
+    disarmConnectDeadline();
+    if (signal.aborted) {
       return { status: "stopped", text: "", attachments };
+    }
+    /* Only a connect-phase abort is a timeout; anything later is a real error. */
+    if ((error as Error)?.name === "AbortError") {
+      return {
+        status: "error",
+        text: "",
+        error: `The engine did not respond within ${CONNECT_TIMEOUT_MS / 1000}s.`,
+        attachments,
+      };
     }
     return { status: "error", text: "", error: "The engine stream could not be reached.", attachments };
   }
+
+  /* Headers are in: the connect deadline has done its job. */
+  disarmConnectDeadline();
 
   if (!response.ok) {
     let detail = `Engine stream error (HTTP ${response.status}).`;
