@@ -1,12 +1,21 @@
-import { BEACON_BACKUP, BEACON_URL } from "./contract";
+import crypto from "node:crypto";
+import { beaconBackupUrl, beaconSecret, beaconUrl, type EngineId } from "./contract";
 
 /**
  * Beacon parsing — engines announce their rotating tunnel URLs by posting
- * status lines to webhook.site (query param `m`) and ntfy (JSON lines).
- * Lines look like:
+ * status lines. Lines look like:
  *   "AGENT LIVE LINK: https://xxx.trycloudflare.com (tools: ...)"
  *   "alive: https://xxx.trycloudflare.com (idle 3 min)"
  *   "ENGINE OFF via UI - quota saved"
+ *
+ * FIX (audit C2): when BEACON_SECRET is configured, an announcement is only
+ * accepted if it carries a valid HMAC. This stops an anonymous party who can
+ * reach the beacon topic from injecting a fake engine URL (which would redirect
+ * all chat traffic to them) or a fake "ENGINE OFF".
+ *
+ * FIX (audit C5): announcements may carry an explicit engine identity
+ * ("engine=b"). Untagged announcements are recorded as unattributed and can
+ * never satisfy a strict per-slot request.
  */
 
 export interface BeaconSignal {
@@ -20,28 +29,56 @@ export interface BeaconSignal {
   /** True when the most recent lifecycle event was a shutdown. */
   off: boolean;
   offAt: number | null;
+  /** Per-slot shutdown, when the announcement was attributed. */
+  offSlot: EngineId | null;
   /** Raw parsed events, newest first (for diagnostics). */
   events: Array<{ at: number; text: string }>;
+  /** Announcements rejected for a bad/missing signature. */
+  rejectedUnsigned: number;
 }
 
 const LIVE_RE = /(?:AGENT LIVE LINK|alive)[:\s]+(https?:\/\/[^\s)]+)/i;
 const OFF_RE = /ENGINE OFF/i;
 /* Engines may tag their heartbeats with their slot: "engine=b alive: ..." */
 const ENGINE_TAG_RE = /engine\s*[:=]?\s*([abc])\b/i;
+/* Signature is carried as a trailing "sig=<hex>" or "X-Aether-Sig: <hex>". */
+const SIG_RE = /(?:\bsig=|X-Aether-Sig:\s*)([a-f0-9]{64})/i;
 
 function extractUrl(text: string): string | null {
   const match = LIVE_RE.exec(text);
   return match ? match[1].replace(/[.,;]+$/, "") : null;
 }
 
-function extractEngineTag(text: string): "a" | "b" | "c" | null {
+function extractEngineTag(text: string): EngineId | null {
   const match = ENGINE_TAG_RE.exec(text);
   if (!match) return null;
   const tag = match[1].toLowerCase();
   return tag === "a" || tag === "b" || tag === "c" ? tag : null;
 }
 
-/** Parse webhook.site requests (heartbeats arrive as GET ?m=<message>). */
+/** Strip the signature token so the signature covers the payload only. */
+function stripSig(text: string): string {
+  return text.replace(SIG_RE, "").trim();
+}
+
+/**
+ * Verify an announcement. With no BEACON_SECRET configured every announcement
+ * is accepted (single-tenant / local development). With a secret configured,
+ * an announcement must carry sig=<hmac-sha256(payload, secret)>.
+ */
+export function verifyAnnouncement(text: string): boolean {
+  const secret = beaconSecret();
+  if (!secret) return true;
+  const match = SIG_RE.exec(text);
+  if (!match) return false;
+  const expected = crypto.createHmac("sha256", secret).update(stripSig(text)).digest("hex");
+  const provided = match[1].toLowerCase();
+  /* Constant-time comparison. */
+  if (expected.length !== provided.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(provided, "hex"));
+}
+
+/** Parse webhook.site-style requests (heartbeats arrive as GET ?m=<message>). */
 export function parseWebhookRequests(body: unknown): Array<{ at: number; text: string }> {
   interface RequestItem {
     url?: string;
@@ -93,17 +130,24 @@ export function interpretBeacon(events: Array<{ at: number; text: string }>): Be
   let liveUrlC: string | null = null;
   let off = false;
   let offAt: number | null = null;
+  let offSlot: EngineId | null = null;
+  let rejectedUnsigned = 0;
+
   for (const event of sorted) {
+    /* Untrusted announcements are counted and ignored entirely. */
+    if (!verifyAnnouncement(event.text)) {
+      rejectedUnsigned += 1;
+      continue;
+    }
     const url = extractUrl(event.text);
+    const tag = extractEngineTag(event.text);
     if (url) {
       liveUrl = url;
       liveUrlAt = event.at;
       off = false;
       offAt = null;
-      /* Per-slot attribution requires an explicit tag; untagged heartbeats
-         stay generic and are attributed only through the wake path — this
-         prevents one engine's tunnel from silently satisfying another. */
-      const tag = extractEngineTag(event.text);
+      offSlot = null;
+      /* Per-slot attribution requires an explicit tag. */
       if (tag === "a") liveUrlA = url;
       else if (tag === "b") liveUrlB = url;
       else if (tag === "c") liveUrlC = url;
@@ -111,6 +155,7 @@ export function interpretBeacon(events: Array<{ at: number; text: string }>): Be
     if (OFF_RE.test(event.text)) {
       off = true;
       offAt = event.at;
+      offSlot = tag;
     }
   }
   return {
@@ -121,41 +166,53 @@ export function interpretBeacon(events: Array<{ at: number; text: string }>): Be
     liveUrlC,
     off,
     offAt,
-    events: sorted.slice(-8).reverse().map(({ at, text }) => ({ at, text: text.slice(0, 200) })),
+    offSlot,
+    events: sorted.slice(-8).reverse().map(({ at, text }) => ({ at, text: stripSig(text).slice(0, 200) })),
+    rejectedUnsigned,
   };
 }
 
 export interface BeaconFetchResult {
   signal: BeaconSignal;
-  sources: { webhook: "ok" | "error"; ntfy: "ok" | "error" };
+  sources: { webhook: "ok" | "error" | "disabled"; ntfy: "ok" | "error" | "disabled" };
 }
 
 /** Fetch both beacons (primary + backup) and merge them. */
 export async function fetchBeaconSignal(fetchImpl: typeof fetch = fetch): Promise<BeaconFetchResult> {
   const events: Array<{ at: number; text: string }> = [];
-  const sources = { webhook: "error" as "ok" | "error", ntfy: "error" as "ok" | "error" };
+  const sources: BeaconFetchResult["sources"] = { webhook: "disabled", ntfy: "disabled" };
 
-  try {
-    const response = await fetchImpl(`${BEACON_URL}/requests`, {
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (response.ok) {
-      events.push(...parseWebhookRequests(await response.json()));
-      sources.webhook = "ok";
+  const primary = beaconUrl();
+  if (primary) {
+    try {
+      const response = await fetchImpl(`${primary.replace(/\/+$/, "")}/requests`, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.ok) {
+        events.push(...parseWebhookRequests(await response.json()));
+        sources.webhook = "ok";
+      } else {
+        sources.webhook = "error";
+      }
+    } catch {
+      sources.webhook = "error";
     }
-  } catch {
-    /* primary beacon unreachable — the backup still covers us */
   }
 
-  try {
-    const response = await fetchImpl(BEACON_BACKUP, { signal: AbortSignal.timeout(10_000) });
-    if (response.ok) {
-      events.push(...parseNtfyLines(await response.text()));
-      sources.ntfy = "ok";
+  const backup = beaconBackupUrl();
+  if (backup) {
+    try {
+      const response = await fetchImpl(backup, { signal: AbortSignal.timeout(10_000) });
+      if (response.ok) {
+        events.push(...parseNtfyLines(await response.text()));
+        sources.ntfy = "ok";
+      } else {
+        sources.ntfy = "error";
+      }
+    } catch {
+      sources.ntfy = "error";
     }
-  } catch {
-    /* backup beacon unreachable */
   }
 
   return { signal: interpretBeacon(events), sources };

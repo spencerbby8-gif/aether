@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as streamPost } from "@/app/api/agent/stream/route";
 
 /* Stub the control layer so the stream route targets the local fixture engine. */
@@ -19,6 +19,12 @@ vi.mock("@/server/engine/netlify", () => ({
 
 let server: Server | null = null;
 let baseUrl = "";
+
+/* The stream route is now behind requireControlAuth (audit C1/C4). */
+const CONTROL_TOKEN = "test-control-token-0123456789abcdef";
+beforeEach(() => {
+  process.env.AETHER_CONTROL_TOKEN = CONTROL_TOKEN;
+});
 
 function startEngine(behavior: "answer" | "tool" | "thinking") {
   return new Promise<string>((resolve) => {
@@ -84,7 +90,7 @@ describe("real NDJSON streaming through /api/agent/stream", () => {
     const response = await streamPost(
       new Request("http://localhost/api/agent/stream", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", Authorization: `Bearer ${CONTROL_TOKEN}` },
         body: JSON.stringify({ messages: [{ role: "user", content: "hi" }], tools: false }),
       }),
     );
@@ -103,7 +109,7 @@ describe("real NDJSON streaming through /api/agent/stream", () => {
     const response = await streamPost(
       new Request("http://localhost/api/agent/stream", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", Authorization: `Bearer ${CONTROL_TOKEN}` },
         body: JSON.stringify({ messages: [{ role: "user", content: "think" }], tools: false }),
       }),
     );
@@ -119,7 +125,7 @@ describe("real NDJSON streaming through /api/agent/stream", () => {
     const response = await streamPost(
       new Request("http://localhost/api/agent/stream", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", Authorization: `Bearer ${CONTROL_TOKEN}` },
         body: JSON.stringify({ messages: [{ role: "user", content: "search" }] }),
       }),
     );

@@ -6,7 +6,7 @@ import {
   resetDiscoveryCache,
   resolveEngine,
 } from "@/server/engine/resolve";
-import { credentialsFor, kernelSlugOverride, engineConfigured } from "@/server/engine/kaggle";
+import { credentialsFor, engineConfigured, kernelSlugFor } from "@/server/engine/kaggle";
 import { ENGINE_IDS } from "@/server/engine/contract";
 import { interpretBeacon } from "@/server/engine/beacon";
 
@@ -111,6 +111,12 @@ function setEnv(a = true, b = true, c = true) {
 
 beforeEach(() => {
   setEnv(true, true, true);
+  process.env.BEACON_URL = "https://webhook.site/token/test";
+  process.env.BEACON_BACKUP_URL = "https://ntfy.sh/test/json?poll=1";
+  delete process.env.BEACON_SECRET;
+  delete process.env.ENGINE_URL_A;
+  delete process.env.ENGINE_URL_B;
+  delete process.env.ENGINE_URL_C;
   vi.unstubAllGlobals();
   resetDiscoveryCache();
 });
@@ -127,7 +133,8 @@ describe("three-engine fleet contract", () => {
   });
 
   it("reads ENGINE_KERNEL_C for engine C", () => {
-    expect(kernelSlugOverride("c")).toBe("dyceelvk/qwen-3-8-27b-uncensored-chat");
+    /* kernelSlugFor normalises "user/slug" down to the slug Kaggle's API wants. */
+    expect(kernelSlugFor("c")).toBe("qwen-3-8-27b-uncensored-chat");
   });
 
   it("reads KAGGLE_USERNAME_C / KAGGLE_KEY_C for engine C credentials", () => {

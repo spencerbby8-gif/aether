@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { resolveKernelSlug, kaggleWakeKernel, clearSlugCache } from "@/server/engine/kaggle";
+import { resetDiscoveryCache, wakeSlot } from "@/server/engine/resolve";
 
 const REAL_ENV = { ...process.env };
 
@@ -11,30 +11,37 @@ afterAll(() => {
 });
 
 /**
- * Live control-plane probes — these hit the REAL Kaggle API over the
- * network with deliberately invalid credentials, proving that Aether's
- * requests are correctly formed and handled honestly end to end.
- * (Skipped automatically when offline.)
+ * Live control-plane probes — these hit the REAL Kaggle API over the network
+ * with deliberately invalid credentials, proving that Aether's requests are
+ * correctly formed and handled honestly end to end.
+ *
+ * Updated for the unified control plane (audit R2): there is now ONE Kaggle
+ * client, in resolve.ts, using `Authorization: Bearer <key>` and a camelCase
+ * push body. The old Basic-auth/snake_case client in kaggle.ts is gone.
  */
 describe("Kaggle control plane — real network probes", () => {
-  it("resolveKernelSlug reaches Kaggle and reports null honestly on 401/400", async () => {
+  it("wakeSlot reports an honest error state against the real API", async () => {
     process.env.KAGGLE_USERNAME = "aether-live-probe";
     process.env.KAGGLE_KEY = "invalid-probe-key";
     delete process.env.ENGINE_KERNEL_A;
-    clearSlugCache();
-    const slug = await resolveKernelSlug("a", fetch);
-    expect(slug).toBeNull(); // invalid creds → Kaggle refuses → honest null
+    resetDiscoveryCache();
+
+    const result = await wakeSlot("a");
+    expect(["error", "quota"]).toContain(result.state);
+    expect(result.detail.length).toBeGreaterThan(5);
+    /* Must NOT claim a kernel is booting when Kaggle refused the credentials. */
+    expect(result.state).not.toBe("waking");
   }, 30_000);
 
-  it("kaggleWakeKernel returns an honest error state against the real API", async () => {
-    process.env.KAGGLE_USERNAME = "aether-live-probe";
-    process.env.KAGGLE_KEY = "invalid-probe-key";
-    delete process.env.ENGINE_KERNEL_A;
-    clearSlugCache();
-    const result = await kaggleWakeKernel("a", fetch);
-    expect(["error", "quota"]).toContain(result.state);
-    expect(result.detail.length).toBeGreaterThan(10);
-    // Must NOT claim success without a real kernel.
-    expect(result.state).not.toBe("waking");
+  it("reports a missing-credential error without touching the network", async () => {
+    delete process.env.KAGGLE_USERNAME_C;
+    delete process.env.KAGGLE_KEY_C;
+    resetDiscoveryCache();
+
+    const result = await wakeSlot("c");
+    expect(result.state).toBe("error");
+    expect(result.detail).toMatch(/KAGGLE_KEY_C/i);
+    /* No credential value may appear in the message. */
+    expect(result.detail).not.toMatch(/invalid-probe-key/);
   }, 30_000);
 });

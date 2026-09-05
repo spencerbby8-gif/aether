@@ -99,6 +99,13 @@ function setEnv(a = true, b = true) {
 
 beforeEach(() => {
   setEnv(true, true);
+  /* Beacons are env-configured now (audit C2); point them at the stubbed hosts. */
+  process.env.BEACON_URL = "https://webhook.site/token/test";
+  process.env.BEACON_BACKUP_URL = "https://ntfy.sh/test/json?poll=1";
+  delete process.env.BEACON_SECRET;
+  delete process.env.ENGINE_URL_A;
+  delete process.env.ENGINE_URL_B;
+  delete process.env.ENGINE_URL_C;
   vi.unstubAllGlobals();
   resetDiscoveryCache(); // never let one scenario's discovery leak into the next
 });

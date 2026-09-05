@@ -1,12 +1,14 @@
+import { requireControlAuth } from "@/server/auth";
 import { killAllEngines, resolveEngine, type KillResult, type ResolveResult } from "./resolve";
 
 /**
  * HTTP adapters for the engine control plane.
- * Backed by resolve.ts — the faithful TypeScript port of the verified
- * aether-engine-runtime Netlify Functions. Responses use the handoff's real
- * shapes:
- *   ensure-alive → {status:"alive",url,...} | {status:"waking",...} | {status:"error",message}
- *   engine-off   → {status:"off",killed:[...],message}
+ *
+ * FIX (audit R2): this is now the ONLY engine control implementation. The
+ * divergent Kaggle client in kaggle.ts (Basic auth + snake_case push body) has
+ * been reduced to credential/config accessors; all wake, discovery, health and
+ * shutdown behaviour flows through resolve.ts, which implements the documented
+ * Kaggle REST contract (camelCase body + `Authorization: Bearer <key>`).
  */
 
 export interface HandlerResult {
@@ -25,5 +27,9 @@ export async function engineOffHandler(): Promise<HandlerResult> {
   if (result.status === "error") return { status: 500, body: result };
   const anyShutdown = result.killed.some((k) => k.result === "shutdown");
   const anyForbidden = result.killed.some((k) => k.result === "rejected-key");
-  return { status: anyShutdown ? 200 : anyForbidden ? 403 : 200, body: result };
+  const anyFailed = result.killed.some((k) => k.result !== "shutdown");
+  return { status: anyForbidden ? 403 : anyFailed && !anyShutdown ? 502 : 200, body: result };
 }
+
+/** Shared auth gate for the control routes. */
+export { requireControlAuth };

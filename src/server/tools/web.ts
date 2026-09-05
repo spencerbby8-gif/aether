@@ -1,5 +1,5 @@
 import type { ToolResult } from "@/lib/types";
-import { ToolSecurityError, assertUrlAllowed, redactSecrets, truncateText } from "./security";
+import { ToolSecurityError, assertUrlAllowed, guardedFetch, redactSecrets, truncateText } from "./security";
 
 /**
  * WebProvider — controlled web access: fetch, crawl, search, extraction.
@@ -28,7 +28,9 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const USER_AGENT = "AetherAgent/3.0 (+sandboxed workspace)";
 
 const defaultFetch: FetchLike = async (url, init) => {
-  const response = await fetch(url, {
+  /* guardedFetch enforces the network policy at CONNECT time, so a hostname
+     that resolves (or rebinds) to a private/metadata address is refused. */
+  const response = await guardedFetch(url, {
     redirect: "manual",
     headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml,text/plain,*/*;q=0.8", ...(init?.headers ?? {}) },
     signal: init?.signal,
@@ -53,7 +55,7 @@ type SearchFetch = (
 ) => Promise<FetchLikeResponse>;
 
 const defaultSearchFetch: SearchFetch = async (url, init) => {
-  const response = await fetch(url, {
+  const response = await guardedFetch(url, {
     method: init?.method ?? "GET",
     body: init?.body,
     redirect: "manual",
