@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/aether_bg">
+  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+      android:orientation="vertical" android:padding="20dp">
+    <TextView android:id="@+id/auto" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:text="Aether engines"
+        android:textColor="@color/aether_fg" android:textSize="26sp"
+        android:textStyle="bold" />
+    <TextView android:id="@+id/mode" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="4dp"
+        android:textColor="@color/aether_accent" android:textSize="13sp" />
+    <TextView android:id="@+id/error" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="10dp"
+        android:textColor="@color/aether_error" android:textSize="13sp" />
+    <LinearLayout android:id="@+id/rows" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:orientation="vertical"
+        android:layout_marginTop="14dp" />
+    <Button android:id="@+id/open_auto" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="4dp"
+        android:text="Open" />
+    <Button android:id="@+id/off_all" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="8dp"
+        android:text="Shut down all" />
+    <TextView android:id="@+id/footnote" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="16dp"
+        android:textColor="@color/aether_muted" android:textSize="11sp"
+        android:lineSpacingExtra="3dp" />
+  </LinearLayout>
+</ScrollView>

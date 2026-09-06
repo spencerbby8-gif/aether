@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:background="@color/aether_panel"
+    android:padding="16dp" android:layout_marginBottom="12dp">
+  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+      android:orientation="horizontal" android:gravity="center_vertical">
+    <TextView android:id="@+id/name" android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="wrap_content" android:textColor="@color/aether_fg"
+        android:textSize="17sp" android:textStyle="bold" />
+    <TextView android:id="@+id/badge" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:textColor="@color/aether_accent"
+        android:textSize="12sp" android:textStyle="bold" android:layout_marginEnd="10dp" />
+    <TextView android:id="@+id/pin" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:text="pin"
+        android:textColor="@color/aether_muted" android:textSize="12sp"
+        android:paddingStart="8dp" android:paddingEnd="4dp" />
+  </LinearLayout>
+  <TextView android:id="@+id/status" android:layout_width="match_parent"
+      android:layout_height="wrap_content" android:layout_marginTop="4dp"
+      android:textColor="@color/aether_muted" android:textSize="13sp" />
+  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+      android:orientation="horizontal" android:layout_marginTop="12dp">
+    <Button android:id="@+id/wake" android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="wrap_content" android:text="@string/wake" />
+    <Button android:id="@+id/open" android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="wrap_content" android:layout_marginStart="8dp"
+        android:text="@string/open" />
+    <Button android:id="@+id/off" android:layout_width="0dp" android:layout_weight="1"
+        android:layout_height="wrap_content" android:layout_marginStart="8dp"
+        android:text="@string/shut_down" />
+  </LinearLayout>
+</LinearLayout>
