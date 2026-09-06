@@ -154,7 +154,12 @@ public class SettingsActivity extends AppCompatActivity {
                 + "ERROR — an action you just pressed actually failed. A dead tunnel from an "
                 + "old announcement is not an error and is never shown as one."
                 + "\n\nShutting an engine down is what releases the GPU quota, and OFF is only "
-                + "reported once /api/ps has stopped answering.");
+                + "reported once /api/ps has stopped answering."
+                /* Printed so an installed build can be identified on the phone
+                   itself. Every build used to be 1.0.0, which made it impossible
+                   to tell whether a fix had actually been installed. */
+                + "\n\nbuild " + BuildConfig.VERSION_NAME + " (" + BuildConfig.VERSION_CODE
+                + ") · " + getPackageName());
     }
 
     @Override
