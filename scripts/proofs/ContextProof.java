@@ -104,11 +104,20 @@ public final class ContextProof {
                 "[" + oneLine(t4.content.toString()) + "]");
 
         System.out.println();
-        System.out.println("== control -- the same question with NO history must not know");
+        System.out.println("== control -- the same question with NO history must not know the fact");
         Turn cold = turn(url, offKey, null, "What is my name?");
         System.out.println("  -> " + oneLine(cold.content.toString()));
-        check("without history it does not invent a name",
+        /* The point of the control is narrow and stated narrowly: without the
+           conversation it must not know the fact we gave it. It is NOT claiming
+           the model stays silent -- observed live on engine B it answered
+           "Your name is Sally -- that's what your system username shows", i.e.
+           it guessed from the container. A check written as "does not invent a
+           name" would have been a false claim that happened to pass. */
+        check("without history it does not know the fact from earlier turns",
                 cold.ok && !cold.content.toString().contains("Ada"),
+                "[" + oneLine(cold.content.toString()) + "]");
+        check("without history it does not know the number either",
+                cold.ok && !cold.content.toString().contains("42"),
                 "[" + oneLine(cold.content.toString()) + "]");
 
         System.out.println();

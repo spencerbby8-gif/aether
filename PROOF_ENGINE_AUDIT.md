@@ -96,21 +96,56 @@ shutdown                                       -> /off 200, confirmed terminated
 CONTEXT PROOF  7 passed, 0 failed
 ```
 
-The control matters: without history the model does **not** guess "Ada", so the
+The control matters: without history the model does **not** answer "Ada", so the
 memory in turns 2–4 is genuinely coming from the conversation the client now
 sends.
 
+### Correction to that control, found on cross-check
+
+Run again on **engine B** (7/7, same results: `Your name is Ada.`, `42`, `Your
+name is Ada and your favourite number is 42.`), the control answered:
+
+> *"Your name is **Sally** — that's what your system username shows."*
+
+So the original check name — *"without history it does not invent a name"* — was
+a false claim that happened to pass, because it only tested for the absence of
+"Ada". The model did invent a name; it pulled one out of the container's
+environment. The assertion is now stated as what it actually proves (*"does not
+know the fact from earlier turns"*, plus the same for the number), and the answer
+is printed so it can be read rather than trusted.
+
+Worth knowing on its own: given no context, this model will guess from whatever
+the execution environment leaks. That is engine behaviour, not a client bug, but
+it is the kind of thing that reads as "the AI is making things up".
+
 ## 4. Something else the audit turned up: Kaggle can revive a kernel
 
-Engine C was shut down during the audit — `/off` returned 200 and `confirmedDown`
-verified `/api/ps` had stopped answering. Ten minutes later it was serving again
-on a fresh tunnel URL, and had to be shut down a second time.
+Observed **twice**, on two different engines:
 
-So `/off` reliably terminates the process, but it is not a guarantee that Kaggle
-will not start the kernel again. The app handles this the honest way: it never
-remembers a shutdown, it re-checks `/api/ps` on every poll, so a revived engine
-shows as LIVE again rather than staying falsely "off". Kaggle's own kernel status
-also lags — engine A read `running` for some time after it had stopped serving.
+- Engine C was shut down during the audit — `/off` 200, `confirmedDown` verified
+  `/api/ps` had stopped answering. Ten minutes later it was serving again on a
+  fresh tunnel URL, and had to be shut down a second time.
+- Engine A did the same later: confirmed terminated, then found serving again on
+  the next check, and shut down a second time.
+
+So `/off` reliably terminates the process, but a single shutdown is **not** a
+durable guarantee that nothing is running afterwards. What triggers the revival
+is not established — the candidates are a second queued kernel run from an
+earlier push, or Kaggle restarting the run; I have not distinguished them and am
+not guessing.
+
+What is verified is the recovery: after the second shutdown of each, three
+separate checks over five minutes (`scripts/proofs/AllOff.java`) all reported no
+live tunnel for any engine, and Kaggle's own status settled to `error` for all
+three. The app handles this the honest way — it never remembers a shutdown, it
+re-checks `/api/ps` on every poll, so a revived engine shows as LIVE again
+instead of staying falsely "off". Kaggle's status also lags in the other
+direction: engine A read `running` for some time after it had stopped serving.
+
+**Practical consequence for you:** after shutting engines down from the app,
+glance at Settings a few minutes later. If one shows LIVE again, it came back on
+its own and needs shutting down again — that is the truth being reported, not a
+stale label.
 
 ## 5. Everything is off
 
@@ -127,24 +162,43 @@ anything it finds serving.
 
 ## 6. Build and checks
 
+Re-run end to end after the fix, not carried over from an earlier run:
+
 | Check | Result |
 |---|---|
 | Three-engine audit (real GPUs) | **24 passed, 0 failed** |
-| Context proof (real engine A) | **7 passed, 0 failed** |
+| Context proof, engine A (real) | **7 passed, 0 failed** |
+| Context proof, engine B (real) | **7 passed, 0 failed** |
 | Stream proof (local server, engine wire format) | **32 passed, 0 failed** |
 | Chat core / routing / wiring | 70/70 · 19/19 · all controls bound |
 | Debug + release build | BUILD SUCCESSFUL, exit 0 |
-| Release signature / launcher | verified `CN=Aether … C=NG` · `SplashActivity` |
-| Plaintext keys in the APK | `0` |
+| TypeScript · Lint · Tests | 0 · 0 errors/17 warnings · 249 passed |
+
+Artifact cross-checks — the claims above are about the APK that exists, not about
+source that was edited:
+
+```
+EngineCore$Msg -> ma                                    (history type is in the release dex)
+chatStream(String,String,java.util.List,String,String,
+           boolean[],ChatListener,StreamPolicy)          (the history overload shipped)
+assets/aether-notebook-template.json in the APK:
+  bytes 40903  sha256 ef0c7fe7c42345b3f626bd03de6e2ca28f9890a2c50379570c0a18c2b0c29919
+  MATCH against the pinned AETHER_NOTEBOOK_SHA256: True
+signer  CN=Aether, OU=Aether, O=Aether, L=Port Harcourt, ST=Rivers, C=NG
+launch  com.aether.app.SplashActivity   minSdk 26
+plaintext KGAT keys in the baked asset: 0
+```
 
 `apk/aether-release.apk` 722 268 B · `apk/aether-debug.apk` 3 952 994 B
 
 ## 7. Not proven
 
 - The APK still has never been installed — no `/dev/kvm` here — so the history is
-  proven at the `EngineCore` and wire level, not from a tapped screen.
-- Only one engine was used for the context proof; B and C were audited for text
-  generation and shut down before that fix existed, so their history behaviour is
-  inferred from the shared client code, not measured.
-- The Kaggle revival was observed once, on engine C. I have not established what
-  triggers it.
+  proven at the `EngineCore` and wire level on two real engines, not from a
+  tapped screen.
+- Engine C was audited for text generation but not re-run through the context
+  proof, so its history behaviour rests on the shared client code (identical for
+  all three) plus the measurements on A and B.
+- The Kaggle revival was observed twice but its cause is not established.
+- Nothing here exercised image or audio generation, or failover between engines
+  under the new history path.
