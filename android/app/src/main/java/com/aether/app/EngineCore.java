@@ -469,6 +469,29 @@ public final class EngineCore {
                         + " checks -- the engine is not off");
     }
 
+    /**
+     * Every distinct tunnel one slot has announced in the window, newest first.
+     *
+     * Kaggle keeps previous versions of a kernel running when a new one is
+     * pushed, and there is no API to stop them (kaggle-api issue #388: "when I
+     * push a new kernel all other versions keep running"). Each running version
+     * opens its OWN tunnel and announces it, so "the newest URL" is not "the
+     * engine": shutting down only that one leaves the others holding GPUs, which
+     * reads exactly as "it won't turn off". Observed live -- two distinct
+     * engine-A tunnels answering /api/ps 200 within the same minute.
+     */
+    public static List<String> urlsFor(String topic, String secret, String slot,
+                                       int sinceSeconds, int timeoutMs, int limit)
+            throws EngineException {
+        List<String> out = new ArrayList<>();
+        for (LiveLink l : liveLinks(topic, secret, sinceSeconds, timeoutMs)) {
+            if (!slot.equals(l.slot)) continue;
+            if (!out.contains(l.url)) out.add(l.url);
+            if (out.size() >= limit) break;
+        }
+        return out;
+    }
+
     // ------------------------------------------------- engine status truth
 
     /** Sentinel: no /api/ps check was possible, because no tunnel answered. */
@@ -645,6 +668,54 @@ public final class EngineCore {
         String b = body.toLowerCase(java.util.Locale.ROOT);
         return b.contains("quota") || b.contains("weekly limit") || b.contains("rate limit")
                 || b.contains("gpu limit") || b.contains("exceeded");
+    }
+
+    /** The outcome of shutting down every running instance of one engine. */
+    public static final class ShutdownAll {
+        public final int checked;        // tunnels examined
+        public final int killed;         // confirmed terminated
+        public final int alreadyDead;    // not answering when examined
+        public final int stillUp;        // accepted /off and kept answering
+        public final boolean allDown;
+        public final String message;
+        ShutdownAll(int checked, int killed, int alreadyDead, int stillUp, String message) {
+            this.checked = checked; this.killed = killed; this.alreadyDead = alreadyDead;
+            this.stillUp = stillUp; this.message = message;
+            this.allDown = stillUp == 0;
+        }
+    }
+
+    /**
+     * Shut down EVERY tunnel an engine has announced, and say how many there were.
+     *
+     * Killing only the newest one is not enough: Kaggle leaves earlier kernel
+     * versions running after a push and has no API to stop them, so one engine
+     * can have several tunnels holding several GPUs. Tunnels that are already
+     * dead are counted separately, because /off there returns 530 and would
+     * otherwise be miscounted as a failed shutdown.
+     */
+    public static ShutdownAll shutDownEvery(List<String> urls, String offKey, int timeoutMs,
+                                            int maxChecks, int gapMs) throws EngineException {
+        int killed = 0, dead = 0, up = 0;
+        String lastFailure = "";
+        for (String url : urls) {
+            if (health(url, timeoutMs).status != 200) { dead++; continue; }
+            Shutdown s = shutDownVerified(url, offKey, timeoutMs, maxChecks, gapMs);
+            if (s.confirmed) killed++;
+            else { up++; lastFailure = s.message; }
+        }
+        String message;
+        if (up > 0) {
+            message = up + " of " + urls.size() + " instances still answering -- " + lastFailure;
+        } else if (killed == 0) {
+            message = "nothing was running to shut down";
+        } else {
+            message = killed + " running instance" + (killed == 1 ? "" : "s")
+                    + " confirmed terminated"
+                    + (dead > 0 ? " (" + dead + " stale tunnel" + (dead == 1 ? "" : "s")
+                            + " already dead)" : "");
+        }
+        return new ShutdownAll(urls.size(), killed, dead, up, message);
     }
 
     // ------------------------------------------------------- chat streaming

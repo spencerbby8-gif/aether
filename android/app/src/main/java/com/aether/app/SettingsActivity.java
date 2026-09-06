@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -83,6 +84,13 @@ public class SettingsActivity extends AppCompatActivity {
      * never hidden by it.
      */
     private final Map<String, Long> confirmedOffAt = new ConcurrentHashMap<>();
+    /**
+     * Slots with a wake in flight. A second push does not replace a running
+     * version -- Kaggle keeps the old one alive and offers no API to stop it
+     * (issue #388) -- so a double tap would leave two engines holding GPUs and
+     * make shutdown look like it failed. Refuse the second push instead.
+     */
+    private final Set<String> waking = ConcurrentHashMap.newKeySet();
 
     /**
      * THE BUG THIS SEPARATION FIXES: this used to be one single-thread executor
@@ -506,8 +514,15 @@ public class SettingsActivity extends AppCompatActivity {
      * /api/ps has returned 200 with a loaded model.
      */
     private void wake(final EngineCore.Engine e, final Button wake) {
-        if (wake != null) wake.setEnabled(false);
         final String up = e.slot.toUpperCase(Locale.ROOT);
+        /* One push at a time per engine. A second one would start another
+           concurrent version that cannot be stopped from the API. */
+        if (!waking.add(e.slot)) {
+            announce("Engine " + up + " is already waking. A second push would start "
+                    + "another version Kaggle cannot be told to stop.");
+            return;
+        }
+        if (wake != null) wake.setEnabled(false);
         /* A new wake supersedes any earlier confirmed shutdown, or the boot
            would be reported OFF for as long as that record lived. */
         confirmedOffAt.remove(e.slot);
@@ -525,6 +540,7 @@ public class SettingsActivity extends AppCompatActivity {
                         EngineCore.KERNEL_TITLE, true, 120_000);
             } catch (Exception ex) {
                 transitions.decrementAndGet();
+                waking.remove(e.slot);
                 String msg = String.valueOf(ex.getMessage());
                 int code = ex instanceof EngineCore.EngineException
                         ? ((EngineCore.EngineException) ex).status : -1;
@@ -598,6 +614,7 @@ public class SettingsActivity extends AppCompatActivity {
             });
         } finally {
             transitions.decrementAndGet();
+            waking.remove(slot);
         }
     }
 
@@ -693,47 +710,50 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private EngineCore.EngineState shutOne(String slot) {
-        /* Resolve the tunnel AT CLICK TIME. Relying on liveUrls was the bug:
-           that map only ever held engines this app had already seen fully LIVE,
-           so the button did nothing during boot or after a restart. */
-        String url = liveUrls.get(slot);
-        if (url == null) url = tunnels.get(slot);
-        if (url == null) url = liveUrlFor(slot);
-        if (url == null) {
-            /* Nothing announced. Not an error -- there is no tunnel to shut
-               down. Classify from Kaggle instead of inventing a failure. */
+        /* EVERY tunnel this slot has announced, not just the newest. Kaggle
+           leaves previous kernel versions running after a new push and offers no
+           API to stop them (issue #388), so each has its own tunnel and its own
+           GPU. Killing only the newest one is why shutdown looked like it
+           failed. */
+        List<String> urls = new ArrayList<>();
+        String known = liveUrls.get(slot);
+        if (known == null) known = tunnels.get(slot);
+        if (known != null) urls.add(known);
+        try {
+            for (String u : EngineCore.urlsFor(cfg.beaconTopic, cfg.beaconSecret,
+                    slot, BEACON_LOOKBACK_S, 20_000, 6)) {
+                if (!urls.contains(u)) urls.add(u);
+            }
+        } catch (Exception ignored) { }
+
+        if (urls.isEmpty()) {
+            /* Nothing announced. Not an error -- there is nothing to shut down.
+               Classify from Kaggle instead of inventing a failure. */
             tunnels.remove(slot);
             liveUrls.remove(slot);
             return EngineCore.classify(slot, EngineCore.NO_CHECK, null, null,
-                    safeKernelStatus(cfg.bySlot(slot)), null);
+                    safeKernelStatus(cfg.bySlot(slot)), null, 0L);
         }
-        liveUrls.put(slot, url);
+
         transitions.incrementAndGet();
         try {
-            /* 8 checks x 4s: measured live, /api/ps goes 200 -> 502 -> 530 in
-               about 20-30 seconds after /off is accepted. */
-            EngineCore.Shutdown s = EngineCore.shutDownVerified(
-                    url, cfg.offKey, 30_000, 8, 4_000);
-            if (s.confirmed) {
-                liveUrls.remove(slot);
-                tunnels.remove(slot);
-                /* Remember the measurement, not a belief: /api/ps was watched
-                   stopping. This is what keeps the card OFF while Kaggle's own
-                   status catches up, and it is dropped the instant the engine
-                   answers 200 again. */
+            EngineCore.ShutdownAll r = EngineCore.shutDownEvery(
+                    urls, cfg.offKey, 30_000, 8, 4_000);
+            tunnels.remove(slot);
+            liveUrls.remove(slot);
+            if (r.allDown) {
+                /* Every instance that was answering has been watched stopping. */
                 confirmedOffAt.put(slot, System.currentTimeMillis());
                 return new EngineCore.EngineState(slot, EngineCore.Phase.OFF,
-                        "off — " + s.message, null, System.currentTimeMillis(), null, null);
+                        "off — " + r.message, null, System.currentTimeMillis(), null, null);
             }
-            /* Accepted but still answering. That IS a failed operation, so
-               ERROR is honest here -- and the engine keeps its real health. */
-            EngineCore.Health h = EngineCore.health(url, 20_000);
-            return EngineCore.classify(slot, h.status, h.models,
-                    h.status == 200 ? url : null, null,
-                    EngineCore.Action.failed("shutdown", s.message));
+            /* A real failure: an instance accepted /off and kept answering. */
+            return EngineCore.classify(slot, EngineCore.NO_CHECK, null, null,
+                    safeKernelStatus(cfg.bySlot(slot)),
+                    EngineCore.Action.failed("shutdown", r.message), 0L);
         } catch (Exception ex) {
-            return EngineCore.classify(slot, EngineCore.NO_CHECK, null, url, null,
-                    EngineCore.Action.failed("shutdown", String.valueOf(ex.getMessage())));
+            return EngineCore.classify(slot, EngineCore.NO_CHECK, null, null, null,
+                    EngineCore.Action.failed("shutdown", String.valueOf(ex.getMessage())), 0L);
         } finally {
             transitions.decrementAndGet();
         }

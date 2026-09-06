@@ -121,6 +121,51 @@ signer and launcher verified, zero plaintext keys in the baked asset.
 
 `apk/aether-release.apk` 724 008 B · `apk/aether-debug.apk` 3 893 953 B
 
+## Second cause found while verifying: one engine, several running versions
+
+Engine A was found serving again 25 seconds after a confirmed shutdown, while
+Kaggle reported its kernel `error`. Checking the beacon for distinct URLs rather
+than the newest one:
+
+```
+engine A: 2 DISTINCT tunnel URLs announced in the last hour
+   https://appears-cooked-researchers-show.trycloudflar…   3 announcements  /api/ps=530
+   https://leading-myth-shows-deutschland.trycloudflare…   3 announcements  /api/ps=530
+```
+
+Two tunnels for one engine, both answering at the time. Kaggle keeps previous
+kernel versions running after a new push and has no API to stop them —
+kaggle-api issue #388: *"when I push a new kernel all other versions keep running
+and I have to go to the website and stop them from there"*.
+
+So shutting down only the newest announced URL left the others holding GPUs, and
+the engine looked like it refused to turn off. Two changes:
+
+- `EngineCore.urlsFor(...)` returns **every** distinct tunnel a slot announced,
+  and `shutDownEvery(...)` shuts each one down, counting survivors and stale
+  tunnels separately. OFF is only reported when nothing is left answering.
+- `wake()` now refuses a second push while one is in flight, because a double tap
+  is what creates the extra version that cannot be stopped from the API.
+
+`scripts/proofs/MultiInstanceProof.java`, **14 passed / 0 failed**:
+
+```
+== two running instances plus a dead tunnel
+  PASS  it killed BOTH running instances  [killed 2]
+  PASS  the dead tunnel was not counted as a failure  [dead 1, still up 0]
+  PASS  it reports everything down  [2 running instances confirmed terminated (1 stale tunnel already dead)]
+== an instance that refuses to die is reported as a failure
+  PASS  it does not claim success  [1 of 1 instances still answering -- …]
+== urlsFor on the real beacon
+  engine A: 2 distinct tunnel(s) announced in 3h
+MULTI-INSTANCE PROOF  14 passed, 0 failed
+```
+
+Re-run with everything else: StreamProof 32/32, ShutdownProof 12/12,
+ExecutorProof 12/12, ChatCoreCheck 70/70, RouterCheck 19/19, wiring clean, debug
+and release BUILD SUCCESSFUL. `shutDownEvery` and `urlsFor` are in the release
+dex. `apk/aether-release.apk` 724 584 B · `apk/aether-debug.apk` 3 963 318 B.
+
 ## Not proven
 
 The Activity still has never run on a device here — no `/dev/kvm`. What is
