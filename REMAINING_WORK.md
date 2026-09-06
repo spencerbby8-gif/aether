@@ -108,5 +108,28 @@ Also fixed here: the repository had **no `.gitignore` at all**, so `git add -A`
 swept 31,960 `node_modules` files plus `.next/` into a commit. Added, and the
 commit was amended back to 54 files.
 
+## REAL KAGGLE VERIFICATION — done (see PROOF_REAL_KAGGLE.md)
+
+The audit's hardest gate, cleared with real credentials on real Kaggle hardware:
+
+  wake        : kernels/status error -> queued after POST ensure-alive?engine=a
+  boot        : ntfy showed gpus=1 -> ollama 0.33.2 -> model warm (15 GB VRAM)
+                -> AGENT LIVE LINK
+  live URL    : discovered from the beacon, kernel status "running"
+  /api/ps     : 200
+  C5 on real  : POST /api/chat no key -> 403, wrong key -> 403, raw ollama
+                proxy no key -> 403, no ACAO header anywhere
+  §4.9        : first content token at 8.65 s of a 50.79 s generation (17%),
+                395 chunks — real streaming, not a replay
+  shutdown    : POST /off -> 200, URL then 530, kernel -> error,
+                ntfy "ENGINE OFF via UI - quota saved"
+
+Still open from that run:
+  - the engine's control surface intermittently returned **501** (Python's
+    default BaseHTTPRequestHandler page) alternating with correct 403s from the
+    same tunnel URL. Retrying /off worked. Not root-caused, not fixed.
+  - single GPU only; A/B/C failover across three live engines not exercised.
+  - no real tool-calling turn observed.
+
 ## Not claimable without evidence
 - Kaggle integration: only after a real credentialed wake → RUNNING → live URL → /api/ps → /api/chat cycle.
