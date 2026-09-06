@@ -122,7 +122,7 @@ public class SettingsActivity extends AppCompatActivity {
         routingRows.removeAllViews();
         String[] opts = {EngineRouter.AUTO, "a", "b", "c"};
         for (String o : opts) {
-            boolean selected = mode().equals(o);
+            boolean selected = EngineRouter.canonical(mode()).equals(o);
             TextView row = new TextView(this);
             row.setText(EngineRouter.AUTO.equals(o)
                     ? (selected ? "●  " : "○  ") + "AUTO — first healthy, fails over A→B→C"

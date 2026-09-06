@@ -2,6 +2,7 @@ package com.aether.app;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * A/B/C routing.
@@ -70,6 +71,31 @@ public final class EngineRouter {
     }
 
     /**
+     * Canonical form of a selection or slot name: trimmed, lower-case, with a
+     * blank meaning AUTO. Routing must not depend on the caller's casing --
+     * the screens display "AUTO" and "A"/"B"/"C", preferences are written as
+     * lower case, and an older or hand-edited value could arrive either way.
+     * Without this, "AUTO" was treated as a pin on an engine called AUTO and
+     * refused with "engine AUTO is not configured", which would have made the
+     * default mode look like a dead pin instead of routing.
+     */
+    private static String norm(String s) {
+        if (s == null) return AUTO;
+        String t = s.trim().toLowerCase(Locale.ROOT);
+        return t.isEmpty() ? AUTO : t;
+    }
+
+    /**
+     * Canonical form of a selection, for callers that need the same normalisation
+     * the router applies (highlighting the right row, choosing a wake candidate).
+     * Returns "auto" or "a"/"b"/"c".
+     */
+    public static String canonical(String selection) { return norm(selection); }
+
+    /** True when the selection means AUTO rather than a manual A / B / C pin. */
+    public static boolean isAuto(String selection) { return AUTO.equals(norm(selection)); }
+
+    /**
      * Choose an engine.
      *
      * @param selection AUTO, or "a"/"b"/"c" to pin one engine
@@ -81,15 +107,16 @@ public final class EngineRouter {
         }
 
         // ---- manual pin: that engine or nothing --------------------------
-        if (selection != null && !selection.isEmpty() && !AUTO.equals(selection)) {
-            SlotState s = find(states, selection);
+        String sel = norm(selection);
+        if (!AUTO.equals(sel)) {
+            SlotState s = find(states, sel);
             if (s == null) {
                 return new Decision(null, null,
-                        "engine " + selection.toUpperCase() + " is not configured", false);
+                        "engine " + sel.toUpperCase(Locale.ROOT) + " is not configured", false);
             }
             if (s.live) return new Decision(s.slot, s.url, "manual pin", false);
             return new Decision(null, null,
-                    "engine " + selection.toUpperCase() + " is not live (" + s.reason + ")", false);
+                    "engine " + sel.toUpperCase(Locale.ROOT) + " is not live (" + s.reason + ")", false);
         }
 
         // ---- AUTO: first healthy in A -> B -> C --------------------------
@@ -122,12 +149,13 @@ public final class EngineRouter {
      * request fails. Wraps around, so pinning C still fails over to A.
      */
     public static Decision failoverFrom(String currentSlot, List<SlotState> states) {
+        String from = norm(currentSlot);
         for (String slot : ORDER) {
-            if (slot.equals(currentSlot)) continue;
+            if (slot.equals(from)) continue;
             SlotState s = find(states, slot);
             if (s != null && s.live) {
                 return new Decision(s.slot, s.url,
-                        "failover from " + currentSlot.toUpperCase(), true);
+                        "failover from " + from.toUpperCase(Locale.ROOT), true);
             }
         }
         return new Decision(null, null, "no other engine is live", false);

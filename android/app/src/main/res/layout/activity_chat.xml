@@ -3,8 +3,7 @@
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:background="@color/aether_bg">
 
-    <!-- Header: mark + engine status chip + settings. No engine panel here --
-         selection, wake and shutdown live in Settings. -->
+    
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="horizontal" android:gravity="center_vertical"
         android:paddingLeft="16dp" android:paddingRight="12dp"
@@ -38,7 +37,7 @@
             android:padding="8dp" android:contentDescription="@string/settings" />
     </LinearLayout>
 
-    <!-- Messages -->
+    
     <ScrollView android:id="@+id/chat_scroll" android:layout_width="match_parent"
         android:layout_height="0dp" android:layout_weight="1"
         android:fillViewport="true"
@@ -48,7 +47,7 @@
             android:layout_height="wrap_content" android:orientation="vertical" />
     </ScrollView>
 
-    <!-- Composer: field + send beside it, on a surface card. ReplyMate's pattern. -->
+    
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="vertical" android:background="@color/aether_surface"
         android:padding="@dimen/composer_pad">

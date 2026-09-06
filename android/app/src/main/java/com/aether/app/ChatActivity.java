@@ -119,7 +119,7 @@ public class ChatActivity extends AppCompatActivity {
             ui.post(() -> {
                 synchronized (lastStates) { lastStates.clear(); lastStates.addAll(states); }
                 if (d.ok()) {
-                    chip.setText("● " + d.slot.toUpperCase() + (mode().equals(EngineRouter.AUTO) ? " · auto" : ""));
+                    chip.setText("● " + d.slot.toUpperCase() + (EngineRouter.isAuto(mode()) ? " · auto" : ""));
                     chip.setTextColor(getColor(R.color.aether_ok));
                 } else {
                     String any = null;
@@ -274,7 +274,7 @@ public class ChatActivity extends AppCompatActivity {
         return b;
     }
 
-    private void onThinking(AssistantBubble b, String text) {
+    private void pushThinking(AssistantBubble b, String text) {
         boolean tool = text.contains("🛠") || text.contains("↳") || text.contains("web_search")
                 || text.contains("run_command") || text.contains("fetch_page") || text.contains("crawl");
         TextView row;
@@ -297,7 +297,7 @@ public class ChatActivity extends AppCompatActivity {
         scrollBottom();
     }
 
-    private void onContent(AssistantBubble b, String text) {
+    private void pushContent(AssistantBubble b, String text) {
         if (b.waiting != null && b.waiting.getParent() != null) {
             b.wrap.removeView(b.waiting);
             b.waiting = null;
@@ -368,13 +368,13 @@ public class ChatActivity extends AppCompatActivity {
 
             if (!d.ok()) {
                 /* Nothing live: wake the routed candidate rather than failing. */
-                String slot = mode().equals(EngineRouter.AUTO) ? "a" : mode();
+                String slot = EngineRouter.isAuto(mode()) ? "a" : EngineRouter.canonical(mode());
                 EngineCore.Engine e = cfg.bySlot(slot);
                 if (e == null) {
                     ui.post(() -> { setStreaming(false); onError("No engines are configured.", prompt); });
                     return;
                 }
-                ui.post(() -> onThinking(b, "Engine " + e.slot.toUpperCase()
+                ui.post(() -> pushThinking(b, "Engine " + e.slot.toUpperCase()
                         + " is off -- waking it now. This takes a few minutes; your message will send once it is live."));
                 try {
                     EngineCore.kernelPush(e, Credentials.renderNotebook(
@@ -417,11 +417,11 @@ public class ChatActivity extends AppCompatActivity {
         EngineCore.chatStream(url, cfg.offKey, prompt, "", cancelFlag,
                 new EngineCore.ChatListener() {
                     @Override public void onThinking(String t) {
-                        ui.post(() -> onThinking(b, t));
+                        ui.post(() -> pushThinking(b, t));
                     }
                     @Override public void onContent(String t) {
                         out.append(t);
-                        ui.post(() -> onContent(b, t));
+                        ui.post(() -> pushContent(b, t));
                     }
                     @Override public void onDone(boolean ok, String err) {
                         ui.post(() -> {

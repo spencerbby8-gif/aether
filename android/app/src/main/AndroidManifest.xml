@@ -10,8 +10,6 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.Aether">
-        <!-- Chat is the opening screen. Engine selection, status, wake and
-             shutdown live in Settings, reached from the header. -->
         <activity android:name=".ChatActivity" android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize">
