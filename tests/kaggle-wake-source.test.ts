@@ -13,7 +13,7 @@ import {
  *
  * The module stores the verified engine notebook as a TEMPLATE with {{...}}
  * placeholders and renders it with server env secrets at push time.
- * getAetherNotebook() fails closed on tampering AND on a missing secret.
+ * getAetherNotebook("a") fails closed on tampering AND on a missing secret.
  *
  * NOTE: these tests deliberately never spell out the OFF_KEY / beacon token /
  * ntfy topic that the previous revision leaked. Re-embedding them here would
@@ -32,6 +32,7 @@ const DUMMY = {
      the original, so the byte-count invariant still holds. */
   beaconToken: "11111111-2222-3333-4444-555555555555",
   beaconTopic: "c".repeat(ORIGINAL_VALUE_LENGTHS.beaconTopic),
+  slot: "a" as const,
 };
 
 /* Guard the guard: the dummy must be the same length it claims. */
@@ -57,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("794df4372dd6bc03b10188beefdac6034366252936644533ad019b0c9b0cfd3a");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("ef0c7fe7c42345b3f626bd03de6e2ca28f9890a2c50379570c0a18c2b0c29919");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -120,7 +121,7 @@ describe("engine source — rendering", () => {
      * this now pins the current rendered size rather than the original one.
      */
     const rendered = renderAetherNotebook(DUMMY);
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(40475);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(40875);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
@@ -136,10 +137,10 @@ describe("engine source — rendering", () => {
       process.env.ENGINE_OFF_KEY = DUMMY.offKey;
       process.env.ENGINE_BEACON_TOKEN = DUMMY.beaconToken;
       process.env.ENGINE_BEACON_TOPIC = DUMMY.beaconTopic;
-      expect(getAetherNotebook()).toContain(DUMMY.offKey);
+      expect(getAetherNotebook("a")).toContain(DUMMY.offKey);
 
       delete process.env.ENGINE_OFF_KEY;
-      expect(() => getAetherNotebook()).toThrow(/ENGINE_OFF_KEY/);
+      expect(() => getAetherNotebook("a")).toThrow(/ENGINE_OFF_KEY/);
     } finally {
       process.env = saved;
     }
@@ -153,7 +154,7 @@ describe("engine source — rendering", () => {
       process.env.ENGINE_OFF_KEY = DUMMY.offKey;
       process.env.BEACON_URL = `https://webhook.site/${DUMMY.beaconToken}`;
       process.env.BEACON_BACKUP_URL = `https://ntfy.sh/${DUMMY.beaconTopic}/json?poll=1&since=12h`;
-      const nb = getAetherNotebook();
+      const nb = getAetherNotebook("a");
       expect(nb).toContain(DUMMY.beaconToken);
       expect(nb).toContain(DUMMY.beaconTopic);
     } finally {
@@ -336,5 +337,42 @@ describe("engine source — keep-alive socket hygiene (the 501 bug)", () => {
     expect(raise).toBeGreaterThan(endHeaders);
     /* do_POST must no longer set it on the success path -- that was the bug. */
     expect(py).not.toMatch(/agent_stream\(self, payload\)\s*\n\s*self\._sent = True/);
+  });
+});
+
+describe("engine source — slot tagging on the beacon", () => {
+  /*
+   * The Android shell talks to Kaggle and the engines directly, with no Aether
+   * server in between. To wake engine B and then find B's tunnel URL it has to
+   * attribute a beacon announcement to a slot -- the URL only ever appears in
+   * an announcement. resolve.ts already parses an "engine=<slot>" tag, so the
+   * engine now emits one on every message.
+   */
+  it("stamps engine=<slot> into notify(), not just the LIVE LINK line", () => {
+    const py = enginePython();
+    expect(py).toContain("SLOT = '{{AETHER_SLOT}}'");
+    expect(py).toContain("m = 'engine=' + SLOT + ' ' + str(m)");
+    /* Both notify definitions (the original cell and the post-model
+       redefinition) must tag, or half the announcements are unattributable. */
+    expect(py.match(/m = 'engine=' \+ SLOT \+ ' ' \+ str\(m\)/g)).toHaveLength(2);
+  });
+
+  it("renders the slot the caller asked for", () => {
+    for (const slot of ["a", "b", "c"] as const) {
+      const nb = JSON.parse(renderAetherNotebook({ ...DUMMY, slot })) as {
+        cells: Array<{ source?: string[] | string }>;
+      };
+      const code = nb.cells
+        .map((c) => (Array.isArray(c.source) ? c.source.join("") : c.source ?? ""))
+        .join("\n");
+      expect(code).toContain(`SLOT = '${slot}'`);
+      expect(code).not.toContain("{{AETHER_SLOT}}");
+    }
+  });
+
+  it("refuses to render without a slot rather than booting an anonymous engine", () => {
+    expect(() =>
+      renderAetherNotebook({ ...DUMMY, slot: "" }),
+    ).toThrow(/slot/);
   });
 });

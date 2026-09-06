@@ -1,0 +1,45 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.aether.app'
+    compileSdk 37
+    buildToolsVersion '36.0.0'
+    defaultConfig {
+        applicationId 'com.aether.app'
+        minSdk 26
+        targetSdk 37
+        versionCode 1
+        versionName '1.0.0'
+    }
+    signingConfigs {
+        release {
+            def p = project.findProperty('AETHER_KS')
+            if (p != null) {
+                storeFile file(p)
+                storePassword project.findProperty('AETHER_KS_PASS')
+                keyAlias project.findProperty('AETHER_KEY_ALIAS')
+                keyPassword project.findProperty('AETHER_KEY_PASS')
+            }
+        }
+    }
+    buildTypes {
+        debug { applicationIdSuffix '.debug'; versionNameSuffix '-debug' }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig = (project.findProperty('AETHER_KS') != null) ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.8.0'
+    implementation 'androidx.activity:activity:1.13.0'
+    implementation 'androidx.webkit:webkit:1.17.0'
+    // EngineCore parses Kaggle/ntfy JSON. Also lets the identical class be
+    // compiled and run on a stock JVM by scripts/proofs/engine-core-probe.sh.
+    implementation 'org.json:json:20260814'
+}

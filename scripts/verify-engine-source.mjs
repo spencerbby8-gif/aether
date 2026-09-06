@@ -55,7 +55,7 @@ try {
 }
 
 /* --- 3. placeholders present ------------------------------------------- */
-const PLACEHOLDERS = ["{{AETHER_OFF_KEY}}", "{{AETHER_BEACON_TOKEN}}", "{{AETHER_BEACON_TOPIC}}"];
+const PLACEHOLDERS = ["{{AETHER_OFF_KEY}}", "{{AETHER_BEACON_TOKEN}}", "{{AETHER_BEACON_TOPIC}}", "{{AETHER_SLOT}}"];
 for (const p of PLACEHOLDERS) {
   if (!decoded.includes(p)) fail(`template is missing placeholder ${p}.`);
 }
@@ -78,6 +78,8 @@ console.log("Leaked secrets         : none");
 const rendered = decoded
   .split("{{AETHER_OFF_KEY}}").join("k".repeat(16))
   .split("{{AETHER_BEACON_TOKEN}}").join("11111111-2222-3333-4444-555555555555")
+  .split("{{AETHER_SLOT}}").join("a")
+  .split("{{AETHER_SLOT}}").join("a")
   .split("{{AETHER_BEACON_TOPIC}}").join("c".repeat(17));
 console.log(`Rendered bytes         : ${Buffer.byteLength(rendered, "utf8")}`);
 if (rendered.includes("{{AETHER")) fail("a placeholder survived rendering.");

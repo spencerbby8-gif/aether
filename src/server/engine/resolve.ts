@@ -383,7 +383,7 @@ export async function kernelStatus(acc: Account, timeoutMs = 15_000): Promise<st
 
 /** Push the verified notebook to one engine's kernel. Documented contract. */
 export async function wakeKernel(acc: Account): Promise<unknown> {
-  const notebook = getAetherNotebook(); // throws on any byte drift — never pushes unverified
+  const notebook = getAetherNotebook(acc.slot); // throws on any byte drift — never pushes unverified
   const body = {
     slug: `${acc.user}/${kernelSlugFor(acc.slot)}`,
     newTitle: KERNEL_TITLE,

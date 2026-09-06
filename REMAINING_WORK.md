@@ -157,3 +157,40 @@ Two of my own earlier claims were wrong and are retracted in
 `PROOF_REAL_KAGGLE.md`: "more than one handler behind the tunnel", and "the 400
 vs 501 difference is CPython version strictness" (it is JSON formatting —
 compact bodies fuse into 3 tokens, spaced ones into 9).
+
+## Dependency bump to latest — done, with three ecosystem ceilings
+
+Everything was moved to the newest release, then walked back only where the
+ecosystem itself is not yet mutually consistent. Each walk-back is a measured
+incompatibility, not a preference:
+
+| package | requested | shipped | why |
+|---|---|---|---|
+| typescript | 7.0.2 | **6.0.3** | `typescript-eslint@8.69.0` (the newest) declares `typescript: ">=4.8.4 <6.1.0"` and hard-throws `typescript-eslint does not support TS 7.0`. 6.0.3 is the highest stable under that ceiling. |
+| eslint | 10.10.0 | **9.39.5** | `eslint-config-next@16.3.4` declares `eslint: ">=9.0.0"`, so npm happily installs 10 — but its bundled `eslint-plugin-react` calls `context.getFilename()`, which ESLint 10 removed: `TypeError: contextOrFilename.getFilename is not a function`. Upstream over-permissive peer range. |
+| undici | 8.10.2 | **7.29.1** | undici 8 declares `engines: { node: ">=22.19.0" }` and dies on Node 20 with `webidl.util.markAsUncloneable is not a function`. This sandbox runs Node 20.20.2. |
+
+Everything else is genuinely latest: next 16.3.4, react/react-dom 19.2.8,
+tailwindcss + @tailwindcss/postcss 4.3.3, postcss 8.5.28, katex 0.18.6,
+@types/node 26.4.1, playwright 1.63.0, eslint-config-next 16.3.4.
+
+### tsconfig change forced by TypeScript 6
+
+TS 6 removed `baseUrl` (`error TS5102: Option 'baseUrl' has been removed`).
+It was redundant — `paths` was already `"@/*": ["./src/*"]`, resolved relative to
+the tsconfig. Removed.
+
+### ESLint 16.3.4 react-hooks debt
+
+The config bump alone turned three `react-hooks` rules into errors and produced
+7 new ones in unchanged code: `set-state-in-effect` ×5, `immutability` ×1,
+`refs` ×1 (src/hooks/useAether.ts, src/components/{composer,media,memory}.tsx).
+They flag deliberate "latest value in a ref" idioms in the streaming path, whose
+behaviour is runtime-proven. Downgraded to **warnings** in eslint.config.mjs with
+the reasoning inline, rather than rewriting streaming refs immediately before an
+APK build. They still print, so the debt stays visible. **This is real debt and
+should be paid down.**
+
+Gate after the bump: tsc 0 · lint 0 errors/17 warnings · 32 files/251 tests ·
+build clean · verify-engine-source PASS.
+

@@ -26,3 +26,19 @@ engine-state.json
 
 # os
 .DS_Store
+
+# Release signing material — never commit
+keystore/
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+android/app/release/
+
+# APK binaries are reproducible via scripts/build-apk.sh; keep them out of git.
+apk/*.apk
+apk/*mapping.txt
+
+# Engine credentials baked into the APK — never commit
+android/credentials.properties
+android/app/src/main/assets/aether-credentials.dat

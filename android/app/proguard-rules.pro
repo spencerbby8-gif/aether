@@ -1,0 +1,6 @@
+-keepclassmembers class com.aether.app.AetherBridge { public *; }
+-keepattributes JavascriptInterface
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.annotation.**
+-dontwarn javax.annotation.concurrent.**
+-dontwarn org.json.**
