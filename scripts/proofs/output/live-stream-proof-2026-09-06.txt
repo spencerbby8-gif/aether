@@ -1,0 +1,58 @@
+LIVE STREAM PROOF — real Kaggle engine A, 2026-09-06
+Command: java -cp /tmp/lp:$T/jars/json-20240303.jar LiveStreamProof android/credentials.properties a
+Client under test: the shipped com.aether.app.EngineCore (same class the APK calls)
+Verbatim process output follows.
+
+== waiting for engine A to become live
+  no tunnel announced yet
+  no tunnel announced yet
+  no tunnel announced yet
+  no tunnel announced yet
+  no tunnel announced yet
+  no tunnel announced yet
+  no tunnel announced yet
+  no tunnel announced yet
+  no tunnel announced yet
+  no tunnel announced yet
+  no tunnel announced yet
+  no tunnel announced yet
+  LIVE  https://speeches-shops-highways-surgery.trycloudflare.com
+        models=[hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS]  status=200
+  PASS  engine A is live (/api/ps 200 with a loaded model)
+
+== turn 1 -- a plain reply
+  PASS  turn completed
+  PASS  the answer came back verbatim
+  PASS  terminal callback fired exactly once
+        9522ms total, first content at 8557ms
+
+== turn 2 -- the model calls run_command (the case that used to hang)
+  PASS  tool turn completed instead of hanging
+  PASS  the tool call was visible in the stream
+  PASS  an answer followed the tool call
+        answer: Tesla P100-PCIE-16GB
+        9637ms total, 6 stream events
+
+== turn 3 -- the same request again (repeated requests)
+  PASS  the next turn still works
+  PASS  answer came back verbatim
+
+== stop pressed mid-generation
+  PASS  stop ended the turn
+  PASS  stop took effect near when it was pressed
+  PASS  the engine is still healthy after a stop
+
+== turn 5 -- the conversation continues after a stop
+  PASS  a turn after a cancelled one still works
+  PASS  answer came back verbatim
+
+== shutdown
+  PASS  POST /off accepted
+  PASS  engine confirmed terminated (/api/ps stopped answering)
+
+LIVE STREAM PROOF  16 passed, 0 failed
+
+Engine A was woken by scripts/proofs/wake-engines.py a (kernel ref
+/code/fridaymoses/qwen-3-8-27b-uncensored-chat v9, slot tag verified, 40837 bytes),
+became live after ~3 minutes of polling, and was shut down again by this proof.
+Engines B and C were not touched and remain off.

@@ -144,6 +144,45 @@ stop took **8012 ms**; with the shipped 1 s slice it lands inside that window
 (the assertion is `ms < readSliceMs + 2000`, and it also asserts the long-slice
 case *is* slow, so the trade is documented rather than assumed).
 
+### …and then against the real engine
+
+A local server proves the client's logic; it does not prove Kaggle, the tunnel or
+the model. So engine A was woken for real (`scripts/proofs/wake-engines.py a`,
+kernel ref `/code/fridaymoses/qwen-3-8-27b-uncensored-chat` v9) and the same
+shipped `EngineCore` was driven against it. Full verbatim output in
+`scripts/proofs/output/live-stream-proof-2026-09-06.txt`.
+
+```
+  LIVE  https://speeches-shops-highways-surgery.trycloudflare.com
+        models=[hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS]  status=200
+  PASS  engine A is live (/api/ps 200 with a loaded model)
+
+== turn 1 -- a plain reply
+  PASS  turn completed / answer verbatim / terminal callback exactly once
+        9522ms total, first content at 8557ms
+
+== turn 2 -- the model calls run_command (the case that used to hang)
+  PASS  tool turn completed instead of hanging
+  PASS  the tool call was visible in the stream
+  PASS  an answer followed the tool call
+        answer: Tesla P100-PCIE-16GB      9637ms total, 6 stream events
+
+== turn 3 -- the same request again            PASS (repeated requests work)
+== stop pressed mid-generation                 PASS stop ended the turn
+                                               PASS stop took effect near when pressed
+                                               PASS engine still healthy afterwards
+== turn 5 -- conversation continues after stop PASS
+== shutdown                                    PASS /off 200, confirmed terminated
+
+LIVE STREAM PROOF  16 passed, 0 failed
+```
+
+That is the specific complaint, answered on real hardware: a turn that makes the
+model run a shell command completed in 9.6 s with the tool call visible in the
+stream, the next turn worked, a stop landed promptly without breaking the engine,
+the turn after the stop worked, and the engine was then shut down and confirmed
+gone. Engine A is off again now; B and C were not touched.
+
 | Check | Command | Result |
 |---|---|---|
 | Streaming client vs live local server | `java -cp /tmp/sp StreamProof` | **28 passed, 0 failed** |
@@ -159,14 +198,17 @@ case *is* slow, so the trade is documented rather than assumed).
 ## 5. What is NOT proven
 
 - **The APK has never been installed.** No `/dev/kvm` in this sandbox, so the new
-  Settings states, the wake watcher, the ticking streaming line and the failover
-  message have never been rendered on a screen.
-- **`StreamProof` is not the real Kaggle engine.** It is a local server that
-  reproduces the engine's wire format, read out of the kernel source. It proves
-  the *client*: that a turn always terminates, that stop is honoured promptly,
-  that content is not dropped, and that turn 25 behaves like turn 1. It does not
-  prove the Kaggle kernel, the Cloudflare tunnel, or the model.
-- **No engine was woken in this turn.** All three are OFF, and waking one to
-  verify the new watcher end-to-end costs real GPU quota — say the word and I
-  will wake A and walk the whole thing with live output.
-- Engine C has never been woken; image/audio generation is still unproven.
+  Settings screens — the wake watcher's live status lines, the per-check shutdown
+  feedback, the ticking streaming line, the failover message — have never been
+  rendered on a screen. The logic they call is proven; the pixels are not.
+- **Engine B and C were not exercised this round**, and C has never been woken at
+  all. Failover A→B→C was proven earlier with two live engines
+  (`PROOF_ANDROID_ENGINES.md`, `MultiEngineProof` 21/21), not today.
+- **The wake watcher was not timed end-to-end against a real boot** — engine A
+  took about 3 minutes from push to `/api/ps` 200 in this run, but that was
+  observed through `LiveStreamProof`'s own polling loop, not through the
+  Settings UI that will display it.
+- Image and audio generation are still unproven.
+- The 330 s stall limit has never been hit by a real tool call; it is set above
+  the engine's longest silent tool run (300 s) by reading the kernel source, not
+  by measuring one.
