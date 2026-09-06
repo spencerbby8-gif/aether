@@ -7,4 +7,8 @@
         <item name="android:textColorPrimary">@color/aether_fg</item>
         <item name="android:colorAccent">@color/aether_accent</item>
     </style>
+    <style name="Theme.Aether.Splash" parent="Theme.Aether">
+        <item name="android:windowBackground">@color/aether_bg</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>

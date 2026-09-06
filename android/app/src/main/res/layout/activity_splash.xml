@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/aether_bg">
+
+    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_gravity="center" android:orientation="vertical"
+        android:gravity="center_horizontal">
+
+        <FrameLayout android:layout_width="140dp" android:layout_height="140dp">
+            <View android:id="@+id/splash_ring" android:layout_width="match_parent"
+                android:layout_height="match_parent" android:background="@drawable/bg_ring"
+                android:alpha="0" />
+            <ImageView android:id="@+id/splash_logo" android:layout_width="92dp"
+                android:layout_height="92dp" android:layout_gravity="center"
+                android:src="@drawable/ic_launcher_foreground"
+                android:alpha="0" android:importantForAccessibility="no" />
+        </FrameLayout>
+
+        <TextView android:id="@+id/splash_word" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_marginTop="18dp"
+            android:text="@string/app_name" android:textColor="@color/aether_fg"
+            android:textSize="26sp" android:textStyle="bold" android:letterSpacing="0.2"
+            android:alpha="0" />
+
+        <View android:id="@+id/splash_line" android:layout_width="0dp"
+            android:layout_height="2dp" android:layout_marginTop="10dp"
+            android:background="@drawable/bg_pill_accent" />
+
+        <TextView android:id="@+id/splash_sub" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_marginTop="12dp"
+            android:text="@string/splash_sub" android:textColor="@color/aether_muted"
+            android:textSize="12sp" android:alpha="0" />
+    </LinearLayout>
+</FrameLayout>

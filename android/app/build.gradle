@@ -38,6 +38,7 @@ android {
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.8.0'
     implementation 'androidx.activity:activity:1.13.0'
+    implementation 'androidx.drawerlayout:drawerlayout:1.2.0'
     implementation 'androidx.webkit:webkit:1.17.0'
     // EngineCore parses Kaggle/ntfy JSON. Also lets the identical class be
     // compiled and run on a stock JVM by scripts/proofs/engine-core-probe.sh.

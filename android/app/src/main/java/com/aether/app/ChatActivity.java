@@ -1,44 +1,77 @@
 package com.aether.app;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.drawerlayout.widget.DrawerLayout;
 
+import com.aether.app.core.Attachment;
+import com.aether.app.core.ChatMessage;
+import com.aether.app.core.ChatSession;
+import com.aether.app.core.ChatStore;
+import com.aether.app.core.TextNormalizer;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * The primary screen: a chat-first conversation with Aether.
+ * The primary screen: a chat-first conversation with Aether, plus the history
+ * drawer beside it.
  *
  * Engine selection, wake and shutdown live in Settings, not here -- the main
  * screen stays focused on the conversation. The header chip is the only engine
  * surface, and it is a read-only status that deep-links to Settings.
+ *
+ * HISTORY. Every conversation is a JSON transcript in app-private storage
+ * (ChatStore): open one from the drawer, start a new one, rename it, delete it.
+ * A turn is written when it finishes, and again on pause, so nothing is lost by
+ * a backgrounded app.
  *
  * STREAMING. The assistant bubble is built in three zones that fill only when
  * the engine emits the matching event:
  *
  *   thinking  -- dim rows, from {"message":{"thinking":...}}
  *   tools     -- accent monospace tiles, from thinking lines that are actual
- *                tool calls ("🛠️ web_search(...)", "↳ ... returned N chars")
+ *                tool calls ("web_search(...)", "... returned N chars")
  *   content   -- the answer, appended token as it arrives
  *
  * Nothing here is a looping placeholder: a thinking or tool row exists only
- * because the engine sent it, and the "waiting" dot disappears the moment the
- * first real token lands. That is the difference between "dynamic, based on
- * actual engine events" and a static fake animation.
+ * because the engine sent it, and the "waiting" line disappears the moment the
+ * first real token lands.
+ *
+ * NORMALISATION. Raw model output goes through TextNormalizer before it is
+ * displayed or stored: ANSI escapes, zero-width and bidi characters, emoji and
+ * pictographs, stray control bytes and markdown decoration are removed, while
+ * arrows, box drawing and code-block contents are preserved.
  *
  * CANCELLATION. The send button becomes a stop button while a turn is in flight;
  * stop flips the same flag EngineCore polls between NDJSON lines, so the socket
@@ -46,6 +79,14 @@ import java.util.concurrent.Executors;
  */
 public class ChatActivity extends AppCompatActivity {
 
+    /** Files larger than this are attached but not read into the prompt. */
+    private static final int INLINE_MAX_BYTES = 200_000;
+    /** Never read more than this off a content URI, whatever it claims. */
+    private static final int READ_MAX_BYTES = 8 * 1024 * 1024;
+    /** Minimum gap between re-normalising the growing answer. */
+    private static final long RENDER_THROTTLE_MS = 70;
+
+    private DrawerLayout drawer;
     private LinearLayout msgList;
     private ScrollView scroll;
     private EditText input;
@@ -54,9 +95,26 @@ public class ChatActivity extends AppCompatActivity {
     private TextView chip;
     private TextView headerSub;
     private View emptyView;
+    private LinearLayout sessionList;
+    private LinearLayout attachRow;
 
     private Credentials.Config cfg;
+    private ChatStore store;
+    private ChatSession current;
+
+    /** Attachments staged for the next send. */
+    private final List<Attachment> staged = new ArrayList<>();
+
+    /** Chat thread: streaming, polling, file reads. */
     private final ExecutorService bg = Executors.newSingleThreadExecutor();
+    /** Separate thread for the header chip, so a long wake never starves it. */
+    private final ExecutorService pollExec = Executors.newSingleThreadExecutor();
+    /**
+     * Separate thread for storage. Saves and drawer reads must never queue
+     * behind a ten-minute wake-and-wait on the chat thread, or a transcript
+     * would appear not to save while an engine was booting.
+     */
+    private final ExecutorService storeExec = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     /** Cancel flag for the in-flight turn. Polled by EngineCore between lines. */
@@ -64,11 +122,14 @@ public class ChatActivity extends AppCompatActivity {
 
     private final List<EngineRouter.SlotState> lastStates = new ArrayList<>();
 
+    private ActivityResultLauncher<String> pickFile;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
 
+        drawer = findViewById(R.id.drawer);
         msgList = findViewById(R.id.msg_list);
         scroll = findViewById(R.id.chat_scroll);
         input = findViewById(R.id.input);
@@ -76,6 +137,13 @@ public class ChatActivity extends AppCompatActivity {
         stopBtn = findViewById(R.id.stop_btn);
         chip = findViewById(R.id.engine_chip);
         headerSub = findViewById(R.id.header_sub);
+        sessionList = findViewById(R.id.session_list);
+        attachRow = findViewById(R.id.attach_row);
+
+        pickFile = registerForActivityResult(new ActivityResultContracts.GetContent(),
+                uri -> { if (uri != null) ingest(uri); });
+
+        store = new ChatStore(new java.io.File(getFilesDir(), "chats"));
 
         cfg = Credentials.load(this);
         if (cfg == null || cfg.engines.isEmpty()) {
@@ -86,6 +154,12 @@ public class ChatActivity extends AppCompatActivity {
 
         chip.setOnClickListener(v -> openSettings());
         findViewById(R.id.settings_btn).setOnClickListener(v -> openSettings());
+        findViewById(R.id.menu_btn).setOnClickListener(v -> {
+            refreshDrawer();
+            drawer.openDrawer(Gravity.START);
+        });
+        findViewById(R.id.new_chat_btn).setOnClickListener(v -> newChat());
+        findViewById(R.id.attach_btn).setOnClickListener(v -> pickFile.launch("*/*"));
 
         sendBtn.setOnClickListener(v -> onSend());
         stopBtn.setOnClickListener(v -> {
@@ -106,6 +180,21 @@ public class ChatActivity extends AppCompatActivity {
         refreshChip();
     }
 
+    @Override
+    protected void onPause() {
+        super.onPause();
+        /* Persist whatever is on screen, including a turn that was cut short. */
+        if (current != null && current.messageCount() > 0) persist();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        bg.shutdownNow();
+        pollExec.shutdownNow();
+        storeExec.shutdownNow();
+    }
+
     private void openSettings() {
         startActivity(new Intent(this, SettingsActivity.class));
     }
@@ -113,13 +202,15 @@ public class ChatActivity extends AppCompatActivity {
     // ----------------------------------------------------------- status chip
 
     private void refreshChip() {
-        bg.execute(() -> {
+        pollExec.execute(() -> {
+            if (cfg == null) return;
             List<EngineRouter.SlotState> states = pollStates();
             EngineRouter.Decision d = EngineRouter.route(mode(), states);
             ui.post(() -> {
                 synchronized (lastStates) { lastStates.clear(); lastStates.addAll(states); }
                 if (d.ok()) {
-                    chip.setText("● " + d.slot.toUpperCase() + (EngineRouter.isAuto(mode()) ? " · auto" : ""));
+                    chip.setText("● " + d.slot.toUpperCase()
+                            + (EngineRouter.isAuto(mode()) ? " · auto" : ""));
                     chip.setTextColor(getColor(R.color.aether_ok));
                 } else {
                     String any = null;
@@ -159,6 +250,187 @@ public class ChatActivity extends AppCompatActivity {
             }
         }
         return out;
+    }
+
+    // --------------------------------------------------------------- history
+
+    private void refreshDrawer() {
+        storeExec.execute(() -> {
+            final List<ChatStore.Meta> metas = store.list();
+            ui.post(() -> buildDrawer(metas));
+        });
+    }
+
+    private void buildDrawer(List<ChatStore.Meta> metas) {
+        sessionList.removeAllViews();
+        if (metas.isEmpty()) {
+            sessionList.addView(Ui.centered(this, getString(R.string.no_chats_yet), 13, Ui.DIM));
+            return;
+        }
+        for (final ChatStore.Meta m : metas) {
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackgroundResource(R.drawable.bg_card);
+            card.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 6), Ui.dp(this, 10));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = Ui.dp(this, 6);
+            card.setLayoutParams(lp);
+
+            LinearLayout head = new LinearLayout(this);
+            head.setOrientation(LinearLayout.HORIZONTAL);
+            head.setGravity(Gravity.CENTER_VERTICAL);
+            TextView title = Ui.tv(this, m.title, 14,
+                    current != null && current.id.equals(m.id) ? Ui.ACCENT : Ui.PRIMARY);
+            title.setMaxLines(1);
+            title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            head.addView(title, new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            ImageView more = new ImageView(this);
+            more.setImageResource(R.drawable.ic_more);
+            more.setPadding(Ui.dp(this, 8), Ui.dp(this, 8), Ui.dp(this, 8), Ui.dp(this, 8));
+            more.setContentDescription(getString(R.string.rename_chat));
+            more.setOnClickListener(v -> sessionMenu(v, m.id, m.title));
+            head.addView(more, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            card.addView(head);
+
+            String meta = when(m.updatedAt) + " · " + m.messageCount + " msg"
+                    + (m.messageCount == 1 ? "" : "s")
+                    + (m.engine != null ? " · engine " + m.engine.toUpperCase(Locale.ROOT) : "");
+            card.addView(Ui.meta(this, meta));
+
+            card.setOnClickListener(v -> openChat(m.id));
+            card.setOnLongClickListener(v -> { sessionMenu(v, m.id, m.title); return true; });
+            sessionList.addView(card);
+        }
+    }
+
+    private void sessionMenu(View anchor, final String id, final String title) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add(0, 1, 0, getString(R.string.rename_chat));
+        menu.getMenu().add(0, 2, 1, getString(R.string.delete_chat));
+        menu.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == 1) { promptRename(id, title); return true; }
+            if (item.getItemId() == 2) { confirmDelete(id, title); return true; }
+            return false;
+        });
+        menu.show();
+    }
+
+    private void promptRename(final String id, String currentTitle) {
+        final EditText field = new EditText(this);
+        field.setText(currentTitle);
+        field.setHint(R.string.chat_title_hint);
+        field.setSingleLine(true);
+        field.setSelectAllOnFocus(true);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.rename_chat)
+                .setView(field)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.rename_chat, (d, w) -> {
+                    storeExec.execute(() -> {
+                        final boolean ok = store.rename(id, field.getText().toString());
+                        ui.post(() -> {
+                            if (ok) {
+                                if (current != null && current.id.equals(id)) {
+                                    current.title = store.load(id) != null
+                                            ? store.load(id).title : current.title;
+                                    current.titleLocked = true;
+                                }
+                                refreshDrawer();
+                            } else {
+                                toast("Could not rename that chat.");
+                            }
+                        });
+                    });
+                })
+                .show();
+    }
+
+    private void confirmDelete(final String id, String title) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.delete_confirm_title)
+                .setMessage(getString(R.string.delete_confirm_message) + "\n\n" + title)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.delete_chat, (d, w) -> {
+                    storeExec.execute(() -> {
+                        final boolean ok = store.delete(id);
+                        ui.post(() -> {
+                            if (ok && current != null && current.id.equals(id)) {
+                                current = null;
+                                msgList.removeAllViews();
+                                showEmptyState();
+                            }
+                            if (ok) toast("Chat deleted.");
+                            refreshDrawer();
+                        });
+                    });
+                })
+                .show();
+    }
+
+    private void openChat(final String id) {
+        drawer.closeDrawer(Gravity.START);
+        storeExec.execute(() -> {
+            final ChatSession s = store.load(id);
+            ui.post(() -> {
+                if (s == null) { toast("That chat could not be read."); return; }
+                current = s;
+                headerSub.setText(s.title);
+                renderSession(s);
+            });
+        });
+    }
+
+    private void newChat() {
+        drawer.closeDrawer(Gravity.START);
+        if (current != null && current.messageCount() > 0) persist();
+        current = null;
+        staged.clear();
+        renderStaged();
+        msgList.removeAllViews();
+        headerSub.setText("chat, tools, search, commands");
+        showEmptyState();
+        input.requestFocus();
+    }
+
+    /** Rebuild the message list from a stored transcript. */
+    private void renderSession(ChatSession s) {
+        msgList.removeAllViews();
+        if (s.messages.isEmpty()) { showEmptyState(); return; }
+        for (ChatMessage m : s.messages) {
+            if (m.isUser()) {
+                TextView body = addUserBubble(m.content);
+                if (m.attachments != null && !m.attachments.isEmpty()) addAttachmentChips(body, m.attachments);
+                attachMessageActions(body, m);
+            } else {
+                AssistantBubble b = addAssistantBubble();
+                for (String line : m.toolLines) pushThinking(b, line);
+                if (m.content != null && !m.content.isEmpty()) {
+                    b.raw.append(m.content);
+                    showNormalized(b, true);
+                } else if (b.waiting != null && b.waiting.getParent() != null) {
+                    /* A finished turn with no answer must not still say "thinking". */
+                    b.wrap.removeView(b.waiting);
+                    b.waiting = null;
+                }
+                if (ChatMessage.STATUS_ERROR.equals(m.status)) {
+                    b.meta.setText("error" + (m.note != null ? " — " + m.note : ""));
+                    b.meta.setTextColor(getColor(R.color.aether_error));
+                    b.meta.setVisibility(View.VISIBLE);
+                } else if (ChatMessage.STATUS_STOPPED.equals(m.status)) {
+                    b.meta.setText("stopped" + (m.note != null ? " — " + m.note : ""));
+                    b.meta.setVisibility(View.VISIBLE);
+                } else if (m.engine != null || !m.toolLines.isEmpty()) {
+                    b.meta.setText((m.engine != null ? "engine " + m.engine.toUpperCase(Locale.ROOT) : "Aether"));
+                    b.meta.setVisibility(View.VISIBLE);
+                }
+                if (b.content != null) attachMessageActions(b.content, m);
+            }
+        }
+        scrollBottom();
     }
 
     // ------------------------------------------------------------- messages
@@ -215,6 +487,72 @@ public class ChatActivity extends AppCompatActivity {
         return body;
     }
 
+    /** Attachment chips under a user bubble, so history shows what was sent. */
+    private void addAttachmentChips(TextView anchor, List<Attachment> attachments) {
+        ViewGroup parent = (ViewGroup) anchor.getParent();
+        if (parent == null) return;
+        int index = parent.indexOfChild(anchor);
+        for (Attachment a : attachments) {
+            TextView chipView = Ui.tv(this, attachmentLabel(a), 11,
+                    a.sentToEngine ? Ui.ACCENT : Ui.DIM);
+            chipView.setBackgroundResource(R.drawable.bg_tool);
+            chipView.setPadding(Ui.dp(this, 10), Ui.dp(this, 5), Ui.dp(this, 10), Ui.dp(this, 5));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.gravity = Gravity.END;
+            lp.topMargin = Ui.dp(this, 4);
+            parent.addView(chipView, index + 1, lp);
+            index++;
+        }
+    }
+
+    private String attachmentLabel(Attachment a) {
+        String size = a.size < 1024 ? a.size + " B"
+                : a.size < 1024 * 1024 ? (a.size / 1024) + " KB"
+                : String.format(Locale.US, "%.1f MB", a.size / (1024.0 * 1024.0));
+        String state = a.sentToEngine ? getString(R.string.attachment_inline)
+                : getString(R.string.attachment_not_sent);
+        return a.name + " · " + size + " · " + state;
+    }
+
+    /** Long-press a message for copy and retry. */
+    private void attachMessageActions(final View anchor, final ChatMessage m) {
+        anchor.setOnLongClickListener(v -> {
+            PopupMenu menu = new PopupMenu(this, anchor);
+            menu.getMenu().add(0, 1, 0, getString(R.string.copy));
+            menu.getMenu().add(0, 2, 1, getString(R.string.retry_message));
+            menu.setOnMenuItemClickListener(item -> {
+                if (item.getItemId() == 1) { copy(m.content); return true; }
+                if (item.getItemId() == 2) { retryOf(m); return true; }
+                return false;
+            });
+            menu.show();
+            return true;
+        });
+    }
+
+    private void copy(String text) {
+        ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (cm == null || text == null) return;
+        cm.setPrimaryClip(ClipData.newPlainText("Aether", text));
+        toast(getString(R.string.copied));
+    }
+
+    /** Re-send the prompt this message belongs to. */
+    private void retryOf(ChatMessage m) {
+        if (cancelFlag != null) { toast("Wait for the current reply to stop first."); return; }
+        String prompt;
+        if (current == null) {
+            prompt = m.isUser() ? m.content : null;
+        } else if (m.isUser()) {
+            prompt = m.content;
+        } else {
+            prompt = current.userPromptBefore(current.messages.indexOf(m));
+        }
+        if (prompt == null || prompt.isEmpty()) { toast("Nothing to retry."); return; }
+        send(prompt, null);
+    }
+
     /** Holds the live assistant bubble and its zones. */
     private static final class AssistantBubble {
         LinearLayout wrap;
@@ -223,6 +561,11 @@ public class ChatActivity extends AppCompatActivity {
         TextView waiting;
         TextView meta;
         boolean hasContent = false;
+        /** Raw text exactly as the engine sent it. */
+        final StringBuilder raw = new StringBuilder();
+        long lastRender = 0L;
+        /** Model message this bubble is filling, so it can be persisted. */
+        ChatMessage model;
     }
 
     private AssistantBubble addAssistantBubble() {
@@ -255,7 +598,7 @@ public class ChatActivity extends AppCompatActivity {
         tz.topMargin = Ui.dp(this, 6);
         b.wrap.addView(b.toolZone, tz);
 
-        /* Waiting dot -- shown until the first real token, then removed. */
+        /* Waiting line -- shown until the first real token, then removed. */
         b.waiting = Ui.tv(this, "Aether is thinking…", 12, Ui.DIM);
         LinearLayout.LayoutParams wl = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -274,9 +617,20 @@ public class ChatActivity extends AppCompatActivity {
         return b;
     }
 
-    private void pushThinking(AssistantBubble b, String text) {
-        boolean tool = text.contains("🛠") || text.contains("↳") || text.contains("web_search")
-                || text.contains("run_command") || text.contains("fetch_page") || text.contains("crawl");
+    /** A stored or streamed thinking line: is it a tool call rather than prose? */
+    private static boolean isToolLine(String text) {
+        if (text == null) return false;
+        return text.startsWith("»")
+                || text.contains("🛠") || text.contains("↳")
+                || text.contains("web_search") || text.contains("run_command")
+                || text.contains("fetch_page") || text.contains("crawl");
+    }
+
+    private void pushThinking(AssistantBubble b, String raw) {
+        boolean tool = isToolLine(raw);
+        String text = TextNormalizer.normalize(raw);
+        if (text.startsWith("»")) text = text.substring(1).trim();
+        if (text.isEmpty()) return;
         TextView row;
         if (tool) {
             row = Ui.tv(this, text, 12, Ui.ACCENT);
@@ -297,7 +651,13 @@ public class ChatActivity extends AppCompatActivity {
         scrollBottom();
     }
 
-    private void pushContent(AssistantBubble b, String text) {
+    /** Show the normalised answer. Throttled so long replies stay smooth. */
+    private void showNormalized(AssistantBubble b, boolean force) {
+        long now = System.currentTimeMillis();
+        if (!force && now - b.lastRender < RENDER_THROTTLE_MS) return;
+        b.lastRender = now;
+        String clean = TextNormalizer.normalize(b.raw.toString());
+        if (clean.isEmpty()) return;
         if (b.waiting != null && b.waiting.getParent() != null) {
             b.wrap.removeView(b.waiting);
             b.waiting = null;
@@ -306,7 +666,7 @@ public class ChatActivity extends AppCompatActivity {
             b.content.setVisibility(View.VISIBLE);
             b.hasContent = true;
         }
-        b.content.append(text);
+        b.content.setText(clean);
         scrollBottom();
     }
 
@@ -320,7 +680,7 @@ public class ChatActivity extends AppCompatActivity {
         msgList.addView(row, lp);
 
         TextView retry = new TextView(this);
-        retry.setText("Try again");
+        retry.setText(getString(R.string.retry));
         retry.setTextColor(getColor(R.color.aether_accent));
         retry.setTextSize(13);
         LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(
@@ -330,7 +690,7 @@ public class ChatActivity extends AppCompatActivity {
         retry.setOnClickListener(v -> {
             msgList.removeView(retry);
             msgList.removeView(row);
-            send(prompt);
+            send(prompt, null);
         });
         msgList.addView(retry, rl);
         scrollBottom();
@@ -341,14 +701,155 @@ public class ChatActivity extends AppCompatActivity {
         msgList.addView(Ui.centered(this, text, 14, Ui.ERROR));
     }
 
+    private void toast(String s) {
+        Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+    }
+
+    private static String when(long ts) {
+        long age = System.currentTimeMillis() - ts;
+        if (age < 60_000) return "just now";
+        if (age < 3_600_000) return (age / 60_000) + "m ago";
+        if (age < 86_400_000) return (age / 3_600_000) + "h ago";
+        if (age < 7 * 86_400_000L) return (age / 86_400_000L) + "d ago";
+        return new SimpleDateFormat("d MMM", Locale.US).format(new Date(ts));
+    }
+
+    // ------------------------------------------------------------ attaching
+
+    /** Read a picked file off the content resolver, on the background thread. */
+    private void ingest(final Uri uri) {
+        storeExec.execute(() -> {
+            String name = "file";
+            String mime = "application/octet-stream";
+            long declared = -1;
+            Cursor c = null;
+            try {
+                String t = getContentResolver().getType(uri);
+                if (t != null) mime = t;
+                c = getContentResolver().query(uri, null, null, null, null);
+                if (c != null && c.moveToFirst()) {
+                    int n = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (n >= 0 && !c.isNull(n)) name = c.getString(n);
+                    int s = c.getColumnIndex(OpenableColumns.SIZE);
+                    if (s >= 0 && !c.isNull(s)) declared = c.getLong(s);
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (c != null) c.close();
+            }
+
+            byte[] bytes = null;
+            try (InputStream in = getContentResolver().openInputStream(uri)) {
+                if (in != null) {
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    byte[] buf = new byte[16 * 1024];
+                    int r;
+                    while ((r = in.read(buf)) > 0) {
+                        out.write(buf, 0, r);
+                        if (out.size() > READ_MAX_BYTES) break;
+                    }
+                    bytes = out.toByteArray();
+                }
+            } catch (Exception e) {
+                final String err = e.getMessage();
+                ui.post(() -> toast("Could not read that file: " + err));
+                return;
+            }
+            if (bytes == null || bytes.length == 0) {
+                ui.post(() -> toast("That file is empty."));
+                return;
+            }
+
+            final String fname = name;
+            final String fmime = mime;
+            final byte[] fbytes = bytes;
+            final long size = declared > 0 ? declared : bytes.length;
+            ui.post(() -> stageAttachment(fname, fmime, size, fbytes));
+        });
+    }
+
+    private void stageAttachment(String name, String mime, long size, byte[] bytes) {
+        /* A transcript to attach to must exist before anything is stored. */
+        if (current == null) current = store.create(null);
+
+        String text = null;
+        boolean inline = false;
+        if (size > INLINE_MAX_BYTES) {
+            text = null;
+        } else if (isTextual(mime, name)) {
+            text = TextNormalizer.userInput(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+            inline = true;
+        }
+
+        java.io.File stored = store.storeAttachment(current.id, bytes, name);
+        Attachment a = new Attachment(
+                stored != null ? stored.getName() : ChatStore.newId(),
+                name, size, mime, text, inline);
+        staged.add(a);
+        renderStaged();
+    }
+
+    private static boolean isTextual(String mime, String name) {
+        if (mime != null && (mime.startsWith("text/") || mime.contains("json")
+                || mime.contains("xml") || mime.contains("javascript")
+                || mime.contains("yaml") || mime.contains("csv"))) return true;
+        String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        String[] exts = {".txt", ".md", ".json", ".csv", ".log", ".py", ".js", ".ts", ".tsx",
+                ".java", ".kt", ".xml", ".yaml", ".yml", ".sh", ".sql", ".html", ".css", ".ini",
+                ".toml", ".conf", ".c", ".h", ".cpp", ".rs", ".go", ".rb", ".php"};
+        for (String e : exts) if (lower.endsWith(e)) return true;
+        return false;
+    }
+
+    private void renderStaged() {
+        attachRow.removeAllViews();
+        attachRow.setVisibility(staged.isEmpty() ? View.GONE : View.VISIBLE);
+        for (int i = 0; i < staged.size(); i++) {
+            final int index = i;
+            final Attachment a = staged.get(i);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setBackgroundResource(R.drawable.bg_card);
+            row.setPadding(Ui.dp(this, 10), Ui.dp(this, 7), Ui.dp(this, 4), Ui.dp(this, 7));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = Ui.dp(this, 4);
+
+            TextView label = Ui.tv(this, attachmentLabel(a), 11,
+                    a.sentToEngine ? Ui.PRIMARY : Ui.DIM);
+            label.setMaxLines(2);
+            row.addView(label, new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView x = new TextView(this);
+            x.setText("×");
+            x.setTextSize(16);
+            x.setTextColor(getColor(R.color.aether_muted));
+            x.setPadding(Ui.dp(this, 10), Ui.dp(this, 2), Ui.dp(this, 10), Ui.dp(this, 2));
+            x.setContentDescription(getString(R.string.attachment_removed));
+            x.setOnClickListener(v -> {
+                if (index < staged.size()) {
+                    staged.remove(index);
+                    renderStaged();
+                }
+            });
+            row.addView(x);
+            attachRow.addView(row, lp);
+        }
+    }
+
     // ----------------------------------------------------------------- send
 
     private void onSend() {
-        String text = input.getText().toString().trim();
-        if (text.isEmpty() || cancelFlag != null) return;
+        String text = TextNormalizer.userInput(input.getText().toString());
+        if ((text.isEmpty() && staged.isEmpty()) || cancelFlag != null) return;
         input.setText("");
         hideKeyboard();
-        send(text);
+        List<Attachment> going = new ArrayList<>(staged);
+        staged.clear();
+        renderStaged();
+        send(text, going);
     }
 
     private void hideKeyboard() {
@@ -356,10 +857,42 @@ public class ChatActivity extends AppCompatActivity {
         if (imm != null) imm.hideSoftInputFromWindow(input.getWindowToken(), 0);
     }
 
-    private void send(String prompt) {
-        addUserBubble(prompt);
+    /**
+     * Send a turn. `attachments` is null for a retry, which re-sends a prompt
+     * that already carries whatever it carried the first time.
+     */
+    private void send(final String prompt, final List<Attachment> attachments) {
+        if (current == null) current = store.create(prompt);
+        if (!current.titleLocked && ("New chat".equals(current.title) || current.title == null
+                || current.title.isEmpty())) {
+            current.rename(TextNormalizer.title(prompt, 42));
+            current.titleLocked = false;      // still open to a later rename
+            headerSub.setText(current.title);
+        }
+
+        /* Record what the user sent, attachments and all. */
+        ChatMessage userMsg = new ChatMessage(ChatMessage.ROLE_USER);
+        userMsg.content = prompt;
+        if (attachments != null) userMsg.attachments.addAll(attachments);
+        current.messages.add(userMsg);
+
+        TextView userBody = addUserBubble(prompt);
+        if (attachments != null && !attachments.isEmpty()) {
+            addAttachmentChips(userBody, attachments);
+        }
+        attachMessageActions(userBody, userMsg);
+
         final AssistantBubble b = addAssistantBubble();
+        ChatMessage model = new ChatMessage(ChatMessage.ROLE_ASSISTANT);
+        b.model = model;
+        current.messages.add(model);
+        attachMessageActions(b.content, model);
+
         setStreaming(true);
+        persist();
+
+        /* The prompt the engine sees: text plus any readable attachment. */
+        final String wire = composeWire(prompt, attachments);
 
         bg.execute(() -> {
             /* Resolve an engine on a real poll, not a guess. */
@@ -371,7 +904,8 @@ public class ChatActivity extends AppCompatActivity {
                 String slot = EngineRouter.isAuto(mode()) ? "a" : EngineRouter.canonical(mode());
                 EngineCore.Engine e = cfg.bySlot(slot);
                 if (e == null) {
-                    ui.post(() -> { setStreaming(false); onError("No engines are configured.", prompt); });
+                    ui.post(() -> { setStreaming(false); markError(model, "no engines configured");
+                        onError("No engines are configured.", prompt); persist(); });
                     return;
                 }
                 ui.post(() -> pushThinking(b, "Engine " + e.slot.toUpperCase()
@@ -382,8 +916,9 @@ public class ChatActivity extends AppCompatActivity {
                             EngineCore.KERNEL_TITLE, true, 120_000);
                 } catch (Exception ex) {
                     ui.post(() -> { setStreaming(false);
+                        markError(model, ex.getMessage());
                         onError("Could not wake engine " + e.slot.toUpperCase() + ": "
-                                + ex.getMessage(), prompt); });
+                                + ex.getMessage(), prompt); persist(); });
                     return;
                 }
                 /* Wait for it to become live, then stream. */
@@ -398,49 +933,99 @@ public class ChatActivity extends AppCompatActivity {
                 }
                 if (url == null) {
                     ui.post(() -> { setStreaming(false);
+                        markError(model, "engine did not come live in time");
                         onError("Engine " + e.slot.toUpperCase()
-                                + " did not come live in time. Try again shortly.", prompt); });
+                                + " did not come live in time. Try again shortly.", prompt); persist(); });
                     return;
                 }
-                stream(url, prompt, b);
+                model.engine = e.slot;
+                stream(url, wire, prompt, b);
                 return;
             }
 
-            stream(d.url, prompt, b);
+            model.engine = d.slot;
+            stream(d.url, wire, prompt, b);
         });
     }
 
-    private void stream(String url, String prompt, AssistantBubble b) {
+    /** The engine has no upload endpoint, so readable attachments ride in the prompt. */
+    private String composeWire(String prompt, List<Attachment> attachments) {
+        if (attachments == null || attachments.isEmpty()) return prompt;
+        StringBuilder sb = new StringBuilder(prompt);
+        for (Attachment a : attachments) {
+            if (!a.hasText()) continue;
+            sb.append("\n\n--- attached file: ").append(a.name)
+              .append(" (").append(a.mime).append(", ").append(a.size).append(" bytes) ---\n")
+              .append(a.text);
+        }
+        return sb.toString();
+    }
+
+    private void markError(ChatMessage m, String note) {
+        m.status = ChatMessage.STATUS_ERROR;
+        m.note = note == null ? "error" : note;
+    }
+
+    private void stream(String url, final String wire, final String prompt, final AssistantBubble b) {
         cancelFlag = new boolean[] {false};
         final long t0 = System.currentTimeMillis();
-        final StringBuilder out = new StringBuilder();
-        EngineCore.chatStream(url, cfg.offKey, prompt, "", cancelFlag,
+        EngineCore.chatStream(url, cfg.offKey, wire, "", cancelFlag,
                 new EngineCore.ChatListener() {
                     @Override public void onThinking(String t) {
-                        ui.post(() -> pushThinking(b, t));
+                        ui.post(() -> {
+                            pushThinking(b, t);
+                            if (b.model != null) {
+                                b.model.toolLines.add(isToolLine(t)
+                                        ? "» " + TextNormalizer.normalize(t)
+                                        : TextNormalizer.normalize(t));
+                            }
+                        });
                     }
                     @Override public void onContent(String t) {
-                        out.append(t);
-                        ui.post(() -> pushContent(b, t));
+                        b.raw.append(t);
+                        ui.post(() -> showNormalized(b, false));
                     }
                     @Override public void onDone(boolean ok, String err) {
                         ui.post(() -> {
                             setStreaming(false);
                             cancelFlag = null;
                             long ms = System.currentTimeMillis() - t0;
+                            showNormalized(b, true);
+                            if (b.model != null) {
+                                b.model.content = TextNormalizer.normalize(b.raw.toString());
+                            }
                             if (!ok && err != null && err.equals("cancelled")) {
+                                if (b.model != null) {
+                                    b.model.status = ChatMessage.STATUS_STOPPED;
+                                    b.model.note = "stopped after " + (ms / 1000) + "s";
+                                }
                                 b.meta.setText("stopped after " + (ms / 1000) + "s");
                                 b.meta.setVisibility(View.VISIBLE);
                             } else if (!ok) {
+                                if (b.model != null) markError(b.model, err);
                                 onError("Engine error: " + err, prompt);
                             } else {
-                                b.meta.setText("Aether · " + (ms / 1000) + "s");
+                                if (b.model != null) b.model.status = ChatMessage.STATUS_OK;
+                                String who = b.model != null && b.model.engine != null
+                                        ? "engine " + b.model.engine.toUpperCase(Locale.ROOT) : "Aether";
+                                b.meta.setText(who + " · " + (ms / 1000) + "s");
                                 b.meta.setVisibility(View.VISIBLE);
                             }
+                            persist();
                             refreshChip();
                         });
                     }
                 }, 600_000);
+    }
+
+    /** Write the transcript, and keep the drawer in step with it. */
+    private void persist() {
+        if (current == null) return;
+        final ChatSession s = current;
+        storeExec.execute(() -> {
+            store.save(s);
+            ui.post(ChatActivity.this::refreshDrawer);
+        });
     }
 
     private void setStreaming(boolean streaming) {

@@ -12,4 +12,33 @@
     <string name="back">Back</string>
     <string name="retry">Try again</string>
     <string name="stop">Stop</string>
+
+    <string name="history">Chats</string>
+    <string name="new_chat">New chat</string>
+    <string name="hold_to_rename">Hold a chat to rename or delete it</string>
+    <string name="history_local">History is stored on this device only.</string>
+    <string name="attach">Attach a file</string>
+
+    <string name="copy">Copy</string>
+    <string name="retry_message">Retry</string>
+    <string name="rename_chat">Rename</string>
+    <string name="delete_chat">Delete</string>
+    <string name="cancel">Cancel</string>
+    <string name="copied">Copied</string>
+    <string name="chat_title_hint">Chat name</string>
+    <string name="delete_confirm_title">Delete this chat?</string>
+    <string name="delete_confirm_message">The transcript and its attachments are removed from this device. This cannot be undone.</string>
+    <string name="no_chats_yet">No saved chats yet.\nStart one and it will appear here.</string>
+
+    <string name="attachment_inline">text sent to the engine</string>
+    <string name="attachment_not_sent">binary — kept on the device, not sent to the engine</string>
+    <string name="attachment_too_big">file too large to read</string>
+    <string name="attachment_removed">Attachment removed</string>
+
+    <string name="nothing_to_shut_down">Nothing to shut down — no engine has a live URL right now.</string>
+    <string name="shut_down_all_title">Shut down every live engine?</string>
+    <string name="shut_down_all_message">Each engine is asked to terminate and is only reported OFF once /api/ps stops answering.</string>
+    <string name="no_live_url">no live URL for this engine — it has no tunnel to answer on</string>
+    <string name="checking">checking…</string>
+    <string name="splash_sub">three engines · one thread</string>
 </resources>

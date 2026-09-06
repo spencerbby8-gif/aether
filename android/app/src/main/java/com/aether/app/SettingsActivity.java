@@ -9,10 +9,12 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -34,8 +36,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * POLLING. One loop guarded by a generation counter; one beacon fetch per cycle
  * shared by all three slots; Kaggle consulted only for engines with no live URL.
  *
- * SHUT-DOWN-ALL confirms each engine individually via confirmedDown() and names
- * any that did not go down, rather than reporting a sweep it did not verify.
+ * SHUT-DOWN asks before it acts, reports the outcome in the note under the
+ * cards, and confirms each engine individually via confirmedDown() before it is
+ * called OFF -- rather than reporting a sweep it did not verify. The button is
+ * enabled in every state: when there is no tunnel URL to reach, the result line
+ * says so instead of the control appearing dead.
  */
 public class SettingsActivity extends AppCompatActivity {
 
@@ -77,6 +82,11 @@ public class SettingsActivity extends AppCompatActivity {
         buildRoutingRows();
         buildEngineRows();
         offAll.setOnClickListener(v -> shutDownAll());
+
+        /* Paint the cards at once. Waiting for the first poll -- a beacon fetch
+           plus a health check per engine -- left every button in its initial
+           state for up to a minute, which reads as a screen that does nothing. */
+        render();
 
         note.setText("LIVE means /api/ps returned 200 with a loaded model. \"Booting\" "
                 + "means Kaggle started the kernel but the weights are not warm yet, which "
@@ -203,8 +213,7 @@ public class SettingsActivity extends AppCompatActivity {
             off.setTextSize(12);
             off.setBackground(getDrawable(R.drawable.bg_pill_ghost));
             off.setTextColor(getColor(R.color.aether_error));
-            off.setEnabled(false);
-            off.setOnClickListener(v -> shutDown(e.slot, off));
+            off.setOnClickListener(v -> confirmShutDown(e.slot));
             LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(0,
                     ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
             olp.leftMargin = Ui.dp(this, 8);
@@ -256,6 +265,7 @@ public class SettingsActivity extends AppCompatActivity {
             }
             liveUrls.remove(e.slot);
             states.put(e.slot, kernelState(e));
+            ui.post(this::render);      // show each engine as soon as it is known
         }
     }
 
@@ -287,9 +297,11 @@ public class SettingsActivity extends AppCompatActivity {
                     : (busy ? R.color.aether_warn : R.color.aether_muted)));
 
             Button wake = card.findViewById(R.id.wake);
-            Button off = card.findViewById(R.id.off);
             wake.setEnabled(!busy);
-            off.setEnabled(live || busy);
+            /* Shut down stays clickable in every state. A disabled button is
+               indistinguishable from a broken one, and the honest answer to
+               "shut down an engine that is not reachable" is a sentence, not
+               silence -- so the action always reports what it found. */
         }
     }
 
@@ -314,36 +326,76 @@ public class SettingsActivity extends AppCompatActivity {
         });
     }
 
-    private void shutDown(String slot, Button off) {
-        off.setEnabled(false);
+    /** One engine: confirm first, because this releases a GPU quota. */
+    private void confirmShutDown(final String slot) {
+        new AlertDialog.Builder(this)
+                .setTitle("Shut down engine " + slot.toUpperCase(Locale.ROOT) + "?")
+                .setMessage("This releases the GPU that engine is holding. "
+                        + "OFF is only reported once /api/ps stops answering.")
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.shut_down, (d, w) -> shutDown(slot))
+                .show();
+    }
+
+    private void shutDown(String slot) {
         states.put(slot, "shutting down…");
         render();
+        announce("Shutting down engine " + slot.toUpperCase(Locale.ROOT) + "…");
         bg.execute(() -> {
-            states.put(slot, shutOne(slot));
-            ui.post(this::render);
+            String result = shutOne(slot);
+            states.put(slot, result);
+            ui.post(() -> {
+                render();
+                announce("Engine " + slot.toUpperCase(Locale.ROOT) + ": " + result);
+            });
         });
     }
 
     private void shutDownAll() {
-        offAll.setEnabled(false);
-        bg.execute(() -> {
-            List<String> targets = new ArrayList<>(liveUrls.keySet());
-            if (targets.isEmpty()) {
-                ui.post(() -> { offAll.setEnabled(true); });
-                return;
-            }
-            for (String slot : targets) {
-                states.put(slot, "shutting down…");
-                states.put(slot, shutOne(slot));
-                ui.post(this::render);
-            }
-            ui.post(() -> offAll.setEnabled(true));
-        });
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.shut_down_all_title)
+                .setMessage(R.string.shut_down_all_message)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.shut_down_all, (d, w) -> {
+                    offAll.setEnabled(false);
+                    announce("Shutting down every live engine…");
+                    bg.execute(() -> {
+                        List<String> targets = new ArrayList<>(liveUrls.keySet());
+                        if (targets.isEmpty()) {
+                            ui.post(() -> {
+                                offAll.setEnabled(true);
+                                announce(getString(R.string.nothing_to_shut_down));
+                            });
+                            return;
+                        }
+                        StringBuilder report = new StringBuilder();
+                        for (String slot : targets) {
+                            states.put(slot, "shutting down…");
+                            ui.post(this::render);
+                            String result = shutOne(slot);
+                            states.put(slot, result);
+                            if (report.length() > 0) report.append("\n");
+                            report.append(slot.toUpperCase(Locale.ROOT)).append(": ").append(result);
+                            ui.post(this::render);
+                        }
+                        final String done = report.toString();
+                        ui.post(() -> {
+                            offAll.setEnabled(true);
+                            announce(done);
+                        });
+                    });
+                })
+                .show();
+    }
+
+    /** Last action's outcome, always visible -- no action fails silently. */
+    private void announce(String message) {
+        ui.post(() -> note.setText(message));
     }
 
     private String shutOne(String slot) {
         String url = liveUrls.get(slot);
-        if (url == null) return "no live URL to shut down";
+        if (url == null) return getString(R.string.no_live_url);
         try {
             int code = EngineCore.off(url, cfg.offKey, 30_000);
             if (code != 200) return "shutdown HTTP " + code;
