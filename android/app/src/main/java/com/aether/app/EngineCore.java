@@ -418,10 +418,55 @@ public final class EngineCore {
      */
     public static boolean confirmedDown(String url, int attempts, int gapMs, int timeoutMs) {
         for (int i = 0; i < attempts; i++) {
-            if (!health(url, timeoutMs).isLive()) return true;
+            if (health(url, timeoutMs).status != 200) return true;
             try { Thread.sleep(gapMs); } catch (InterruptedException e) { return false; }
         }
-        return !health(url, timeoutMs).isLive();
+        return health(url, timeoutMs).status != 200;
+    }
+
+    /** What a shutdown attempt actually observed. Every field is measured. */
+    public static final class Shutdown {
+        public final int code;           // HTTP status returned by POST /off
+        public final boolean confirmed;  // /api/ps stopped answering with 200
+        public final int checks;         // how many /api/ps checks that took
+        public final int finalStatus;    // last status seen (-1 = unreachable)
+        public final String message;
+        Shutdown(int code, boolean confirmed, int checks, int finalStatus, String message) {
+            this.code = code; this.confirmed = confirmed; this.checks = checks;
+            this.finalStatus = finalStatus; this.message = message;
+        }
+    }
+
+    /**
+     * Shut one engine down and verify it, in a single call.
+     *
+     * "Down" means /api/ps no longer answers 200 -- the kernel process and its
+     * tunnel are gone. It deliberately does NOT mean "no models loaded": an
+     * engine that is still booting answers 200 with an empty models list, and
+     * treating that as down reported a running, GPU-holding engine as
+     * terminated. That was a live bug in confirmedDown() and in the Settings
+     * shutdown path, which both tested !isLive().
+     */
+    public static Shutdown shutDownVerified(String url, String offKey, int timeoutMs,
+                                            int maxChecks, int gapMs) throws EngineException {
+        int code = off(url, offKey, timeoutMs);
+        if (code != 200) {
+            return new Shutdown(code, false, 0, -1,
+                    "shutdown not accepted: POST /off returned HTTP " + code);
+        }
+        int status = -1;
+        for (int i = 1; i <= maxChecks; i++) {
+            status = health(url, timeoutMs).status;
+            if (status != 200) {
+                return new Shutdown(code, true, i, status,
+                        "off -- confirmed terminated (/api/ps now " + status + " after "
+                                + i + " check" + (i > 1 ? "s" : "") + ")");
+            }
+            try { Thread.sleep(gapMs); } catch (InterruptedException ie) { break; }
+        }
+        return new Shutdown(code, false, maxChecks, status,
+                "shutdown sent but /api/ps STILL answers 200 after " + maxChecks
+                        + " checks -- the engine is not off");
     }
 
     // ------------------------------------------------------- chat streaming
@@ -469,11 +514,17 @@ public final class EngineCore {
      *   readSliceMs  how often the reader surfaces. Bounds how long "stop" can
      *                take to be noticed, and how often a stall is detected.
      *   stallMs      no bytes at all for this long means the tunnel or the
-     *                kernel is gone. Set above the longest silent tool run so a
-     *                legitimate tool call is never cut off.
-     *   totalMs      wall-clock ceiling. The agent loop can legitimately run ten
-     *                model iterations, so this is generous -- it exists so a turn
-     *                can never hang for ever.
+     *                kernel is gone. MUST sit above the longest silent tool run
+     *                or a legitimate tool call is cut off mid-turn. Read from
+     *                the kernel source, not guessed: the heartbeat loop only
+     *                wraps the model call (`while tw.is_alive(): emit('⏳');
+     *                tw.join(10)`), while tool execution emits nothing until it
+     *                returns, and the kernel's own subprocess timeouts run to
+     *                1200s. The shipped 330s was below that, so a long crawl or
+     *                command killed the turn -- the "stuck on generating" case.
+     *   totalMs      wall-clock ceiling. Ten model iterations, each able to run
+     *                a tool, so this is generous; it exists so a turn can never
+     *                hang for ever, not to limit how long the agent may think.
      */
     public static final class StreamPolicy {
         public final int connectMs;
@@ -496,7 +547,11 @@ public final class EngineCore {
          * at the cost of one caught timeout per idle second.
          */
         public static StreamPolicy standard() {
-            return new StreamPolicy(15_000, 1_000, 330_000, 1_800_000);
+            /* 1260s stall = the kernel's longest tool timeout (1200s) plus a
+               margin, so no legitimate tool run is ever cut off. 2h total = ten
+               agent iterations each allowed a long tool. Stop still lands in
+               about a second, because it is checked on every read slice. */
+            return new StreamPolicy(15_000, 1_000, 1_260_000, 7_200_000);
         }
     }
 

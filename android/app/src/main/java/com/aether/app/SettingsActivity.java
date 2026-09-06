@@ -483,7 +483,15 @@ public class SettingsActivity extends AppCompatActivity {
                     offAll.setEnabled(false);
                     announce("Shutting down every live engine…");
                     bg.execute(() -> {
-                        List<String> targets = new ArrayList<>(liveUrls.keySet());
+                        /* Every engine with an announced tunnel, whether or not
+                           this app had already seen it fully LIVE -- same reason
+                           as in shutOne(). */
+                        List<String> targets = new ArrayList<>();
+                        for (EngineCore.Engine e : cfg.engines) {
+                            if (liveUrls.containsKey(e.slot)) { targets.add(e.slot); continue; }
+                            String url = liveUrlFor(e.slot);
+                            if (url != null) { liveUrls.put(e.slot, url); targets.add(e.slot); }
+                        }
                         if (targets.isEmpty()) {
                             ui.post(() -> {
                                 offAll.setEnabled(true);
@@ -517,27 +525,31 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private String shutOne(String slot) {
+        /* Resolve the tunnel AT CLICK TIME. Relying on liveUrls was the bug:
+           that map only ever held engines this app had already seen fully LIVE
+           (/api/ps 200 WITH a loaded model), and pollOnce() actively removes
+           the entry whenever an engine is booting, unreachable, or not yet
+           polled. So after tapping Wake -- and for the whole multi-minute boot,
+           and after any app restart -- the map was empty and this button did
+           literally nothing, which is exactly "it can't turn off the engine". */
         String url = liveUrls.get(slot);
-        if (url == null) return getString(R.string.no_live_url);
+        if (url == null) url = liveUrlFor(slot);
+        if (url == null) {
+            return "nothing to shut down -- no tunnel announced for engine "
+                    + slot.toUpperCase(Locale.ROOT) + " (Kaggle says: "
+                    + kernelState(cfg.bySlot(slot)) + ")";
+        }
+        liveUrls.put(slot, url);
         transitions.incrementAndGet();
         try {
-            int code = EngineCore.off(url, cfg.offKey, 30_000);
-            if (code != 200) return "shutdown HTTP " + code;
-            /* A 200 only means the request was accepted. Poll /api/ps until it
-               stops answering, and say which check finally confirmed it --
-               measured live, this takes 20-30 seconds. */
-            for (int i = 1; i <= 8; i++) {
-                EngineCore.Health h = EngineCore.health(url, 20_000);
-                if (!h.isLive()) {
-                    liveUrls.remove(slot);
-                    return "off — confirmed terminated (/api/ps now " + h.status
-                            + " after " + i + " check" + (i > 1 ? "s" : "") + ")";
-                }
-                states.put(slot, "shutting down… /api/ps still 200 (check " + i + "/8)");
-                ui.post(this::render);
-                try { Thread.sleep(4_000); } catch (InterruptedException ie) { break; }
-            }
-            return "shutdown sent but the engine is STILL LIVE after 8 checks";
+            states.put(slot, "shutting down -- waiting for /api/ps to stop answering…");
+            ui.post(this::render);
+            /* 8 checks x 4s: measured live, /api/ps goes 200 -> 502 -> 530 in
+               about 20-30 seconds after /off is accepted. */
+            EngineCore.Shutdown s = EngineCore.shutDownVerified(
+                    url, cfg.offKey, 30_000, 8, 4_000);
+            if (s.confirmed) liveUrls.remove(slot);
+            return s.message;
         } catch (Exception ex) {
             return "shutdown failed: " + ex.getMessage();
         } finally {
