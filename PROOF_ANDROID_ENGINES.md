@@ -1,200 +1,175 @@
-# PROOF — Android APK driving the real Kaggle engines
+# PROOF — Android APK driving the three real Kaggle engines
 
-Date: 2026-09-06. Engine A, account `fridaymoses`, kernel
-`qwen-3-8-27b-uncensored-chat`, model
+Date: 2026-09-06. Kernel `qwen-3-8-27b-uncensored-chat`, model
 `hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS`.
 
-Every result below came from a real network call to Kaggle, ntfy or a live
-engine. Nothing here is inferred from source, a mock, or a unit test.
+Every result below came from a real network call to Kaggle, ntfy, or a live
+engine. Nothing is inferred from source, a mock, or a unit test.
 
 ---
 
-## What could not be done, stated first
+## The caveat, stated first
 
 **The installed APK was never run.** This sandbox has no `/dev/kvm` and
-`grep -cE "vmx|svm" /proc/cpuinfo` returns `0`, so there is no hardware
-virtualisation and an Android emulator cannot boot here. 1984 MB RAM and 2 cores
-would not run one either.
+`grep -cE "vmx|svm" /proc/cpuinfo` returns `0`, so no Android emulator can boot
+here.
 
-What was done instead: `EngineCore.java` and `EngineRouter.java` contain **no
-`android.*` imports**, so `scripts/proofs/engine-core-probe.sh` compiles those
-exact files with a stock `javac` and runs them against the real endpoints. The
-networking, parsing, routing and shutdown logic that the APK executes is
-therefore genuinely tested — but the Activities, the WebView and the credential
-asset loading are not. Treat everything UI-level as unverified.
-
-**Engines B and C were never woken.** Their keys (`KAGGLE_KEY_B`,
-`KAGGLE_KEY_C`) only ever existed as environment variables, were never committed,
-and the sandbox wiped them. Only engine A's key was recoverable, from git blob
-`97b45757`. A/B/C routing is proven at the routing-logic level, not across three
-live engines.
+What was tested instead: `EngineCore.java` and `EngineRouter.java` contain **no
+`android.*` imports**, so `scripts/proofs/` compiles those exact files with a
+stock `javac` and runs them against the real endpoints. All networking, parsing,
+routing, health-checking and shutdown logic the APK executes is genuinely tested.
+**The Activities, the WebView and asset loading are not.** Treat everything
+UI-level as unverified.
 
 ---
 
-## Three bugs found by running the engine, not by reading it
+## Credentials — all three verified live before baking
 
-All three would have shipped silently.
+| Engine | Account | Kaggle status | Ownership |
+|---|---|---|---|
+| A | `fridaymoses` | HTTP 200 | lists `fridaymoses/qwen-3-8-27b-uncensored-chat` |
+| B | `spencercoldtr` | HTTP 200 | lists `spencercoldtr/qwen-3-8-27b-uncensored-chat` |
+| C | `dyceelvk` | HTTP 200 | lists `dyceelvk/qwen-3-8-27b-uncensored-chat` |
+
+Listing each account's own kernels proves **ownership**, not just that the key is
+unexpired — a valid key aimed at someone else's kernel gets 403 on push.
+
+Baked-asset round trip, checked without printing a key: three engines present,
+all keys 37 characters, and `strings` on `aether-credentials.dat` finds **0**
+plaintext `KGAT_` occurrences. Same check on both built APKs: 0 hits.
+
+---
+
+## The headline test: two engines live at the same time
+
+This is the test single-engine testing cannot do. With one engine you cannot tell
+correct slot attribution from luck, and you cannot exercise failover at all.
+
+`scripts/proofs/MultiEngineProof.java`, **21 passed, 0 failed**:
+
+```
+== 1. Discovery
+  A -> https://enhanced-concerts-favourites-poison.trycloudflare.com
+  B -> https://berkeley-photo-apply-looksmart.trycloudflare.com
+  PASS  A and B got DIFFERENT urls
+
+== 2. Health
+  A /api/ps 200 [Qwen3.8-27B-Uncensored-GGUF:IQ4_XS]
+  B /api/ps 200 [Qwen3.8-27B-Uncensored-GGUF:IQ4_XS]
+
+== 3. Routing with both live
+  PASS  AUTO picks A                       -- A (auto: first healthy in A→B→C)
+  PASS  AUTO returns A's real url
+  PASS  manual pin on B selects B, not A
+  PASS  failoverFrom(a) lands on B
+
+== 4. Chat on EACH engine
+      A said: FROM ENGINE A
+      B said: FROM ENGINE B
+  PASS  A and B are different engines (different replies)
+
+== 5. Failover when A dies
+  PASS  A /off accepted                -- HTTP 200
+  PASS  A confirmed terminated         -- /api/ps now 502
+  PASS  AUTO now routes to B
+  PASS  ...and returns B's url
+  PASS  B still serves after A died    -- STILL WORKING ON B
+
+== 6. Shut down ALL
+  PASS  B /off accepted                -- HTTP 200
+  PASS  B confirmed terminated         -- /api/ps now 502
+  PASS  BOTH engines down
+```
+
+Asking each engine to identify itself is the point of step 4: `FROM ENGINE A`
+coming back from A's URL and `FROM ENGINE B` from B's proves the attribution is
+correct, not merely plausible.
+
+---
+
+## Four bugs found by running the engine, not by reading it
+
+All four produced output that looked like success.
 
 ### 1. Chat sent the wrong model name
 
-The engine builds its ollama payload as `user_payload.get('model', MODEL)`
-(cell4 L258). A client-supplied `model` therefore **overrides the model actually
-loaded in VRAM**. `EngineCore` sent `"model":"aether"`; ollama has no such model;
-the engine replied `{"content":"(model timeout/error)"}` with `done:true`.
+The engine builds its ollama payload as `user_payload.get('model', MODEL)`, so a
+client-supplied `model` **overrides the model loaded in VRAM**. `EngineCore` sent
+`"model":"aether"`; the engine replied `{"content":"(model timeout/error)"}` with
+`done:true` — a well-formed, successfully parsed, empty-looking success.
+Measured: 181 ms to first token, 1 chunk, 21 chars, all of it that string.
+Fix: omit the field.
 
-This is the worst kind of failure: a well-formed, successfully parsed,
-empty-looking success. Measured: 181 ms to first token, 1 chunk, 21 chars — all
-of it the error string.
+### 2. Beacon attribution lost for exactly the engines that were up
 
-Fix: omit the field. After the fix the same probe returned the exact prompt echo.
-
-### 2. Beacon attribution was lost for exactly the engines that were up
-
-The idle heartbeat calls `_ntfy()` directly, bypassing `notify()`, so it was
+The idle heartbeat called `_ntfy()` directly, bypassing `notify()`, so it was
 untagged — and it is the **newest** announcement for a running engine.
-`liveLinks()` compared recency before attribution, so the newest sighting won and
-the tag was dropped.
-
+`liveLinks()` compared recency before attribution, so the tag was dropped.
 Observed live: 2 links on the topic, **0 tagged**, although both
-`AGENT LIVE LINK` lines said `engine=a`.
-
-Fixed both sides: the heartbeat now emits `engine=<slot>` (pin
-`ef0c7fe7c42345b3f626bd03de6e2ca28f9890a2c50379570c0a18c2b0c29919`), and the
-client prefers an attributed sighting over an unattributed one regardless of age.
+`AGENT LIVE LINK` lines said `engine=a`. Fixed on both sides: the heartbeat now
+emits `engine=<slot>` (pin `ef0c7fe7c42345b3…`), and the client prefers an
+attributed sighting regardless of age.
 
 ### 3. The NDJSON shape was guessed, and wrong
 
-The engine emits Ollama's format:
+The engine emits Ollama's format — `{"message":{"thinking":…}}`,
+`{"message":{"content":…}}`, `{"message":{"content":""},"done":true,…}`. There is
+no `type` and no `text` field. The first parser matched nothing, consumed the
+stream, and reported a clean success with zero content.
 
-```
-{"message": {"thinking": "..."}, "done": false}
-{"message": {"content": "..."},  "done": false}
-{"message": {"content": ""}, "done": true, "done_reason": "stop", ...}
-```
+### 4. A push with a per-engine title orphaned the kernel
 
-There is no `type` field and no `text` field. The first parser matched nothing,
-consumed the whole stream, and reported a clean success with zero content.
-
-### 4. A push with a per-engine title orphans the kernel
-
-Kaggle derives a kernel's slug from its title. Pushing with
-`newTitle: "Aether engine A"` moved the kernel to `/fridaymoses/aether-engine-a`
-and the real slug began returning **404 to a valid key**. `kernelPush` now
-refuses any title other than `KERNEL_TITLE`. Re-pushing with the canonical title
-restored `ref: /fridaymoses/qwen-3-8-27b-uncensored-chat`.
+Kaggle derives the slug from the title. Pushing `"Aether engine A"` moved the
+kernel to `/aether-engine-a` and the real slug began returning **404 to a valid
+key**. `kernelPush` now refuses any title but `KERNEL_TITLE`.
 
 ---
 
-## Runtime evidence
+## Four defects found by auditing my own Android code
 
-### Kaggle API (real)
+1. **Thread safety.** `states`/`liveUrls`/`healthCodes` were plain `HashMap`s
+   mutated on the poll thread and read on the UI thread. Concurrent put during a
+   resize can lose entries or spin; the visible symptom is an engine row that
+   never updates, which looks exactly like an engine that is down. Now
+   `ConcurrentHashMap`.
+2. **No shut-down-all.** Power control must release every GPU. Leaving one up
+   keeps burning quota while the UI says everything is off. Added a bulk path
+   that confirms each engine individually and names any that did not go down.
+3. **Double poll loops.** `onResume` started a loop and `onPause` only set a
+   flag, so a fast pause/resume could leave two running and double the Kaggle
+   calls. Now an `AtomicInteger` generation counter retires the previous loop.
+4. **Stale URL on open.** A Cloudflare quick tunnel changes on every boot.
+   `currentLinkFor()` existed but was never wired in — dead code. Open now
+   re-discovers and takes the first candidate that is genuinely live.
 
-| check | result |
-|---|---|
-| authenticated status, real key | HTTP 200, `{"status":"error"}` (resting state) |
-| bogus key | 401 |
-| **HTTP Basic with a VALID key** | **401** — indistinguishable from a revoked key, which is why Bearer is mandatory |
-| stub notebook push | refused locally, never sent |
-| push with a slug-changing title | refused locally |
-| real push | `ref: /fridaymoses/qwen-3-8-27b-uncensored-chat`, versions 6 and 7 |
+---
 
-### Wake → LIVE
+## Other runtime evidence
 
+**Kaggle API:** authenticated status 200 · bogus key 401 · **HTTP Basic with a
+valid key also 401** (indistinguishable from a revoked key — why Bearer is
+mandatory) · stub push refused locally · slug-changing title refused locally ·
+real pushes: A v8, B v3.
+
+**Wake:** every beacon line tagged — `engine=a stage: pulling IQ4_XS`,
+`engine=a AGENT LIVE LINK: …`, and after the fix `engine=a alive: … (idle 1 min)`.
+
+**Tools, on a real engine:**
 ```
-engine=a stage: downloading github.com gpus=1
-engine=a ollama READY: ... client version is 0.33.2
-engine=a stage: pulling IQ4_XS gpus=1
-engine=a stage: model-ready: hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
-engine=a warming up IQ4_XS (loading 15GB into VRAM)...
-engine=a AGENT LIVE LINK: https://weblogs-stephanie-treated-jonathan.trycloudflare.com
-```
-
-Every line carries `engine=a`. After the heartbeat fix:
-
-```
-engine=a alive: https://weblogs-stephanie-treated-jonathan.trycloudflare.com (idle 1 min)
-```
-
-Beacon attribution went from **0 of 2 tagged** to **3 of 3 tagged**.
-
-### Health
-
-```
-GET /api/ps -> 200
-models[] = [hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS]
-Health.isLive() = true
+web_search  -> agent step 1, tool call, 1158 chars back -> "Port Harcourt"
+run_command -> nvidia-smi returned "Tesla P100-PCIE-16GB, 16384 MiB"
 ```
 
-### Streaming chat — two consecutive rounds, no wedge
+**Streaming:** two consecutive rounds returned `PROBE ROUND 1` / `PROBE ROUND 2`
+verbatim (8.5 s then 1.9 s to first token). Cancellation returned with the engine
+still healthy afterwards.
 
-```
-round 1: first token 8460ms, 5 chunks, 13 chars, done=true -> "PROBE ROUND 1"
-round 2: first token 1875ms, 5 chunks, 13 chars, done=true -> "PROBE ROUND 2"
-```
-
-Verbatim echo of the prompt. Round 2 is faster because the prompt cache is warm.
-
-### Cancellation
-
-Stream cancelled mid-generation returned after 10088 ms; `GET /api/ps` still 200
-afterwards, so the socket was not left wedged.
-
-### Real tool execution
-
-**web_search:**
-```
-⚙️ agent step 1...
-🛠️ web_search({"query": "capital of Rivers State Nigeria"})
-↳ web_search returned 1158 chars
-⚙️ agent step 2...
-content: The capital of Rivers State, Nigeria is Port Harcourt.
-```
-
-**run_command** — the output is the real GPU on the Kaggle kernel:
-```
-🛠️ run_command({"command": "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader"})
-↳ run_command returned 39 chars
-content: Tesla P100-PCIE-16GB, 16384 MiB
-```
-
-### Shutdown, and proof it actually terminated
-
-```
-before : /api/ps -> 200  isLive=true  models=[Qwen3.8-27B-Uncensored-GGUF:IQ4_XS]
-POST /off with key -> HTTP 200
-confirmedDown -> true after 4s
-after  : /api/ps -> 502, then 530
-beacon: "engine=a ENGINE OFF via UI - quota saved"
-```
+**Shutdown:** `/off` 200 → `confirmedDown` true in 4 s → `/api/ps` 502 then 530 →
+beacon `engine=a ENGINE OFF via UI - quota saved`.
 
 Note: **Kaggle's kernel status still reads `running` for a while after `/off`.**
 That is why `confirmedDown()` probes the engine instead of trusting the API —
-claiming OFF on the strength of the 200 would report an engine as off while it
-still holds a GPU.
-
-### Wake again after shutdown
-
-Pushed version 7, engine came back live at
-`https://weblogs-stephanie-treated-jonathan.trycloudflare.com`, and the full
-33-check probe passed again against it.
-
-### Routing (EngineRouter, 8 checks)
-
-| case | result |
-|---|---|
-| AUTO with A and B live | A |
-| manual pin B with A and B live | B |
-| AUTO with A quota-blocked | B |
-| `failoverFrom(a)` with A blocked | B |
-| manual pin on a dead engine | **no decision** — does not silently re-route |
-| ...and the reason | `engine A is not live (quota blocked)` |
-| AUTO with A and B down | C |
-| AUTO with nothing live | no decision, with per-engine reasons |
-
-### Probe totals
-
-`33 passed, 0 failed` against the live engine, twice (once per wake), plus the
-offline checks.
+trusting the 200 would report OFF while a GPU is still held.
 
 ---
 
@@ -202,16 +177,20 @@ offline checks.
 
 | | release | debug |
 |---|---|---|
-| size | 661 936 B | 3 842 962 B |
+| size | 663 736 B | 3 822 432 B |
 | signature | v2, `CN=Aether, OU=Aether, O=Aether, L=Port Harcourt, ST=Rivers, C=NG` | v2, Android Debug |
+| package | `com.aether.app` | `com.aether.app.debug` |
 | launcher | `com.aether.app.EnginesActivity` | same |
-| `assets/aether-credentials.dat` | 272 B | 272 B |
+| `assets/aether-credentials.dat` | 484 B | 484 B |
 | `assets/aether-notebook-template.json` | 40 903 B | 40 903 B |
+| plaintext `KGAT_` in assets | **0** | **0** |
 
 R8 kept the JS bridge — `dexdump -a` on the built release:
 
 ```
-Annotations on method #4167 'engineKey'
+Annotations on method #4209 'controlToken'
+  VISIBILITY_RUNTIME Landroid/webkit/JavascriptInterface;
+Annotations on method #4210 'engineKey'
   VISIBILITY_RUNTIME Landroid/webkit/JavascriptInterface;
 ```
 
@@ -224,32 +203,22 @@ Web gate: `verify-engine-source` PASS · `tsc --noEmit` 0 errors · lint 0 error
 
 ---
 
-## Credentials
+## Explicitly unverified
 
-Engine A's key, the OFF_KEY and the beacon topic were recovered from git history
-and re-verified live. **Engines B and C are missing** — fill in
-`android/credentials.properties`, then:
-
-```
-scripts/bake-credentials.sh && scripts/build-apk.sh
-```
-
-The credentials file and the generated `.dat` are gitignored. The values are
-obfuscated (XOR + Base64), **not encrypted**: anyone who unpacks the APK can
-recover them in about a minute. That was an explicit decision for a private
-build. A Kaggle key can be revoked and an OFF_KEY rotated at any time, which
-makes a leaked copy worthless — if this APK ever leaves the phone, rotate all of
-them.
+- **The APK has never been installed or launched.** No emulator is possible here.
+- `EnginesActivity` polling, the WebView, credential loading from the asset, and
+  the UI state machine — all unexercised.
+- **Engine C was never woken.** Its key is baked and verified against Kaggle, but
+  no kernel was pushed to it, so three-way simultaneous routing is unproven. A
+  and B were both live at once and routed correctly.
+- Image and audio generation.
+- Real Netlify deployment and the Netlify Blobs backend.
 
 ---
 
-## Explicitly unverified
+## If this APK leaves your phone
 
-- The APK has never been installed or launched. No emulator is possible here.
-- `EnginesActivity` polling, the WebView, credential loading from the asset, and
-  the UI state machine — all unexercised.
-- Engines B and C: never woken, keys absent.
-- A/B/C failover across three simultaneously live engines.
-- Image and audio generation.
-- Real Netlify deployment and the Netlify Blobs backend.
-- The `_sent` fix on live hardware.
+The three Kaggle keys and the OFF_KEY are inside it, obfuscated but recoverable
+in about a minute by anyone who unpacks it. That was an explicit decision for a
+private build. Revoke the keys and rotate `ENGINE_OFF_KEY` — a leaked copy then
+becomes worthless.
