@@ -1,0 +1,102 @@
+Engine status proof -- captured verbatim, 2026-09-06
+=====================================================
+Two real runs against live Kaggle engines. Run 1 transitioned engine B, run 2
+transitioned engine C. Nothing below is simulated.
+
+The only edit made to this transcript is collapsing repeated identical poll
+lines, marked [...]. Every PASS/FAIL line and every measured value is verbatim.
+
+
+RUN 2 (engine C transition) -- final, 33 passed / 0 failed
+----------------------------------------------------------
+
+== the classifier: one rule per phase, from evidence only
+  PASS  200 + models[] is LIVE  [live - proof-model:Q4]
+  PASS  LIVE carries the model it measured  [[proof-model:Q4]]
+  PASS  LIVE records when it was verified  [verifiedAt 1788716845582]
+  PASS  200 with no model is WAKING, never LIVE  [waking - kernel answers /api/ps, model not loaded yet]
+  PASS  a queued kernel is WAKING  [queued]
+  PASS  a running kernel that does not answer is WAKING  [running]
+  PASS  a terminated kernel with nothing answering is OFF  [error]
+  PASS  no kernel state at all is OFF  [absent]
+  PASS  a dead tunnel (530) is OFF, not ERROR  [off - nothing answering, Kaggle reports the kernel terminated]
+  PASS  a dead tunnel (DNS -1) is OFF, not ERROR  [off - nothing answering, Kaggle reports the kernel terminated]
+  PASS  no tunnel hostname reaches the UI  [off - nothing answering, Kaggle reports the kernel terminated]
+  PASS  a URL passed into a detail is scrubbed  [[engine endpoint hidden]]
+  PASS  ERROR comes only from an action that failed  [action failed]
+  PASS  a quota refusal is QUOTA, not ERROR  [quota]
+  PASS  quota detection reads a real Kaggle 429  [429]
+
+== A, B and C classified from real responses
+  engine A: newest announced tunnel -> /api/ps HTTP 200 | Kaggle says "running"
+      -> LIVE  live - hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  PASS  engine A has a real phase  [LIVE]
+  PASS  engine A shows no tunnel in its status  [live - hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS]
+  engine B: newest announced tunnel -> /api/ps HTTP 530 | Kaggle says "error"
+      -> OFF  off - nothing answering, Kaggle reports the kernel terminated
+  PASS  engine B has a real phase  [OFF]
+  PASS  engine B shows no tunnel in its status  [off - nothing answering, Kaggle reports the kernel terminated]
+  engine C: newest announced tunnel -> /api/ps HTTP -1 | Kaggle says "error"
+      -> OFF  off - nothing answering, Kaggle reports the kernel terminated
+  PASS  engine C has a real phase  [OFF]
+  PASS  engine C shows no tunnel in its status  [off - nothing answering, Kaggle reports the kernel terminated]
+  PASS  no engine is in ERROR on the strength of a dead tunnel  [0 in ERROR]
+  PASS  a dead tunnel leaves the engine OFF or WAKING  [2 off, 1 live]
+
+== real transition on engine C: wake -> live -> off
+  before: OFF  off - nothing answering, Kaggle reports the kernel terminated
+  PASS  the wake push was accepted by Kaggle  [{"versionNumberNullable":8,"ref":"/code/dyceelvk/qwen-3-8-27b-uncensored-chat","url":"https://www.kaggle.com/code/dyceelvk/qwen-3-8-27b-uncensored-chat","versionNumber":8,"hasVersionNumber":true,"error":"","hasError":false,"invalidTags":[],
+  PASS  an accepted push reads WAKING, not LIVE  [waking - Kaggle accepted the kernel]
+      14 min left -> WAKING  waking - kernel running, engine not answering yet
+      13 min left -> WAKING  waking - kernel running, engine not answering yet
+      [... further identical WAKING polls, one every 15 seconds, count not transcribed ...]
+      10 min left -> LIVE  live - hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  PASS  it was observed WAKING before it was LIVE  [watched every 15s]
+  PASS  it became LIVE only on a real /api/ps 200 with a model  [live - hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS]
+  PASS  LIVE carries the model that was actually loaded  [[hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS]]
+  PASS  shutdown confirmed on the real engine  [off -- confirmed terminated (/api/ps now 502 after 2 checks)]
+  PASS  after a confirmed shutdown it reads OFF  [off - shutdown confirmed at the engine (/api/ps stopped answering); Kaggle's own status still reads "running"]
+  PASS  it does not claim OFF from Kaggle's lagging status alone  [off - shutdown confirmed at the engine (/api/ps stopped answering); Kaggle's own status still reads "running"]
+  PASS  a revived engine is LIVE even with a shutdown on record  [live - proof-model:Q4]
+  PASS  a new wake is not shadowed by an earlier shutdown  [confirmedOffAt cleared on wake]
+
+STATUS PROOF  33 passed, 0 failed
+
+
+RUN 1 (engine B transition) -- 29 passed / 1 failed
+----------------------------------------------------
+Identical parts 1 and 2, except engine B read "HTTP -1" (DNS gone) and engine C
+read "HTTP -1" as well; both classified OFF.
+
+The one failure was a REAL BUG in the first version of the classifier, found by
+this proof and then fixed:
+
+  PASS  shutdown confirmed on the real engine  [off -- confirmed terminated (/api/ps now 502 after 2 checks)]
+  FAIL  after a confirmed shutdown it reads OFF  [waking - kernel running, engine not answering yet]
+
+Cause: after the shutdown was confirmed at the engine, Kaggle's own kernel status
+still read "running", and the classifier trusted it, so the card flipped from OFF
+back to WAKING on the next poll. Fix: a shutdown measured at the engine
+(/api/ps watched stopping) outranks Kaggle's lagging control-plane field, and is
+dropped the instant the engine answers 200 again. Run 2 above proves the fix on a
+second engine, including the counter-cases (a revived engine still reads LIVE; a
+new wake is not shadowed by the record).
+
+Real transition observed on engine B in run 1:
+  before: OFF -> push accepted (versionNumber 8) -> WAKING (kernel running)
+  -> LIVE at "9 min left" (real /api/ps 200 with IQ4_XS loaded)
+  -> shutdown confirmed (/api/ps 502 after 2 checks)
+
+
+Reproduce
+---------
+  T=/home/user/.cache/toolchain
+  javac -encoding UTF-8 -cp "$T/jars/json-20240303.jar" -d /tmp/st \
+      android/app/src/main/java/com/aether/app/EngineCore.java \
+      scripts/proofs/StatusProof.java
+  java -cp "/tmp/st:$T/jars/json-20240303.jar" StatusProof \
+      android/credentials.properties \
+      android/app/src/main/assets/aether-notebook-template.json <a|b|c>
+
+Engine state after both runs: A, B and C all "no live tunnel", Kaggle status
+"error" -- verified with scripts/proofs/AllOff.java.
