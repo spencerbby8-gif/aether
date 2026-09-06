@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -83,7 +84,26 @@ public class SettingsActivity extends AppCompatActivity {
      */
     private final Map<String, Long> confirmedOffAt = new ConcurrentHashMap<>();
 
-    private final ExecutorService bg = Executors.newSingleThreadExecutor();
+    /**
+     * THE BUG THIS SEPARATION FIXES: this used to be one single-thread executor
+     * shared by the poll loop and the buttons. pollLoop() never returns while the
+     * screen is open, so it owned the only worker thread and every wake or
+     * shutdown task sat in the queue behind it, forever. The UI text was set
+     * synchronously before execute(), so the card said "WAKING" and the note said
+     * "Shutting down…" while the work never ran at all -- exactly "it can't turn
+     * the engine on or off". Bumping the generation (Check now, leaving the
+     * screen) ended the loop and let the stuck task run, which is why it looked
+     * like it sometimes worked.
+     *
+     * So: one thread for polling, and a separate pool for actions, so a 15-minute
+     * wake watch can never block a shutdown.
+     */
+    private final ExecutorService pollExec = Executors.newSingleThreadExecutor(daemonFactory());
+    private final ExecutorService actionExec = Executors.newCachedThreadPool(daemonFactory());
+
+    private static ThreadFactory daemonFactory() {
+        return r -> { Thread t = new Thread(r); t.setDaemon(true); return t; };
+    }
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final AtomicInteger generation = new AtomicInteger();
     /** How many wake/shutdown operations are in flight; drives the poll rate. */
@@ -134,7 +154,7 @@ public class SettingsActivity extends AppCompatActivity {
         super.onResume();
         if (cfg == null) return;
         int gen = generation.incrementAndGet();
-        bg.execute(() -> pollLoop(gen));
+        pollExec.execute(() -> pollLoop(gen));
     }
 
     @Override
@@ -147,7 +167,8 @@ public class SettingsActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         generation.incrementAndGet();
-        bg.shutdownNow();
+        pollExec.shutdownNow();
+        actionExec.shutdownNow();
     }
 
     /** Force a poll immediately instead of waiting for the next tick. */
@@ -159,7 +180,7 @@ public class SettingsActivity extends AppCompatActivity {
            and how old it is, and the poll replaces it with a fresh measurement. */
         render();
         int gen = generation.incrementAndGet();
-        bg.execute(() -> pollLoop(gen));
+        pollExec.execute(() -> pollLoop(gen));
     }
 
     // ------------------------------------------------------------- routing
@@ -497,7 +518,7 @@ public class SettingsActivity extends AppCompatActivity {
         announce("Waking engine " + up + "…");
         transitions.incrementAndGet();
         render();
-        bg.execute(() -> {
+        actionExec.execute(() -> {
             try {
                 EngineCore.kernelPush(e, Credentials.renderNotebook(
                         Credentials.notebookTemplate(this), cfg, e.slot),
@@ -604,7 +625,7 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void shutDown(final String slot) {
         announce("Shutting down engine " + slot.toUpperCase(Locale.ROOT) + "…");
-        bg.execute(() -> {
+        actionExec.execute(() -> {
             final EngineCore.EngineState result = shutOne(slot);
             states.put(slot, result);
             ui.post(() -> {
@@ -623,7 +644,7 @@ public class SettingsActivity extends AppCompatActivity {
                 .setPositiveButton(R.string.shut_down_all, (d, w) -> {
                     offAll.setEnabled(false);
                     announce("Shutting down every live engine…");
-                    bg.execute(() -> {
+                    actionExec.execute(() -> {
                         /* Every engine with an announced tunnel, whether or not
                            this app had already seen it fully LIVE -- same reason
                            as in shutOne(). */
