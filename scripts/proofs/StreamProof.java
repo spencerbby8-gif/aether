@@ -125,6 +125,24 @@ public final class StreamProof {
             o.close();          // no done:true
         });
 
+        /* Echoes what the client actually put in the request body, so the
+           conversation-history fix can be checked rather than assumed. */
+        route("/context", ex -> {
+            byte[] raw = ex.getRequestBody().readAllBytes();
+            String body = new String(raw, StandardCharsets.UTF_8);
+            int n = 0;
+            int i = body.indexOf("\"role\"");
+            while (i >= 0) { n++; i = body.indexOf("\"role\"", i + 1); }
+            boolean sawAda = body.contains("My name is Ada");
+            boolean sawReply = body.contains("Nice to meet you");
+            ex.getResponseHeaders().add("Content-Type", "application/x-ndjson");
+            ex.sendResponseHeaders(200, 0);
+            OutputStream o = ex.getResponseBody();
+            write(o, content("messages=" + n + ";sawAda=" + sawAda + ";sawReply=" + sawReply));
+            write(o, "{\"message\":{\"content\"\"},\"done\":true}");
+            o.close();
+        });
+
         route("/502", ex -> {
             byte[] b = "bad gateway".getBytes(StandardCharsets.UTF_8);
             ex.sendResponseHeaders(502, b.length);
@@ -160,6 +178,7 @@ public final class StreamProof {
             longToolTurn();
             garbageLinesSurvive();
             closedSocketIsNotAHang();
+            conversationHistoryIsSent();
             httpErrorsAreExplained();
             wrongKeyIsExplained();
             manyTurnsInARow();
@@ -273,6 +292,37 @@ public final class StreamProof {
                 "count=" + r.doneCount.get());
         check("what arrived was kept", "partial answer".equals(r.content.toString()),
                 "[" + r.content + "]");
+    }
+
+    private static void conversationHistoryIsSent() {
+        section("the conversation before the turn is on the wire");
+        java.util.List<EngineCore.Msg> history = new java.util.ArrayList<>();
+        history.add(new EngineCore.Msg("user", "My name is Ada."));
+        history.add(new EngineCore.Msg("assistant", "Nice to meet you, Ada."));
+        final Rec rec = new Rec();
+        final CountDownLatch latch = new CountDownLatch(1);
+        Thread t = new Thread(() -> EngineCore.chatStream(base + "/context", KEY, history,
+                "What is my name?", "", null, new EngineCore.ChatListener() {
+                    @Override public void onThinking(String text) { }
+                    @Override public void onContent(String text) { rec.content.append(text); }
+                    @Override public void onDone(boolean ok, String err) {
+                        rec.ok = ok; rec.error = err; rec.doneCount.incrementAndGet();
+                        latch.countDown();
+                    }
+                }, EngineCore.StreamPolicy.standard()));
+        t.setDaemon(true);
+        t.start();
+        try { latch.await(10_000, TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) { }
+        String seen = rec.content.toString();
+        check("earlier user turn was sent", seen.contains("sawAda=true"), "[" + seen + "]");
+        check("earlier assistant turn was sent", seen.contains("sawReply=true"), "[" + seen + "]");
+        check("the new prompt is last, after two history messages (3 roles total)",
+                seen.contains("messages=3"), "[" + seen + "]");
+
+        /* And the single-prompt form must still send exactly one message. */
+        Rec solo = run("/context", null, EngineCore.StreamPolicy.standard(), 10_000);
+        check("single-prompt form still sends only the prompt",
+                solo.content.toString().contains("messages=1"), "[" + solo.content + "]");
     }
 
     private static void httpErrorsAreExplained() {

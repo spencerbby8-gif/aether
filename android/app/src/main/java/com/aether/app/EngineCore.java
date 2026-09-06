@@ -500,16 +500,42 @@ public final class EngineCore {
         }
     }
 
+    /** One prior turn of conversation. */
+    public static final class Msg {
+        public final String role;      // "user" or "assistant"
+        public final String content;
+        public Msg(String role, String content) { this.role = role; this.content = content; }
+    }
+
     /** Legacy entry point: a single timeout, interpreted as the total ceiling. */
     public static void chatStream(String url, String offKey, String prompt, String system,
                                   boolean[] cancelledFlag, ChatListener listener, int timeoutMs) {
         StreamPolicy base = StreamPolicy.standard();
-        chatStream(url, offKey, prompt, system, cancelledFlag, listener, new StreamPolicy(
+        chatStream(url, offKey, null, prompt, system, cancelledFlag, listener, new StreamPolicy(
                 base.connectMs, base.readSliceMs, base.stallMs, Math.max(timeoutMs, base.totalMs)));
     }
 
+    /** Single-prompt form: no conversation before it. */
     public static void chatStream(String url, String offKey, String prompt, String system,
                                   boolean[] cancelledFlag, ChatListener listener, StreamPolicy p) {
+        chatStream(url, offKey, null, prompt, system, cancelledFlag, listener, p);
+    }
+
+    /**
+     * Stream a turn WITH the conversation before it.
+     *
+     * The engine takes a full Ollama messages array and keeps the last 24
+     * entries, so it is built for multi-turn chat. Sending only the newest
+     * prompt -- which is what this client used to do -- makes every message a
+     * cold start: ask "summarise that" and the model correctly answers that
+     * there is nothing before it. Observed live during the engine audit.
+     *
+     * `history` is oldest-first and may be null. Empty entries are skipped, so
+     * a stopped or failed turn cannot poison the context.
+     */
+    public static void chatStream(String url, String offKey, List<Msg> history, String prompt,
+                                  String system, boolean[] cancelledFlag, ChatListener listener,
+                                  StreamPolicy p) {
         HttpURLConnection c = null;
         final boolean[] fired = new boolean[] {false};
         try {
@@ -520,6 +546,13 @@ public final class EngineCore {
                use one. System text rides as a leading user message. */
             if (system != null && !system.isEmpty()) {
                 msgs.put(new JSONObject().put("role", "user").put("content", system));
+            }
+            if (history != null) {
+                for (Msg m : history) {
+                    if (m == null || m.content == null || m.content.isEmpty()) continue;
+                    String role = "assistant".equals(m.role) ? "assistant" : "user";
+                    msgs.put(new JSONObject().put("role", role).put("content", m.content));
+                }
             }
             msgs.put(new JSONObject().put("role", "user").put("content", prompt));
             body.put("messages", msgs);

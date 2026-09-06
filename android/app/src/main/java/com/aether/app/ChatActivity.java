@@ -919,6 +919,9 @@ public class ChatActivity extends AppCompatActivity {
 
         /* The prompt the engine sees: text plus any readable attachment. */
         final String wire = composeWire(prompt, attachments);
+        /* And the conversation before it -- without this every message is a
+           cold start and "summarise that" has nothing to summarise. */
+        final List<EngineCore.Msg> history = historyFor(userMsg, model);
 
         bg.execute(() -> {
             /* Reuse the engine that just answered unless it has gone stale. */
@@ -966,13 +969,13 @@ public class ChatActivity extends AppCompatActivity {
                 }
                 model.engine = e.slot;
                 remember(e.slot, url);
-                streamWithFailover(url, wire, prompt, b, true);
+                streamWithFailover(url, wire, prompt, b, true, history);
                 return;
             }
 
             model.engine = d.slot;
             remember(d.slot, d.url);
-            streamWithFailover(d.url, wire, prompt, b, true);
+            streamWithFailover(d.url, wire, prompt, b, true, history);
         });
     }
 
@@ -998,6 +1001,29 @@ public class ChatActivity extends AppCompatActivity {
         cachedUrl = null;
         cachedSlot = null;
         cachedAt = 0L;
+    }
+
+    /**
+     * The conversation before this turn, oldest first.
+     *
+     * Empty and errored turns are left out: a stopped or failed message is not
+     * context worth teaching the model. Capped well inside the engine's own
+     * 24-message window.
+     */
+    private List<EngineCore.Msg> historyFor(ChatMessage thisUser, ChatMessage thisAssistant) {
+        List<EngineCore.Msg> out = new ArrayList<>();
+        if (current == null) return out;
+        for (ChatMessage m : current.messages) {
+            if (m == thisUser || m == thisAssistant) continue;
+            if (m.content == null || m.content.isEmpty()) continue;
+            if (ChatMessage.STATUS_ERROR.equals(m.status)) continue;
+            out.add(new EngineCore.Msg(m.isUser() ? "user" : "assistant", m.content));
+        }
+        final int max = 20;
+        if (out.size() > max) {
+            return new ArrayList<>(out.subList(out.size() - max, out.size()));
+        }
+        return out;
     }
 
     /** The engine has no upload endpoint, so readable attachments ride in the prompt. */
@@ -1027,7 +1053,8 @@ public class ChatActivity extends AppCompatActivity {
      * retried on another slot rather than reported as an error.
      */
     private void streamWithFailover(final String url, final String wire, final String prompt,
-                                    final AssistantBubble b, final boolean allowFailover) {
+                                    final AssistantBubble b, final boolean allowFailover,
+                                    final List<EngineCore.Msg> history) {
         final boolean[] cancel = new boolean[] {false};
         cancelFlag = cancel;
         final long t0 = System.currentTimeMillis();
@@ -1035,7 +1062,7 @@ public class ChatActivity extends AppCompatActivity {
         final String[] err = new String[] {null};
         final AtomicBoolean recorded = new AtomicBoolean(false);
 
-        EngineCore.chatStream(url, cfg.offKey, wire, "", cancel,
+        EngineCore.chatStream(url, cfg.offKey, history, wire, "", cancel,
                 new EngineCore.ChatListener() {
                     @Override public void onThinking(String t) {
                         ui.post(() -> {
@@ -1073,7 +1100,7 @@ public class ChatActivity extends AppCompatActivity {
                 forget();
                 remember(next.slot, next.url);
                 if (b.model != null) b.model.engine = next.slot;
-                streamWithFailover(next.url, wire, prompt, b, false);
+                streamWithFailover(next.url, wire, prompt, b, false, history);
                 return;
             }
         }
