@@ -469,6 +469,184 @@ public final class EngineCore {
                         + " checks -- the engine is not off");
     }
 
+    // ------------------------------------------------- engine status truth
+
+    /** Sentinel: no /api/ps check was possible, because no tunnel answered. */
+    public static final int NO_CHECK = Integer.MIN_VALUE;
+
+    /**
+     * The only phases the UI is allowed to show, and the evidence each needs.
+     *
+     *   LIVE    /api/ps returned 200 WITH at least one loaded model. Nothing
+     *           else earns this label -- not a beacon announcement, not a
+     *           successful push, not "selected".
+     *   WAKING  a real request is in progress: a push was accepted, Kaggle says
+     *           queued/running, or the kernel answers 200 with no model yet.
+     *   OFF     nothing answers /api/ps AND Kaggle reports the kernel gone.
+     *   QUOTA   Kaggle refused a push for quota or limits.
+     *   ERROR   an operation the user just triggered actually failed. NEVER a
+     *           stale tunnel: an old Cloudflare URL answering 530, or failing
+     *           DNS with -1, says nothing about the engine and must not be
+     *           shown as an error.
+     */
+    public enum Phase { LIVE, WAKING, OFF, QUOTA, ERROR, UNKNOWN }
+
+    /** An operation the user just triggered. This is what ERROR is allowed to mean. */
+    public static final class Action {
+        public final String what;
+        public final boolean ok;
+        public final boolean quota;
+        public final String detail;
+        private Action(String what, boolean ok, boolean quota, String detail) {
+            this.what = what; this.ok = ok; this.quota = quota; this.detail = detail;
+        }
+        public static Action succeeded(String what, String detail) {
+            return new Action(what, true, false, detail);
+        }
+        public static Action failed(String what, String detail) {
+            return new Action(what, false, false, detail);
+        }
+        public static Action quotaHit(String what, String detail) {
+            return new Action(what, false, true, detail);
+        }
+    }
+
+    /**
+     * One engine's state, derived only from evidence that was actually measured.
+     *
+     * `detail` is scrubbed of URLs on the way in, so a tunnel hostname cannot
+     * reach the screen even if a caller builds one by accident. `url` is for the
+     * caller's own routing and must never be rendered.
+     */
+    public static final class EngineState {
+        public final String slot;
+        public final Phase phase;
+        public final String detail;
+        public final String url;
+        public final long verifiedAtMs;      // 0 = /api/ps was never checked
+        public final List<String> models;
+        public final String kaggleStatus;    // null when it was not consulted
+
+        EngineState(String slot, Phase phase, String detail, String url,
+                    long verifiedAtMs, List<String> models, String kaggleStatus) {
+            this.slot = slot;
+            this.phase = phase;
+            this.detail = scrubUrls(detail);
+            this.url = url;
+            this.verifiedAtMs = verifiedAtMs;
+            this.models = models == null ? new ArrayList<>() : models;
+            this.kaggleStatus = kaggleStatus;
+        }
+
+        public boolean isLive() { return phase == Phase.LIVE; }
+    }
+
+    /** Strip anything that looks like a URL. The UI must never show a tunnel. */
+    public static String scrubUrls(String s) {
+        if (s == null) return "";
+        return s.replaceAll("(?i)\\b[a-z][a-z0-9+.-]*://\\S+", "[engine endpoint hidden]")
+                .replaceAll("(?i)\\b[a-z0-9-]+\\.trycloudflare\\.com\\b", "[engine endpoint hidden]");
+    }
+
+    /**
+     * Classify one engine. THE ORDER IS THE POINT: a real /api/ps answer beats
+     * everything; when nothing answers, Kaggle's own kernel status decides
+     * between WAKING and OFF; ERROR only ever comes from an action that failed.
+     *
+     * @param healthStatus status from a /api/ps check just performed, or NO_CHECK
+     * @param models       what that check returned
+     * @param url          the tunnel that was checked, if any
+     * @param kaggleStatus Kaggle's kernel status, or null if not consulted
+     * @param action       the operation just triggered, or null
+     */
+    public static EngineState classify(String slot, int healthStatus, List<String> models,
+                                       String url, String kaggleStatus, Action action) {
+        return classify(slot, healthStatus, models, url, kaggleStatus, action, 0L);
+    }
+
+    /**
+     * Same, but able to weigh a shutdown this client confirmed itself.
+     *
+     * `confirmedOffAtMs` is the wall-clock time at which /api/ps was watched
+     * stopping. That is a measurement taken at the engine, so it outranks
+     * Kaggle's kernel status, which is a control-plane field that lags: observed
+     * reading "running" for minutes after the process had died. Without this, a
+     * confirmed shutdown was reported OFF for one frame and then flipped back to
+     * WAKING on the next poll. It is placed after the /api/ps checks, so an
+     * engine that genuinely came back is still shown LIVE.
+     */
+    public static EngineState classify(String slot, int healthStatus, List<String> models,
+                                       String url, String kaggleStatus, Action action,
+                                       long confirmedOffAtMs) {
+        long now = System.currentTimeMillis();
+        List<String> m = models == null ? new ArrayList<>() : models;
+
+        // 1. Measured evidence from the engine itself.
+        if (healthStatus == 200 && !m.isEmpty()) {
+            return new EngineState(slot, Phase.LIVE, "live — " + String.join(", ", m),
+                    url, now, m, kaggleStatus);
+        }
+        if (healthStatus == 200) {
+            return new EngineState(slot, Phase.WAKING,
+                    "waking — kernel answers /api/ps, model not loaded yet", url, now, m, kaggleStatus);
+        }
+
+        // 2. A shutdown confirmed at the engine beats Kaggle's lagging status.
+        if (confirmedOffAtMs > 0) {
+            return new EngineState(slot, Phase.OFF,
+                    "off — shutdown confirmed at the engine (/api/ps stopped answering)"
+                            + "; Kaggle's own status still reads \""
+                            + (kaggleStatus == null || kaggleStatus.isEmpty() ? "unknown" : kaggleStatus)
+                            + "\"",
+                    url, confirmedOffAtMs, m, kaggleStatus);
+        }
+
+        // 3. Nothing answers. A dead tunnel is not an error: 530 and -1 are what
+        //    an old Cloudflare URL returns once the engine is gone.
+        if (action != null && action.quota) {
+            return new EngineState(slot, Phase.QUOTA, action.what + " refused by Kaggle: "
+                    + action.detail, url, 0, m, kaggleStatus);
+        }
+        if (action != null && !action.ok) {
+            return new EngineState(slot, Phase.ERROR, action.what + " failed: "
+                    + action.detail, url, 0, m, kaggleStatus);
+        }
+        String kg = kaggleStatus == null ? "" : kaggleStatus.trim().toLowerCase(java.util.Locale.ROOT);
+        if (action != null && action.ok) {
+            return new EngineState(slot, Phase.WAKING, "waking — " + action.detail,
+                    url, 0, m, kaggleStatus);
+        }
+        switch (kg) {
+            case "queued":
+                return new EngineState(slot, Phase.WAKING,
+                        "waking — queued for a GPU", url, 0, m, kaggleStatus);
+            case "running":
+                return new EngineState(slot, Phase.WAKING,
+                        "waking — kernel running, engine not answering yet", url, 0, m, kaggleStatus);
+            case "":
+                return new EngineState(slot, Phase.OFF,
+                        "off — nothing answering and Kaggle has no kernel state",
+                        url, 0, m, kaggleStatus);
+            case "error":
+                return new EngineState(slot, Phase.OFF,
+                        "off — nothing answering, Kaggle reports the kernel terminated",
+                        url, 0, m, kaggleStatus);
+            default:
+                return new EngineState(slot, Phase.OFF,
+                        "off — nothing answering, Kaggle reports \"" + kaggleStatus + "\"",
+                        url, 0, m, kaggleStatus);
+        }
+    }
+
+    /** True when a push failure is a quota or limit refusal, not a real fault. */
+    public static boolean isQuotaRefusal(int status, String body) {
+        if (status == 429) return true;
+        if (body == null) return false;
+        String b = body.toLowerCase(java.util.Locale.ROOT);
+        return b.contains("quota") || b.contains("weekly limit") || b.contains("rate limit")
+                || b.contains("gpu limit") || b.contains("exceeded");
+    }
+
     // ------------------------------------------------------- chat streaming
 
     /** Receives streamed tokens. Called on the network thread. */

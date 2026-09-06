@@ -57,8 +57,31 @@ public class SettingsActivity extends AppCompatActivity {
     private Button offAll;
 
     private final Map<String, View> rowViews = new ConcurrentHashMap<>();
+    private final Map<String, TextView> routingTexts = new ConcurrentHashMap<>();
+    /** Only tunnels that answered /api/ps 200. Cleared the moment one fails. */
     private final Map<String, String> liveUrls = new ConcurrentHashMap<>();
-    private final Map<String, String> states = new ConcurrentHashMap<>();
+    /** Last tunnel seen for a slot, kept only until a health check disproves it. */
+    private final Map<String, String> tunnels = new ConcurrentHashMap<>();
+    /**
+     * Per-engine truth. Each slot carries its own phase, its own evidence and
+     * the time /api/ps was last actually checked -- they are never derived from
+     * each other, and "selected" in the routing list is not one of them.
+     */
+    private final Map<String, EngineCore.EngineState> states = new ConcurrentHashMap<>();
+    /**
+     * An action the user just triggered, consumed by the next classification.
+     * This is the only thing that may produce ERROR or QUOTA, which is what
+     * keeps a stale tunnel from being reported as a failure.
+     */
+    private final Map<String, EngineCore.Action> pendingActions = new ConcurrentHashMap<>();
+    /**
+     * When a shutdown was confirmed by watching /api/ps stop answering, per
+     * slot. Kaggle's kernel status lags behind that measurement, so this is what
+     * keeps a confirmed OFF from flipping back to WAKING on the next poll. It is
+     * cleared the moment an engine answers 200 again, so a revived engine is
+     * never hidden by it.
+     */
+    private final Map<String, Long> confirmedOffAt = new ConcurrentHashMap<>();
 
     private final ExecutorService bg = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -94,11 +117,16 @@ public class SettingsActivity extends AppCompatActivity {
            state for up to a minute, which reads as a screen that does nothing. */
         render();
 
-        note.setText("LIVE means /api/ps returned 200 with a loaded model. \"Booting\" "
-                + "means Kaggle started the kernel but the weights are not warm yet, which "
-                + "takes several minutes.\n\nShutting an engine down is what releases the GPU "
-                + "quota. Shut down all releases every engine at once and only reports OFF once "
-                + "each has been confirmed gone.");
+        note.setText("Every status here comes from a real check, and each engine is judged "
+                + "on its own.\n\nLIVE — /api/ps returned 200 with a loaded model. "
+                + "WAKING — a wake was accepted, or Kaggle says the kernel is queued or "
+                + "running, or the kernel answers 200 with no model yet. "
+                + "OFF — nothing answers /api/ps and Kaggle reports the kernel gone. "
+                + "QUOTA — Kaggle refused the wake for quota or limits. "
+                + "ERROR — an action you just pressed actually failed. A dead tunnel from an "
+                + "old announcement is not an error and is never shown as one."
+                + "\n\nShutting an engine down is what releases the GPU quota, and OFF is only "
+                + "reported once /api/ps has stopped answering.");
     }
 
     @Override
@@ -125,7 +153,10 @@ public class SettingsActivity extends AppCompatActivity {
     /** Force a poll immediately instead of waiting for the next tick. */
     private void checkNow() {
         announce("Checking every engine now…");
-        states.replaceAll((k, v) -> v != null && v.startsWith("LIVE") ? v : "checking…");
+        /* Deliberately does NOT overwrite the measured states with "checking…".
+           Replacing real evidence with a placeholder is the same class of lie
+           as claiming LIVE early: the card keeps showing what was last verified
+           and how old it is, and the poll replaces it with a fresh measurement. */
         render();
         int gen = generation.incrementAndGet();
         bg.execute(() -> pollLoop(gen));
@@ -153,16 +184,19 @@ public class SettingsActivity extends AppCompatActivity {
             return;
         }
         final String up = o.toUpperCase(Locale.ROOT);
-        String st = states.get(o);
-        if (st != null && st.startsWith("LIVE")) {
-            announce("Engine " + up + " pinned. It is live, so only it will answer.");
+        /* Pinning is a routing choice; it says nothing about health, so the
+           engine's own measured phase is read separately and shown as such. */
+        final EngineCore.EngineState st = states.get(o);
+        if (st != null && st.isLive()) {
+            announce("Engine " + up + " pinned. It is LIVE, so only it will answer.");
             return;
         }
         final EngineCore.Engine e = cfg == null ? null : cfg.bySlot(o);
         new AlertDialog.Builder(this)
                 .setTitle("Engine " + up + " is not live")
-                .setMessage("Pinned, so only engine " + up + " will be used. It is currently: "
-                        + (st == null ? "unknown" : st)
+                .setMessage("Pinned, so only engine " + up + " will be used. Its own measured "
+                        + "status is " + (st == null ? "UNKNOWN" : badge(st.phase)) + ": "
+                        + (st == null ? "not checked yet" : st.detail)
                         + "\n\nBooting a kernel takes several minutes.")
                 .setNegativeButton(R.string.just_pin, null)
                 .setPositiveButton(R.string.pin_and_wake, (d, w) -> {
@@ -178,14 +212,10 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void buildRoutingRows() {
         routingRows.removeAllViews();
+        routingTexts.clear();
         String[] opts = {EngineRouter.AUTO, "a", "b", "c"};
         for (String o : opts) {
-            boolean selected = EngineRouter.canonical(mode()).equals(o);
             TextView row = new TextView(this);
-            row.setText(EngineRouter.AUTO.equals(o)
-                    ? (selected ? "●  " : "○  ") + "AUTO — first healthy, fails over A→B→C"
-                    : (selected ? "●  " : "○  ") + "Engine " + o.toUpperCase() + " — pinned, no failover");
-            row.setTextColor(getColor(selected ? R.color.aether_fg : R.color.aether_muted));
             row.setTextSize(14);
             row.setBackgroundResource(R.drawable.bg_card);
             row.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 12));
@@ -195,6 +225,36 @@ public class SettingsActivity extends AppCompatActivity {
             row.setLayoutParams(lp);
             row.setOnClickListener(v -> chooseMode(o));
             routingRows.addView(row);
+            routingTexts.put(o, row);
+        }
+        renderRouting();
+    }
+
+    /**
+     * Selection and health are two separate facts on one line. Choosing an
+     * engine only decides where traffic goes; it says nothing about whether
+     * that engine is running, so the phase is drawn from the engine's own
+     * measured state and the marker is labelled "routing only".
+     */
+    private void renderRouting() {
+        String current = EngineRouter.canonical(mode());
+        for (Map.Entry<String, TextView> en : routingTexts.entrySet()) {
+            String o = en.getKey();
+            boolean selected = current.equals(o);
+            StringBuilder sb = new StringBuilder();
+            sb.append(selected ? "●  " : "○  ");
+            if (EngineRouter.AUTO.equals(o)) {
+                sb.append("AUTO — first healthy, fails over A→B→C");
+            } else {
+                EngineCore.EngineState st = states.get(o);
+                sb.append("Engine ").append(o.toUpperCase(Locale.ROOT))
+                        .append(" — pinned, no failover · ")
+                        .append(st == null ? "UNKNOWN" : badge(st.phase));
+            }
+            if (selected) sb.append("   (selected — routing only)");
+            TextView row = en.getValue();
+            row.setText(sb.toString());
+            row.setTextColor(getColor(selected ? R.color.aether_fg : R.color.aether_muted));
         }
     }
 
@@ -270,7 +330,10 @@ public class SettingsActivity extends AppCompatActivity {
             card.addView(btns, blp);
             engineRows.addView(card);
             rowViews.put(e.slot, card);
-            states.put(e.slot, "unknown");
+            /* Unknown, not "off": nothing has been measured yet. Claiming OFF
+               here would be the same kind of lie as claiming LIVE. */
+            states.put(e.slot, new EngineCore.EngineState(e.slot, EngineCore.Phase.UNKNOWN,
+                    "not checked yet — the first /api/ps poll decides", null, 0, null, null));
         }
     }
 
@@ -288,47 +351,66 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void pollOnce() {
-        Map<String, String> links = new ConcurrentHashMap<>();
+        /* Step 1 -- resolve. The beacon only proves a URL was published at some
+           point; it is a candidate list, never a status. */
+        Map<String, String> announced = new ConcurrentHashMap<>();
         try {
             for (EngineCore.LiveLink l : EngineCore.liveLinks(
                     cfg.beaconTopic, cfg.beaconSecret, BEACON_LOOKBACK_S, 20_000)) {
                 if (l.slot == null || cfg.bySlot(l.slot) == null) continue;
-                if (!links.containsKey(l.slot)) links.put(l.slot, l.url);
+                if (!announced.containsKey(l.slot)) announced.put(l.slot, l.url);
             }
         } catch (Exception ignored) { }
 
         for (EngineCore.Engine e : cfg.engines) {
-            String url = links.get(e.slot);
+            /* Step 2 -- obtain a URL: the newest announcement, else the last one
+               that actually answered. */
+            String url = announced.get(e.slot);
+            if (url == null) url = tunnels.get(e.slot);
+
+            /* Step 3 -- health-check it. This is the only evidence that counts. */
+            int status = EngineCore.NO_CHECK;
+            List<String> models = new ArrayList<>();
             if (url != null) {
                 EngineCore.Health h = EngineCore.health(url, 15_000);
-                if (h.isLive()) {
-                    liveUrls.put(e.slot, url);
-                    states.put(e.slot, "LIVE — " + String.join(", ", h.models));
-                    continue;
+                status = h.status;
+                models = h.models;
+                if (h.status == 200) {
+                    tunnels.put(e.slot, url);
+                    confirmedOffAt.remove(e.slot);   // it is answering: not off
+                } else {
+                    /* Step 4 -- a tunnel that will not answer is stale. Drop it
+                       here so the next poll re-resolves instead of re-reporting
+                       the same dead URL as an error. */
+                    tunnels.remove(e.slot);
+                    liveUrls.remove(e.slot);
+                    url = null;
                 }
-                liveUrls.remove(e.slot);
-                states.put(e.slot, h.status == 200
-                        ? "booting — model not loaded yet"
-                        : "announced but unreachable (HTTP " + h.status + ")");
-                continue;
+            } else {
+                tunnels.remove(e.slot);
             }
-            liveUrls.remove(e.slot);
-            states.put(e.slot, kernelState(e));
+
+            /* Step 5 -- classify. Kaggle's own kernel status is only consulted
+               when the engine is not answering, and only to tell WAKING from
+               OFF; a dead tunnel never becomes ERROR. */
+            String kg = status == 200 ? null : safeKernelStatus(e);
+            EngineCore.Action pending = pendingActions.remove(e.slot);
+            Long offAt = confirmedOffAt.get(e.slot);
+            EngineCore.EngineState st = EngineCore.classify(
+                    e.slot, status, models, url, kg, pending, offAt == null ? 0L : offAt);
+            states.put(e.slot, st);
+            if (st.isLive()) liveUrls.put(e.slot, st.url); else liveUrls.remove(e.slot);
             ui.post(this::render);      // show each engine as soon as it is known
         }
     }
 
-    private String kernelState(EngineCore.Engine e) {
+    /** Kaggle's kernel status, or null when it could not be read. Never throws. */
+    private String safeKernelStatus(EngineCore.Engine e) {
+        if (e == null) return null;
         try {
-            String s = EngineCore.kernelStatus(e, 20_000);
-            switch (s == null ? "" : s) {
-                case "running": return "booting — kernel running, model not warm";
-                case "queued":  return "queued for a GPU";
-                case "error":   return "off";
-                default:        return s.isEmpty() ? "unknown" : s;
-            }
-        } catch (EngineCore.EngineException ex) {
-            return "status failed (HTTP " + ex.status + ")";
+            return EngineCore.kernelStatus(e, 20_000);
+        } catch (Exception ex) {
+            return null;
         }
     }
 
@@ -336,22 +418,63 @@ public class SettingsActivity extends AppCompatActivity {
         for (Map.Entry<String, View> en : rowViews.entrySet()) {
             String slot = en.getKey();
             View card = en.getValue();
-            String st = states.get(slot);
-            boolean live = st != null && st.startsWith("LIVE");
-            boolean busy = st != null && (st.startsWith("booting") || st.startsWith("queued"));
+            EngineCore.EngineState st = states.get(slot);
 
             TextView status = card.findViewById(R.id.status);
-            status.setText(st == null ? "unknown" : st);
-            status.setTextColor(getColor(live ? R.color.aether_ok
-                    : (busy ? R.color.aether_warn : R.color.aether_muted)));
+            if (st == null) {
+                status.setText("not checked yet");
+                status.setTextColor(getColor(R.color.aether_muted));
+            } else {
+                /* The badge is the phase, the second line is the evidence, and
+                   the age says when that evidence was measured. None of it can
+                   contain a tunnel: EngineState scrubs URLs on the way in. */
+                String age = st.verifiedAtMs == 0
+                        ? "no /api/ps answer"
+                        : "checked " + ago(System.currentTimeMillis() - st.verifiedAtMs);
+                status.setText(badge(st.phase) + "  ·  " + age + "\n" + st.detail);
+                status.setTextColor(getColor(colorFor(st.phase)));
+            }
 
             Button wake = card.findViewById(R.id.wake);
-            wake.setEnabled(!busy);
+            /* Disabled only while a wake is genuinely in progress, so a second
+               tap cannot queue another GPU run by accident. */
+            wake.setEnabled(st == null || st.phase != EngineCore.Phase.WAKING);
             /* Shut down stays clickable in every state. A disabled button is
                indistinguishable from a broken one, and the honest answer to
                "shut down an engine that is not reachable" is a sentence, not
                silence -- so the action always reports what it found. */
         }
+        renderRouting();      // the pinned engine's phase, refreshed with the rest
+    }
+
+    private static String badge(EngineCore.Phase p) {
+        switch (p) {
+            case LIVE:    return "LIVE";
+            case WAKING:  return "WAKING";
+            case OFF:     return "OFF";
+            case QUOTA:   return "QUOTA";
+            case ERROR:   return "ERROR";
+            default:      return "UNKNOWN";
+        }
+    }
+
+    private int colorFor(EngineCore.Phase p) {
+        switch (p) {
+            case LIVE:    return R.color.aether_ok;
+            case WAKING:  return R.color.aether_warn;
+            case QUOTA:   return R.color.aether_warn;
+            case ERROR:   return R.color.aether_error;
+            default:      return R.color.aether_muted;
+        }
+    }
+
+    private static String ago(long ms) {
+        long s = ms / 1000;
+        if (s < 5) return "just now";
+        if (s < 60) return s + "s ago";
+        long m = s / 60;
+        if (m < 60) return m + " min ago";
+        return (m / 60) + " h ago";
     }
 
     // ------------------------------------------------------------- actions
@@ -364,73 +487,92 @@ public class SettingsActivity extends AppCompatActivity {
     private void wake(final EngineCore.Engine e, final Button wake) {
         if (wake != null) wake.setEnabled(false);
         final String up = e.slot.toUpperCase(Locale.ROOT);
-        states.put(e.slot, "wake requested -- pushing the kernel to Kaggle…");
+        /* A new wake supersedes any earlier confirmed shutdown, or the boot
+           would be reported OFF for as long as that record lived. */
+        confirmedOffAt.remove(e.slot);
+        /* "WAKING" the moment it is pressed. Nothing stronger is claimed until
+           /api/ps answers 200 with a loaded model. */
+        states.put(e.slot, new EngineCore.EngineState(e.slot, EngineCore.Phase.WAKING,
+                "waking — sending the kernel to Kaggle", null, 0, null, null));
         announce("Waking engine " + up + "…");
         transitions.incrementAndGet();
         render();
         bg.execute(() -> {
-            String result;
             try {
                 EngineCore.kernelPush(e, Credentials.renderNotebook(
                         Credentials.notebookTemplate(this), cfg, e.slot),
                         EngineCore.KERNEL_TITLE, true, 120_000);
-                result = "kernel pushed -- queued for a GPU (booting takes several minutes)";
             } catch (Exception ex) {
-                final String failure = "wake failed: " + ex.getMessage();
                 transitions.decrementAndGet();
-                states.put(e.slot, failure);
+                String msg = String.valueOf(ex.getMessage());
+                int code = ex instanceof EngineCore.EngineException
+                        ? ((EngineCore.EngineException) ex).status : -1;
+                /* A quota refusal is its own state, not a generic error. */
+                EngineCore.Action a = EngineCore.isQuotaRefusal(code, msg)
+                        ? EngineCore.Action.quotaHit("wake", msg)
+                        : EngineCore.Action.failed("wake", msg);
+                states.put(e.slot, EngineCore.classify(e.slot, EngineCore.NO_CHECK, null,
+                        null, safeKernelStatus(e), a));
+                final EngineCore.EngineState bad = states.get(e.slot);
                 ui.post(() -> {
                     render();
-                    announce("Engine " + up + ": " + failure);
+                    announce("Engine " + up + ": " + badge(bad.phase) + " — " + bad.detail);
                     if (wake != null) wake.setEnabled(true);
                 });
                 return;
             }
-            final String pushed = result;
-            states.put(e.slot, pushed);
+            /* Accepted. That earns WAKING and nothing more. */
+            states.put(e.slot, new EngineCore.EngineState(e.slot, EngineCore.Phase.WAKING,
+                    "waking — Kaggle accepted the kernel; booting takes several minutes",
+                    null, 0, null, null));
             ui.post(() -> {
                 render();
-                announce("Engine " + up + ": " + pushed + ". Watching it now.");
+                announce("Engine " + up + ": kernel accepted. It becomes LIVE only when "
+                        + "/api/ps answers 200 with a model.");
             });
             watchToLive(e.slot, System.currentTimeMillis() + WAKE_WATCH_MS, wake);
         });
     }
 
-    /** Poll one engine until it is really live, or the window runs out. */
+    /** Poll one engine until /api/ps really answers, or the window runs out. */
     private void watchToLive(final String slot, long deadline, final Button wake) {
         final String up = slot.toUpperCase(Locale.ROOT);
         final int myGen = generation.get();
         try {
             while (System.currentTimeMillis() < deadline && generation.get() == myGen) {
                 String url = liveUrlFor(slot);
+                int status = EngineCore.NO_CHECK;
+                List<String> models = new ArrayList<>();
                 if (url != null) {
                     EngineCore.Health h = EngineCore.health(url, 15_000);
-                    if (h.isLive()) {
-                        liveUrls.put(slot, url);
-                        final String models = String.join(", ", h.models);
-                        states.put(slot, "LIVE — " + models);
-                        ui.post(() -> {
-                            render();
-                            announce("Engine " + up + " is LIVE — " + models);
-                            if (wake != null) wake.setEnabled(true);
-                        });
-                        return;
-                    }
-                    states.put(slot, h.status == 200
-                            ? "tunnel up, model still loading (not live yet)"
-                            : "tunnel up but HTTP " + h.status);
-                } else {
-                    states.put(slot, kernelState(cfg.bySlot(slot)));
+                    status = h.status;
+                    models = h.models;
+                    if (h.status == 200) { tunnels.put(slot, url); confirmedOffAt.remove(slot); }
+                    else { tunnels.remove(slot); liveUrls.remove(slot); url = null; }
+                }
+                /* A wake in progress is never shadowed by an earlier confirmed
+                   shutdown: wake() clears it, and 0 is passed here as well. */
+                EngineCore.EngineState st = EngineCore.classify(slot, status, models, url,
+                        status == 200 ? null : safeKernelStatus(cfg.bySlot(slot)), null, 0L);
+                states.put(slot, st);
+                if (st.isLive()) {
+                    liveUrls.put(slot, st.url);
+                    final EngineCore.EngineState live = st;
+                    ui.post(() -> {
+                        render();
+                        announce("Engine " + up + " is LIVE — "
+                                + String.join(", ", live.models));
+                        if (wake != null) wake.setEnabled(true);
+                    });
+                    return;
                 }
                 ui.post(this::render);
                 try { Thread.sleep(FAST_POLL_MS); } catch (InterruptedException ie) { return; }
             }
-            final String last = states.get(slot);
-            states.put(slot, "still not live — last seen: " + last);
             ui.post(() -> {
                 render();
-                announce("Engine " + up + " did not come live inside "
-                        + (WAKE_WATCH_MS / 60_000) + " minutes. Last seen: " + last);
+                announce("Engine " + up + " did not answer /api/ps inside "
+                        + (WAKE_WATCH_MS / 60_000) + " minutes. It is not LIVE.");
                 if (wake != null) wake.setEnabled(true);
             });
         } finally {
@@ -460,16 +602,15 @@ public class SettingsActivity extends AppCompatActivity {
                 .show();
     }
 
-    private void shutDown(String slot) {
-        states.put(slot, "shutting down…");
-        render();
+    private void shutDown(final String slot) {
         announce("Shutting down engine " + slot.toUpperCase(Locale.ROOT) + "…");
         bg.execute(() -> {
-            String result = shutOne(slot);
+            final EngineCore.EngineState result = shutOne(slot);
             states.put(slot, result);
             ui.post(() -> {
                 render();
-                announce("Engine " + slot.toUpperCase(Locale.ROOT) + ": " + result);
+                announce("Engine " + slot.toUpperCase(Locale.ROOT) + ": "
+                        + badge(result.phase) + " — " + result.detail);
             });
         });
     }
@@ -488,7 +629,10 @@ public class SettingsActivity extends AppCompatActivity {
                            as in shutOne(). */
                         List<String> targets = new ArrayList<>();
                         for (EngineCore.Engine e : cfg.engines) {
-                            if (liveUrls.containsKey(e.slot)) { targets.add(e.slot); continue; }
+                            if (liveUrls.containsKey(e.slot) || tunnels.containsKey(e.slot)) {
+                                targets.add(e.slot);
+                                continue;
+                            }
                             String url = liveUrlFor(e.slot);
                             if (url != null) { liveUrls.put(e.slot, url); targets.add(e.slot); }
                         }
@@ -501,12 +645,12 @@ public class SettingsActivity extends AppCompatActivity {
                         }
                         StringBuilder report = new StringBuilder();
                         for (String slot : targets) {
-                            states.put(slot, "shutting down…");
                             ui.post(this::render);
-                            String result = shutOne(slot);
+                            EngineCore.EngineState result = shutOne(slot);
                             states.put(slot, result);
                             if (report.length() > 0) report.append("\n");
-                            report.append(slot.toUpperCase(Locale.ROOT)).append(": ").append(result);
+                            report.append(slot.toUpperCase(Locale.ROOT)).append(": ")
+                                    .append(badge(result.phase)).append(" — ").append(result.detail);
                             ui.post(this::render);
                         }
                         final String done = report.toString();
@@ -521,37 +665,54 @@ public class SettingsActivity extends AppCompatActivity {
 
     /** Last action's outcome, always visible -- no action fails silently. */
     private void announce(String message) {
-        ui.post(() -> note.setText(message));
+        /* Belt and braces: EngineState already scrubs, and nothing here should
+           ever hold a tunnel, but the screen must never print a raw endpoint. */
+        final String safe = EngineCore.scrubUrls(message);
+        ui.post(() -> note.setText(safe));
     }
 
-    private String shutOne(String slot) {
+    private EngineCore.EngineState shutOne(String slot) {
         /* Resolve the tunnel AT CLICK TIME. Relying on liveUrls was the bug:
-           that map only ever held engines this app had already seen fully LIVE
-           (/api/ps 200 WITH a loaded model), and pollOnce() actively removes
-           the entry whenever an engine is booting, unreachable, or not yet
-           polled. So after tapping Wake -- and for the whole multi-minute boot,
-           and after any app restart -- the map was empty and this button did
-           literally nothing, which is exactly "it can't turn off the engine". */
+           that map only ever held engines this app had already seen fully LIVE,
+           so the button did nothing during boot or after a restart. */
         String url = liveUrls.get(slot);
+        if (url == null) url = tunnels.get(slot);
         if (url == null) url = liveUrlFor(slot);
         if (url == null) {
-            return "nothing to shut down -- no tunnel announced for engine "
-                    + slot.toUpperCase(Locale.ROOT) + " (Kaggle says: "
-                    + kernelState(cfg.bySlot(slot)) + ")";
+            /* Nothing announced. Not an error -- there is no tunnel to shut
+               down. Classify from Kaggle instead of inventing a failure. */
+            tunnels.remove(slot);
+            liveUrls.remove(slot);
+            return EngineCore.classify(slot, EngineCore.NO_CHECK, null, null,
+                    safeKernelStatus(cfg.bySlot(slot)), null);
         }
         liveUrls.put(slot, url);
         transitions.incrementAndGet();
         try {
-            states.put(slot, "shutting down -- waiting for /api/ps to stop answering…");
-            ui.post(this::render);
             /* 8 checks x 4s: measured live, /api/ps goes 200 -> 502 -> 530 in
                about 20-30 seconds after /off is accepted. */
             EngineCore.Shutdown s = EngineCore.shutDownVerified(
                     url, cfg.offKey, 30_000, 8, 4_000);
-            if (s.confirmed) liveUrls.remove(slot);
-            return s.message;
+            if (s.confirmed) {
+                liveUrls.remove(slot);
+                tunnels.remove(slot);
+                /* Remember the measurement, not a belief: /api/ps was watched
+                   stopping. This is what keeps the card OFF while Kaggle's own
+                   status catches up, and it is dropped the instant the engine
+                   answers 200 again. */
+                confirmedOffAt.put(slot, System.currentTimeMillis());
+                return new EngineCore.EngineState(slot, EngineCore.Phase.OFF,
+                        "off — " + s.message, null, System.currentTimeMillis(), null, null);
+            }
+            /* Accepted but still answering. That IS a failed operation, so
+               ERROR is honest here -- and the engine keeps its real health. */
+            EngineCore.Health h = EngineCore.health(url, 20_000);
+            return EngineCore.classify(slot, h.status, h.models,
+                    h.status == 200 ? url : null, null,
+                    EngineCore.Action.failed("shutdown", s.message));
         } catch (Exception ex) {
-            return "shutdown failed: " + ex.getMessage();
+            return EngineCore.classify(slot, EngineCore.NO_CHECK, null, url, null,
+                    EngineCore.Action.failed("shutdown", String.valueOf(ex.getMessage())));
         } finally {
             transitions.decrementAndGet();
         }
