@@ -149,3 +149,36 @@ Engine process gone, GPU released.
 - Tool calls (`web_search`, `run_command`) were not exercised; the prompt was
   chosen to avoid them. The streaming reader collects `tool_calls` and the
   tests assert that, but a real tool-calling turn was not observed.
+
+---
+
+## Second real-Kaggle verification — the 501 fix, live
+
+Run 2026-09-06 against engine A (`fridaymoses`), template pin `794df437…`
+(40 475 rendered bytes). This is the run that closes the loop: the fix was
+previously proven only against the shipped source exec'd locally.
+
+| stage | observed |
+|---|---|
+| wake | `kernels/status` → `{"status":"error"}` → `POST /api/netlify/ensure-alive?engine=a` → `{"status":"waking","slot":"a","etaMinutes":10}` |
+| boot | patched notebook boots normally: `starting gpus=1` → ollama 0.33.2 → `serve UP=True` → `pulling IQ4_XS` → `model-ready` → `WARM OK attempt 0` → `AGENT LIVE LINK` |
+| live URL | `https://remained-laid-from-bumper.trycloudflare.com`, kernel `running` |
+| **the fix** | **6 consecutive unauthenticated `POST /api/chat` on ONE keep-alive TLS socket, compact `JSON.stringify` body → `403, 403, 403, 403, 403, 403`. `501s=0, 400s=0`.** This is the exact pattern that previously alternated `403, 501, 403, 501, 403`. |
+| auth gate | `POST /api/chat` no key → 403; wrong key → 403 |
+| streaming | `POST /api/chat` correct key → HTTP 200, first event 0.32 s, first content token 0.32 s, 4 content chunks, 21 chars, `done=True` (model already warm, short reply) |
+| shutdown | `POST /off` keyed → 200 `{"status":"shutting down"}` → `GET /api/ps` → **530 ×3** → kernel `error` → ntfy `ENGINE OFF via UI - quota saved` |
+
+What this does and does not establish:
+
+- It **does** show the patched notebook boots, serves, gates, streams and shuts
+  down on real Kaggle hardware, and that the 403/501 alternation is gone under
+  the exact framing that produced it.
+- It **does not** re-test engines B and C individually. They are covered
+  structurally instead: `renderAetherNotebook()` takes no slot argument, and
+  rendering for `a`, `b`, `c` was verified to produce **byte-identical**
+  notebooks (all three `40352` bytes, sha256 `b3c8fb22f5c9d3ab…`). One template,
+  one artefact, three pushes.
+- The `_sent` fix (double status line) was **not** exercised live — forcing a
+  mid-generation failure on real hardware is not something I can trigger on
+  demand. It remains proven against the shipped `agent_stream` + `do_POST`
+  exec'd locally.

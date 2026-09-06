@@ -133,3 +133,27 @@ Still open from that run:
 
 ## Not claimable without evidence
 - Kaggle integration: only after a real credentialed wake → RUNNING → live URL → /api/ps → /api/chat cycle.
+
+## Engine robustness pass — done
+
+Two real bugs found by re-reading the shipped handler, both fixed and both proven
+against the *shipped* source (ast-sliced out of the decoded notebook and exec'd,
+not re-implemented):
+
+1. **Keep-alive desync (the 501 bug).** `protocol_version = 'HTTP/1.1'` plus a 403
+   gate that returned without reading the request body. Fixed by draining the body
+   once at the top of `do_POST`. Live-verified: 6 unauthenticated POSTs on one
+   keep-alive socket → 6× 403, zero 501s.
+2. **Double status line.** `_sent` was set only after `agent_stream()` returned,
+   so a mid-generation failure still wrote a second `HTTP/1.1 200 OK` into the
+   open chunked body. Now set inside `agent_stream`, next to `end_headers()`.
+
+Tooling added under `scripts/proofs/`: `keepalive-501-proof.py` (A/B on one
+reused socket), `double-status-proof.py` (real `agent_stream`, fails it where a
+real one fails), `engine-sweep.py` (13 contract cases + 4 connection-reuse
+sequences; the pre-fix engine fails 4, the fixed one fails 0).
+
+Two of my own earlier claims were wrong and are retracted in
+`PROOF_REAL_KAGGLE.md`: "more than one handler behind the tunnel", and "the 400
+vs 501 difference is CPython version strictness" (it is JSON formatting —
+compact bodies fuse into 3 tokens, spaced ones into 9).
