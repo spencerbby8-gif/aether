@@ -57,7 +57,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("520eb6984e2ce6d059b827bfcb42950f46d50a314e68b6f7e585131a1b052fa8");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("5891989f37c57762cc9a9f27e33a7acc5104a2ca191b05fec4310599bdd050c8");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -120,7 +120,7 @@ describe("engine source — rendering", () => {
      * this now pins the current rendered size rather than the original one.
      */
     const rendered = renderAetherNotebook(DUMMY);
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(39205);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(40198);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
@@ -180,7 +180,7 @@ describe("engine source — engine-side hardening (audit C5)", () => {
        ollama proxy are covered too — previously only /off checked the key, and
        an unauthenticated /api/chat meant remote code execution. */
     expect(py).toMatch(
-      /def do_POST\(self\):\s*\n(?:\s*#[^\n]*\n)*\s*if self\.headers\.get\('X-Engine-Key'\) != OFF_KEY:/,
+      /def do_POST\(self\):\s*\n\s*body = self\._read_body\(\)\s*\n(?:\s*#[^\n]*\n)*\s*if self\.headers\.get\('X-Engine-Key'\) != OFF_KEY:/,
     );
   });
 
@@ -269,5 +269,57 @@ describe("engine source — real streaming, not a replay (audit §4 item 9)", ()
     const py = enginePython();
     expect(py.length).toBeGreaterThan(30_000);
     expect(py).toContain("def agent_stream(handler, user_payload):");
+  });
+});
+
+describe("engine source — keep-alive socket hygiene (the 501 bug)", () => {
+  /*
+   * Observed on the real engine: POST /off and some POST /api/chat calls returned
+   * 501 with Python's default BaseHTTPRequestHandler page, alternating perfectly
+   * with correct 403s from the same tunnel URL (403, 501, 403, 501, 403).
+   *
+   * Cause: the handler declares protocol_version = 'HTTP/1.1', so sockets are
+   * keep-alive, and the 403 gate returned WITHOUT consuming the request body.
+   * Those bytes stayed in the socket, so the next request parsed off that pooled
+   * connection read leftover JSON as a request line -> "Unsupported method".
+   */
+  it("declares HTTP/1.1, which is what makes an unread body fatal", () => {
+    expect(enginePython()).toContain("protocol_version = 'HTTP/1.1'");
+  });
+
+  it("drains the request body before the auth gate can return", () => {
+    const py = enginePython();
+    const read = py.indexOf("body = self._read_body()");
+    const gate = py.indexOf("if self.headers.get('X-Engine-Key') != OFF_KEY:");
+    expect(read).toBeGreaterThan(-1);
+    expect(gate).toBeGreaterThan(-1);
+    expect(read).toBeLessThan(gate);
+  });
+
+  it("reads the body exactly once — no branch re-reads the socket", () => {
+    const py = enginePython();
+    expect(py.match(/self\.rfile\.read\(int\(self\.headers\.get\('Content-Length'/g)).toBeNull();
+    expect(py.match(/def _read_body\(self\):/g)).toHaveLength(1);
+  });
+
+  it("has exactly one authoritative key check, not a dead duplicate", () => {
+    expect(enginePython().match(/X-Engine-Key'\) != OFF_KEY/g)).toHaveLength(1);
+  });
+
+  it("flushes /off before the process exits, so the 200 is not lost", () => {
+    const py = enginePython();
+    const off = py.indexOf("if self.path == '/off':");
+    const exit = py.indexOf("os._exit(0)", off);
+    const flush = py.indexOf("self.wfile.flush()", off);
+    expect(off).toBeGreaterThan(-1);
+    expect(flush).toBeGreaterThan(-1);
+    expect(exit).toBeGreaterThan(-1);
+    expect(flush).toBeLessThan(exit);
+  });
+
+  it("never writes a second status line into an already-started stream", () => {
+    const py = enginePython();
+    expect(py).toContain("self._sent = False");
+    expect(py).toContain("if getattr(self, '_sent', False):");
   });
 });

@@ -96,9 +96,22 @@ const py = cells
   .map((c) => (Array.isArray(c.source) ? c.source.join("") : String(c.source ?? "")))
   .join("\n");
 if (py.includes("Access-Control-Allow-Origin")) fail("engine still sends a CORS Access-Control-Allow-Origin header.");
+/*
+ * Exactly ONE authoritative gate. It used to be two, because a dead duplicate
+ * check sat inside the /off branch; that was removed, so ">= 2" is no longer
+ * the right assertion. What actually matters is that the gate is the first
+ * control-flow statement in do_POST (checked below) and that nothing can return
+ * before it.
+ */
 const gateMatches = py.match(/X-Engine-Key'\) != OFF_KEY/g) ?? [];
-if (gateMatches.length < 2) fail(`engine POST auth gate missing (found ${gateMatches.length} key checks, expected >= 2).`);
-if (!/def do_POST\(self\):\s*\n(?:\s*#[^\n]*\n)*\s*if self\.headers\.get\('X-Engine-Key'\) != OFF_KEY:/.test(py)) {
+if (gateMatches.length !== 1) fail(`engine POST auth gate: expected exactly 1 key check, found ${gateMatches.length}.`);
+/*
+ * The body is drained BEFORE the gate on purpose: this handler is HTTP/1.1, so
+ * answering 403 without consuming the request body leaves those bytes in the
+ * keep-alive socket and the next request on it parses as garbage -> 501. That
+ * was a real bug observed on the live engine as a 403/501 alternation.
+ */
+if (!/def do_POST\(self\):\s*\n\s*body = self\._read_body\(\)\s*\n(?:\s*#[^\n]*\n)*\s*if self\.headers\.get\('X-Engine-Key'\) != OFF_KEY:/.test(py)) {
   fail("the engine's do_POST does not check the key before routing.");
 }
 console.log("Engine hardening       : every POST gated, no wildcard CORS");
