@@ -388,13 +388,22 @@ public class SettingsActivity extends AppCompatActivity {
         /* Step 1 -- resolve. The beacon only proves a URL was published at some
            point; it is a candidate list, never a status. */
         Map<String, String> announced = new ConcurrentHashMap<>();
+        String beaconError = null;
         try {
             for (EngineCore.LiveLink l : EngineCore.liveLinks(
                     cfg.beaconTopic, cfg.beaconSecret, BEACON_LOOKBACK_S, 20_000)) {
                 if (l.slot == null || cfg.bySlot(l.slot) == null) continue;
                 if (!announced.containsKey(l.slot)) announced.put(l.slot, l.url);
             }
-        } catch (Exception ignored) { }
+        } catch (Exception ex) {
+            /* NOT swallowed. This used to be `catch (Exception ignored) {}`, so a
+               phone that cannot reach the discovery service saw an empty list,
+               fell back to Kaggle's "running", and showed WAKING for ever with
+               no clue that discovery -- not the engine -- was the thing failing.
+               That is indistinguishable from a slow boot, which is the worst
+               possible way to report it. */
+            beaconError = String.valueOf(ex.getMessage());
+        }
 
         for (EngineCore.Engine e : cfg.engines) {
             /* Step 2 -- obtain a URL: the newest announcement, else the last one
@@ -432,6 +441,16 @@ public class SettingsActivity extends AppCompatActivity {
             Long offAt = confirmedOffAt.get(e.slot);
             EngineCore.EngineState st = EngineCore.classify(
                     e.slot, status, models, url, kg, pending, offAt == null ? 0L : offAt);
+            /* A discovery outage is reported, not hidden. It never overrides a
+               real /api/ps measurement -- only the "nothing answering" case,
+               where without it the screen would claim a boot that may not be
+               happening. */
+            if (beaconError != null && url == null) {
+                st = new EngineCore.EngineState(e.slot, st.phase,
+                        st.detail + " — cannot reach the discovery service, so no tunnel can "
+                                + "be found: " + beaconError,
+                        null, st.verifiedAtMs, st.models, st.kaggleStatus);
+            }
             states.put(e.slot, st);
             if (st.isLive()) liveUrls.put(e.slot, st.url); else liveUrls.remove(e.slot);
             ui.post(this::render);      // show each engine as soon as it is known
@@ -582,18 +601,31 @@ public class SettingsActivity extends AppCompatActivity {
         final int myGen = generation.get();
         try {
             while (System.currentTimeMillis() < deadline && generation.get() == myGen) {
-                String url = liveUrlFor(slot);
+                /* Probe EVERY tunnel this slot has announced, not just the first.
+                   One engine can have several in the window (Kaggle leaves old
+                   versions running), and a watcher that only ever looks at the
+                   first match can sit on a dead one for ever while the real
+                   tunnel goes unexamined -- which reads as "stuck on WAKING". */
+                List<String> urls = new ArrayList<>();
+                try {
+                    for (String u : EngineCore.urlsFor(cfg.beaconTopic, cfg.beaconSecret,
+                            slot, BEACON_LOOKBACK_S, 20_000, 6)) urls.add(u);
+                } catch (Exception ignored) { }
+                String url = null;
                 int status = EngineCore.NO_CHECK;
                 List<String> models = new ArrayList<>();
-                if (url != null) {
-                    EngineCore.Health h = EngineCore.health(url, 15_000);
-                    status = h.status;
-                    models = h.models;
-                    if (h.status == 200) { tunnels.put(slot, url); confirmedOffAt.remove(slot); }
-                    else { tunnels.remove(slot); liveUrls.remove(slot); url = null; }
+                for (String u : urls) {
+                    EngineCore.Health h = EngineCore.health(u, 15_000);
+                    if (h.status == 200 && !h.models.isEmpty()) {
+                        url = u; status = h.status; models = h.models;
+                        break;                                  // fully live: stop here
+                    }
+                    if (h.status == 200 && status != 200) { url = u; status = h.status; }
                 }
-                /* A wake in progress is never shadowed by an earlier confirmed
-                   shutdown: wake() clears it, and 0 is passed here as well. */
+                if (url != null) { tunnels.put(slot, url); confirmedOffAt.remove(slot); }
+                else { tunnels.remove(slot); liveUrls.remove(slot); }
+                /* A new wake in progress is never shadowed by an earlier
+                   confirmed shutdown: wake() clears it, and 0 is passed here. */
                 EngineCore.EngineState st = EngineCore.classify(slot, status, models, url,
                         status == 200 ? null : safeKernelStatus(cfg.bySlot(slot)), null, 0L);
                 states.put(slot, st);

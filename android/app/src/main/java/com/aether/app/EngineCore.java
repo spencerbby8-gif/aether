@@ -644,8 +644,14 @@ public final class EngineCore {
                 return new EngineState(slot, Phase.WAKING,
                         "waking — queued for a GPU", url, 0, m, kaggleStatus);
             case "running":
+                /* Say what is actually happening instead of a label that looks
+                   frozen. Measured: the kernel pulls the model and warms it up
+                   BEFORE it opens a tunnel, so there is nothing to reach for the
+                   first few minutes. Engine A reached /api/ps 200 at 288s. */
                 return new EngineState(slot, Phase.WAKING,
-                        "waking — kernel running, engine not answering yet", url, 0, m, kaggleStatus);
+                        "waking — kernel running, model loading; the engine opens its "
+                                + "tunnel only once the model is warm (measured ~5 min)",
+                        url, 0, m, kaggleStatus);
             case "":
                 return new EngineState(slot, Phase.OFF,
                         "off — nothing answering and Kaggle has no kernel state",
