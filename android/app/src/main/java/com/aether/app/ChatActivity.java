@@ -42,6 +42,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The primary screen: a chat-first conversation with Aether, plus the history
@@ -119,6 +120,21 @@ public class ChatActivity extends AppCompatActivity {
 
     /** Cancel flag for the in-flight turn. Polled by EngineCore between lines. */
     private boolean[] cancelFlag = null;
+
+    /**
+     * The engine that answered last. Consecutive messages reuse it instead of
+     * paying for a fresh beacon fetch and health check every single time, which
+     * is what made the second message in a row feel slow. It is re-resolved on
+     * any failure, so a stale URL cannot wedge the conversation.
+     */
+    private volatile String cachedUrl;
+    private volatile String cachedSlot;
+    private volatile long cachedAt;
+    private static final long URL_FRESH_MS = 45_000;
+
+    /** Ticking elapsed time for the live turn, so a long turn is visibly alive. */
+    private AssistantBubble liveBubble;
+    private long turnStart;
 
     private final List<EngineRouter.SlotState> lastStates = new ArrayList<>();
 
@@ -627,6 +643,14 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void pushThinking(AssistantBubble b, String raw) {
+        /* Any real event ends the waiting line, not just the first content
+           token. During a tool-heavy turn the engine can send thinking and
+           heartbeat lines for minutes before any answer text, and leaving
+           "Aether is thinking…" up through all of it reads as a hang. */
+        if (b.waiting != null && b.waiting.getParent() != null) {
+            b.wrap.removeView(b.waiting);
+            b.waiting = null;
+        }
         boolean tool = isToolLine(raw);
         String text = TextNormalizer.normalize(raw);
         if (text.startsWith("»")) text = text.substring(1).trim();
@@ -888,6 +912,8 @@ public class ChatActivity extends AppCompatActivity {
         current.messages.add(model);
         attachMessageActions(b.content, model);
 
+        liveBubble = b;
+        turnStart = System.currentTimeMillis();
         setStreaming(true);
         persist();
 
@@ -895,9 +921,9 @@ public class ChatActivity extends AppCompatActivity {
         final String wire = composeWire(prompt, attachments);
 
         bg.execute(() -> {
-            /* Resolve an engine on a real poll, not a guess. */
-            List<EngineRouter.SlotState> states = pollStates();
-            EngineRouter.Decision d = EngineRouter.route(mode(), states);
+            /* Reuse the engine that just answered unless it has gone stale. */
+            EngineRouter.Decision d = cachedDecision();
+            if (d == null) d = EngineRouter.route(mode(), pollStates());
 
             if (!d.ok()) {
                 /* Nothing live: wake the routed candidate rather than failing. */
@@ -939,13 +965,39 @@ public class ChatActivity extends AppCompatActivity {
                     return;
                 }
                 model.engine = e.slot;
-                stream(url, wire, prompt, b);
+                remember(e.slot, url);
+                streamWithFailover(url, wire, prompt, b, true);
                 return;
             }
 
             model.engine = d.slot;
-            stream(d.url, wire, prompt, b);
+            remember(d.slot, d.url);
+            streamWithFailover(d.url, wire, prompt, b, true);
         });
+    }
+
+    /** The cached engine, if it was live recently and the mode has not changed. */
+    private EngineRouter.Decision cachedDecision() {
+        String url = cachedUrl;
+        String slot = cachedSlot;
+        if (url == null || slot == null) return null;
+        if (System.currentTimeMillis() - cachedAt > URL_FRESH_MS) return null;
+        if (!EngineRouter.isAuto(mode()) && !slot.equals(EngineRouter.canonical(mode()))) {
+            return null;      // the user pinned a different engine
+        }
+        return new EngineRouter.Decision(slot, url, "reused engine " + slot.toUpperCase(Locale.ROOT), false);
+    }
+
+    private void remember(String slot, String url) {
+        cachedSlot = slot;
+        cachedUrl = url;
+        cachedAt = System.currentTimeMillis();
+    }
+
+    private void forget() {
+        cachedUrl = null;
+        cachedSlot = null;
+        cachedAt = 0L;
     }
 
     /** The engine has no upload endpoint, so readable attachments ride in the prompt. */
@@ -966,17 +1018,31 @@ public class ChatActivity extends AppCompatActivity {
         m.note = note == null ? "error" : note;
     }
 
-    private void stream(String url, final String wire, final String prompt, final AssistantBubble b) {
-        cancelFlag = new boolean[] {false};
+    /**
+     * Stream one turn, and if the engine lets go before answering, fail over
+     * once and retry -- without ever leaving the bubble mid-generation.
+     *
+     * Runs on the background thread. The listener only RECORDS the outcome;
+     * this method decides what the UI is told, because a dropped engine may be
+     * retried on another slot rather than reported as an error.
+     */
+    private void streamWithFailover(final String url, final String wire, final String prompt,
+                                    final AssistantBubble b, final boolean allowFailover) {
+        final boolean[] cancel = new boolean[] {false};
+        cancelFlag = cancel;
         final long t0 = System.currentTimeMillis();
-        EngineCore.chatStream(url, cfg.offKey, wire, "", cancelFlag,
+        final boolean[] ok = new boolean[] {false};
+        final String[] err = new String[] {null};
+        final AtomicBoolean recorded = new AtomicBoolean(false);
+
+        EngineCore.chatStream(url, cfg.offKey, wire, "", cancel,
                 new EngineCore.ChatListener() {
                     @Override public void onThinking(String t) {
                         ui.post(() -> {
                             pushThinking(b, t);
                             if (b.model != null) {
                                 b.model.toolLines.add(isToolLine(t)
-                                        ? "» " + TextNormalizer.normalize(t)
+                                        ? "\u00BB " + TextNormalizer.normalize(t)
                                         : TextNormalizer.normalize(t));
                             }
                         });
@@ -985,37 +1051,67 @@ public class ChatActivity extends AppCompatActivity {
                         b.raw.append(t);
                         ui.post(() -> showNormalized(b, false));
                     }
-                    @Override public void onDone(boolean ok, String err) {
-                        ui.post(() -> {
-                            setStreaming(false);
-                            cancelFlag = null;
-                            long ms = System.currentTimeMillis() - t0;
-                            showNormalized(b, true);
-                            if (b.model != null) {
-                                b.model.content = TextNormalizer.normalize(b.raw.toString());
-                            }
-                            if (!ok && err != null && err.equals("cancelled")) {
-                                if (b.model != null) {
-                                    b.model.status = ChatMessage.STATUS_STOPPED;
-                                    b.model.note = "stopped after " + (ms / 1000) + "s";
-                                }
-                                b.meta.setText("stopped after " + (ms / 1000) + "s");
-                                b.meta.setVisibility(View.VISIBLE);
-                            } else if (!ok) {
-                                if (b.model != null) markError(b.model, err);
-                                onError("Engine error: " + err, prompt);
-                            } else {
-                                if (b.model != null) b.model.status = ChatMessage.STATUS_OK;
-                                String who = b.model != null && b.model.engine != null
-                                        ? "engine " + b.model.engine.toUpperCase(Locale.ROOT) : "Aether";
-                                b.meta.setText(who + " · " + (ms / 1000) + "s");
-                                b.meta.setVisibility(View.VISIBLE);
-                            }
-                            persist();
-                            refreshChip();
-                        });
+                    @Override public void onDone(boolean good, String e) {
+                        if (recorded.compareAndSet(false, true)) { ok[0] = good; err[0] = e; }
                     }
-                }, 600_000);
+                }, EngineCore.StreamPolicy.standard());
+
+        boolean userStopped = cancel[0];
+        boolean cancelled = "cancelled".equals(err[0]);
+
+        /* Nothing at all arrived and the engine let go on its own: the tunnel
+           died or the kernel went away. Try the next engine in A -> B -> C
+           rather than making the user press send again. */
+        if (!ok[0] && !cancelled && !userStopped && allowFailover && b.raw.length() == 0) {
+            final String from = cachedSlot == null ? "?" : cachedSlot;
+            final String reason = err[0];
+            EngineRouter.Decision next = EngineRouter.failoverFrom(from, pollStates());
+            if (next.ok()) {
+                ui.post(() -> pushThinking(b, "Engine " + from.toUpperCase(Locale.ROOT)
+                        + " dropped (" + reason + ") -- failing over to "
+                        + next.slot.toUpperCase(Locale.ROOT)));
+                forget();
+                remember(next.slot, next.url);
+                if (b.model != null) b.model.engine = next.slot;
+                streamWithFailover(next.url, wire, prompt, b, false);
+                return;
+            }
+        }
+
+        finalizeTurn(b, prompt, ok[0], err[0], System.currentTimeMillis() - t0);
+    }
+
+    /** Every turn ends here, exactly once, on the UI thread. */
+    private void finalizeTurn(final AssistantBubble b, final String prompt,
+                              final boolean ok, final String err, final long ms) {
+        ui.post(() -> {
+            setStreaming(false);
+            cancelFlag = null;
+            showNormalized(b, true);
+            if (b.model != null) {
+                b.model.content = TextNormalizer.normalize(b.raw.toString());
+            }
+            if (!ok && "cancelled".equals(err)) {
+                if (b.model != null) {
+                    b.model.status = ChatMessage.STATUS_STOPPED;
+                    b.model.note = "stopped after " + (ms / 1000) + "s";
+                }
+                b.meta.setText("stopped after " + (ms / 1000) + "s");
+                b.meta.setVisibility(View.VISIBLE);
+            } else if (!ok) {
+                forget();     // a failed engine must not be reused next message
+                if (b.model != null) markError(b.model, err);
+                onError("Engine error: " + err, prompt);
+            } else {
+                if (b.model != null) b.model.status = ChatMessage.STATUS_OK;
+                String who = b.model != null && b.model.engine != null
+                        ? "engine " + b.model.engine.toUpperCase(Locale.ROOT) : "Aether";
+                b.meta.setText(who + " · " + (ms / 1000) + "s");
+                b.meta.setVisibility(View.VISIBLE);
+            }
+            persist();
+            refreshChip();
+        });
     }
 
     /** Write the transcript, and keep the drawer in step with it. */
@@ -1032,5 +1128,29 @@ public class ChatActivity extends AppCompatActivity {
         sendBtn.setVisibility(streaming ? View.GONE : View.VISIBLE);
         stopBtn.setVisibility(streaming ? View.VISIBLE : View.GONE);
         input.setEnabled(!streaming);
+        if (streaming) {
+            ui.post(ticker);
+        } else {
+            ui.removeCallbacks(ticker);
+            liveBubble = null;
+        }
     }
+
+    /**
+     * One update a second while a turn is in flight: which engine, how long it
+     * has been running. This is measured state, not decoration -- it is the
+     * difference between "the app is working on it" and "the app froze".
+     */
+    private final Runnable ticker = new Runnable() {
+        @Override public void run() {
+            AssistantBubble b = liveBubble;
+            if (b == null || cancelFlag == null) return;
+            long secs = (System.currentTimeMillis() - turnStart) / 1000;
+            String who = b.model != null && b.model.engine != null
+                    ? "engine " + b.model.engine.toUpperCase(Locale.ROOT) : "Aether";
+            b.meta.setText(who + " · " + secs + "s · streaming…");
+            b.meta.setVisibility(View.VISIBLE);
+            ui.postDelayed(this, 1000);
+        }
+    };
 }

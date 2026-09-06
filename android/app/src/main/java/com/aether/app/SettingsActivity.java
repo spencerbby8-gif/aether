@@ -45,7 +45,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class SettingsActivity extends AppCompatActivity {
 
     private static final int POLL_MS = 15_000;
+    /** While a wake or a shutdown is in flight: the user is watching a change. */
+    private static final int FAST_POLL_MS = 4_000;
     private static final int BEACON_LOOKBACK_S = 3 * 3600;
+    private static final long WAKE_WATCH_MS = 15 * 60_000L;
 
     private Credentials.Config cfg;
     private LinearLayout routingRows;
@@ -60,6 +63,8 @@ public class SettingsActivity extends AppCompatActivity {
     private final ExecutorService bg = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final AtomicInteger generation = new AtomicInteger();
+    /** How many wake/shutdown operations are in flight; drives the poll rate. */
+    private final AtomicInteger transitions = new AtomicInteger();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,6 +77,7 @@ public class SettingsActivity extends AppCompatActivity {
         offAll = findViewById(R.id.off_all);
 
         findViewById(R.id.back_btn).setOnClickListener(v -> finish());
+        findViewById(R.id.check_now).setOnClickListener(v -> checkNow());
 
         cfg = Credentials.load(this);
         if (cfg == null || cfg.engines.isEmpty()) {
@@ -116,11 +122,53 @@ public class SettingsActivity extends AppCompatActivity {
         bg.shutdownNow();
     }
 
+    /** Force a poll immediately instead of waiting for the next tick. */
+    private void checkNow() {
+        announce("Checking every engine now…");
+        states.replaceAll((k, v) -> v != null && v.startsWith("LIVE") ? v : "checking…");
+        render();
+        int gen = generation.incrementAndGet();
+        bg.execute(() -> pollLoop(gen));
+    }
+
     // ------------------------------------------------------------- routing
 
     private String mode() {
         return getSharedPreferences("aether_console", MODE_PRIVATE)
                 .getString("mode", EngineRouter.AUTO);
+    }
+
+    /**
+     * Pinning an engine is a routing choice, and on its own it does not turn
+     * anything on -- which is exactly the gap that made the switch look broken.
+     * So when the chosen engine is not live, say so at once and offer to wake
+     * it, instead of leaving the user staring at a selection that changed
+     * nothing they can see.
+     */
+    private void chooseMode(final String o) {
+        setMode(o);
+        if (EngineRouter.AUTO.equals(o)) {
+            announce("AUTO selected -- the first healthy engine answers, and a failed "
+                    + "engine fails over A\u2192B\u2192C.");
+            return;
+        }
+        final String up = o.toUpperCase(Locale.ROOT);
+        String st = states.get(o);
+        if (st != null && st.startsWith("LIVE")) {
+            announce("Engine " + up + " pinned. It is live, so only it will answer.");
+            return;
+        }
+        final EngineCore.Engine e = cfg == null ? null : cfg.bySlot(o);
+        new AlertDialog.Builder(this)
+                .setTitle("Engine " + up + " is not live")
+                .setMessage("Pinned, so only engine " + up + " will be used. It is currently: "
+                        + (st == null ? "unknown" : st)
+                        + "\n\nBooting a kernel takes several minutes.")
+                .setNegativeButton(R.string.just_pin, null)
+                .setPositiveButton(R.string.pin_and_wake, (d, w) -> {
+                    if (e != null) wake(e, null);
+                })
+                .show();
     }
 
     private void setMode(String m) {
@@ -145,7 +193,7 @@ public class SettingsActivity extends AppCompatActivity {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.topMargin = Ui.dp(this, 6);
             row.setLayoutParams(lp);
-            row.setOnClickListener(v -> setMode(o));
+            row.setOnClickListener(v -> chooseMode(o));
             routingRows.addView(row);
         }
     }
@@ -234,7 +282,8 @@ public class SettingsActivity extends AppCompatActivity {
                 pollOnce();
                 ui.post(this::render);
             } catch (Exception ignored) { }
-            try { Thread.sleep(POLL_MS); } catch (InterruptedException ie) { return; }
+            int wait = transitions.get() > 0 ? FAST_POLL_MS : POLL_MS;
+            try { Thread.sleep(wait); } catch (InterruptedException ie) { return; }
         }
     }
 
@@ -307,9 +356,17 @@ public class SettingsActivity extends AppCompatActivity {
 
     // ------------------------------------------------------------- actions
 
-    private void wake(EngineCore.Engine e, Button wake) {
-        wake.setEnabled(false);
-        states.put(e.slot, "queued for a GPU");
+    /**
+     * Wake an engine and then WATCH it, reporting what Kaggle and /api/ps
+     * actually say at each step. Nothing here claims an engine is ready before
+     * /api/ps has returned 200 with a loaded model.
+     */
+    private void wake(final EngineCore.Engine e, final Button wake) {
+        if (wake != null) wake.setEnabled(false);
+        final String up = e.slot.toUpperCase(Locale.ROOT);
+        states.put(e.slot, "wake requested -- pushing the kernel to Kaggle…");
+        announce("Waking engine " + up + "…");
+        transitions.incrementAndGet();
         render();
         bg.execute(() -> {
             String result;
@@ -317,13 +374,79 @@ public class SettingsActivity extends AppCompatActivity {
                 EngineCore.kernelPush(e, Credentials.renderNotebook(
                         Credentials.notebookTemplate(this), cfg, e.slot),
                         EngineCore.KERNEL_TITLE, true, 120_000);
-                result = "queued for a GPU";
+                result = "kernel pushed -- queued for a GPU (booting takes several minutes)";
             } catch (Exception ex) {
-                result = "wake failed: " + ex.getMessage();
+                final String failure = "wake failed: " + ex.getMessage();
+                transitions.decrementAndGet();
+                states.put(e.slot, failure);
+                ui.post(() -> {
+                    render();
+                    announce("Engine " + up + ": " + failure);
+                    if (wake != null) wake.setEnabled(true);
+                });
+                return;
             }
-            states.put(e.slot, result);
-            ui.post(this::render);
+            final String pushed = result;
+            states.put(e.slot, pushed);
+            ui.post(() -> {
+                render();
+                announce("Engine " + up + ": " + pushed + ". Watching it now.");
+            });
+            watchToLive(e.slot, System.currentTimeMillis() + WAKE_WATCH_MS, wake);
         });
+    }
+
+    /** Poll one engine until it is really live, or the window runs out. */
+    private void watchToLive(final String slot, long deadline, final Button wake) {
+        final String up = slot.toUpperCase(Locale.ROOT);
+        final int myGen = generation.get();
+        try {
+            while (System.currentTimeMillis() < deadline && generation.get() == myGen) {
+                String url = liveUrlFor(slot);
+                if (url != null) {
+                    EngineCore.Health h = EngineCore.health(url, 15_000);
+                    if (h.isLive()) {
+                        liveUrls.put(slot, url);
+                        final String models = String.join(", ", h.models);
+                        states.put(slot, "LIVE — " + models);
+                        ui.post(() -> {
+                            render();
+                            announce("Engine " + up + " is LIVE — " + models);
+                            if (wake != null) wake.setEnabled(true);
+                        });
+                        return;
+                    }
+                    states.put(slot, h.status == 200
+                            ? "tunnel up, model still loading (not live yet)"
+                            : "tunnel up but HTTP " + h.status);
+                } else {
+                    states.put(slot, kernelState(cfg.bySlot(slot)));
+                }
+                ui.post(this::render);
+                try { Thread.sleep(FAST_POLL_MS); } catch (InterruptedException ie) { return; }
+            }
+            final String last = states.get(slot);
+            states.put(slot, "still not live — last seen: " + last);
+            ui.post(() -> {
+                render();
+                announce("Engine " + up + " did not come live inside "
+                        + (WAKE_WATCH_MS / 60_000) + " minutes. Last seen: " + last);
+                if (wake != null) wake.setEnabled(true);
+            });
+        } finally {
+            transitions.decrementAndGet();
+        }
+    }
+
+    /** The current tunnel URL for one slot, or null when it has not announced. */
+    private String liveUrlFor(String slot) {
+        try {
+            for (EngineCore.LiveLink l : EngineCore.liveLinks(
+                    cfg.beaconTopic, cfg.beaconSecret, BEACON_LOOKBACK_S, 20_000)) {
+                if (slot.equals(l.slot)) return l.url;
+            }
+        } catch (Exception ignored) { }
+        return null;
     }
 
     /** One engine: confirm first, because this releases a GPU quota. */
@@ -396,16 +519,29 @@ public class SettingsActivity extends AppCompatActivity {
     private String shutOne(String slot) {
         String url = liveUrls.get(slot);
         if (url == null) return getString(R.string.no_live_url);
+        transitions.incrementAndGet();
         try {
             int code = EngineCore.off(url, cfg.offKey, 30_000);
             if (code != 200) return "shutdown HTTP " + code;
-            if (EngineCore.confirmedDown(url, 6, 4_000, 20_000)) {
-                liveUrls.remove(slot);
-                return "off — confirmed terminated";
+            /* A 200 only means the request was accepted. Poll /api/ps until it
+               stops answering, and say which check finally confirmed it --
+               measured live, this takes 20-30 seconds. */
+            for (int i = 1; i <= 8; i++) {
+                EngineCore.Health h = EngineCore.health(url, 20_000);
+                if (!h.isLive()) {
+                    liveUrls.remove(slot);
+                    return "off — confirmed terminated (/api/ps now " + h.status
+                            + " after " + i + " check" + (i > 1 ? "s" : "") + ")";
+                }
+                states.put(slot, "shutting down… /api/ps still 200 (check " + i + "/8)");
+                ui.post(this::render);
+                try { Thread.sleep(4_000); } catch (InterruptedException ie) { break; }
             }
-            return "shutdown sent but the engine is STILL LIVE";
+            return "shutdown sent but the engine is STILL LIVE after 8 checks";
         } catch (Exception ex) {
             return "shutdown failed: " + ex.getMessage();
+        } finally {
+            transitions.decrementAndGet();
         }
     }
 }

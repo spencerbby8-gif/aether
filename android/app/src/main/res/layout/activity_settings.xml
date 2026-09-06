@@ -34,6 +34,11 @@
             android:layout_height="wrap_content" android:orientation="vertical"
             android:layout_marginTop="8dp" />
 
+        <Button android:id="@+id/check_now" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="18dp"
+            android:background="@drawable/bg_pill_ghost" android:text="@string/check_now"
+            android:textColor="@color/aether_fg" android:textSize="13sp" />
+
         <Button android:id="@+id/off_all" android:layout_width="match_parent"
             android:layout_height="wrap_content" android:layout_marginTop="18dp"
             android:background="@drawable/bg_pill_ghost" android:text="@string/shut_down_all"

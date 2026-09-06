@@ -110,10 +110,21 @@ public final class EngineCore {
     }
 
     private static HttpURLConnection open(String method, String url, int timeoutMs) throws Exception {
+        return open(method, url, timeoutMs, timeoutMs);
+    }
+
+    /**
+     * Connect and read timeouts are separate on purpose. A streaming turn needs
+     * a SHORT read timeout so the reader surfaces regularly and the caller can
+     * notice a cancellation or a dead connection; a long one turns both into a
+     * ten-minute freeze.
+     */
+    private static HttpURLConnection open(String method, String url, int connectMs, int readMs)
+            throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setRequestMethod(method);
-        c.setConnectTimeout(timeoutMs);
-        c.setReadTimeout(timeoutMs);
+        c.setConnectTimeout(connectMs);
+        c.setReadTimeout(readMs);
         c.setInstanceFollowRedirects(true);
         /* Keep-alive is the default and matters here: the engine desync bug this
            contract was hardened against only shows up on a reused socket, so a
@@ -445,9 +456,62 @@ public final class EngineCore {
      * `cancel` is polled between lines, so stopping actually closes the socket
      * rather than letting the generation finish in the background.
      */
+    /**
+     * Timing policy for one streamed turn.
+     *
+     * The numbers come from the engine's own behaviour, not from guesswork:
+     * while the model generates, the engine emits an {"message":{"thinking":"..."} }
+     * heartbeat roughly every 10 seconds, and a tool call (run_command,
+     * web_search, crawl) executes synchronously and emits nothing until it
+     * returns -- those are bounded by the engine's own subprocess timeouts, the
+     * longest of which is 300s. So:
+     *
+     *   readSliceMs  how often the reader surfaces. Bounds how long "stop" can
+     *                take to be noticed, and how often a stall is detected.
+     *   stallMs      no bytes at all for this long means the tunnel or the
+     *                kernel is gone. Set above the longest silent tool run so a
+     *                legitimate tool call is never cut off.
+     *   totalMs      wall-clock ceiling. The agent loop can legitimately run ten
+     *                model iterations, so this is generous -- it exists so a turn
+     *                can never hang for ever.
+     */
+    public static final class StreamPolicy {
+        public final int connectMs;
+        public final int readSliceMs;
+        public final int stallMs;
+        public final int totalMs;
+
+        public StreamPolicy(int connectMs, int readSliceMs, int stallMs, int totalMs) {
+            this.connectMs = connectMs;
+            this.readSliceMs = readSliceMs;
+            this.stallMs = stallMs;
+            this.totalMs = totalMs;
+        }
+
+        /**
+         * readSliceMs is 1s, not something larger, because it is what bounds how
+         * long "stop" can take to be noticed: the reader only re-checks the
+         * cancel flag when a read returns or times out. Measured with a local
+         * server, an 8s slice made stop take 8.0s; 1s makes it about a second,
+         * at the cost of one caught timeout per idle second.
+         */
+        public static StreamPolicy standard() {
+            return new StreamPolicy(15_000, 1_000, 330_000, 1_800_000);
+        }
+    }
+
+    /** Legacy entry point: a single timeout, interpreted as the total ceiling. */
     public static void chatStream(String url, String offKey, String prompt, String system,
                                   boolean[] cancelledFlag, ChatListener listener, int timeoutMs) {
+        StreamPolicy base = StreamPolicy.standard();
+        chatStream(url, offKey, prompt, system, cancelledFlag, listener, new StreamPolicy(
+                base.connectMs, base.readSliceMs, base.stallMs, Math.max(timeoutMs, base.totalMs)));
+    }
+
+    public static void chatStream(String url, String offKey, String prompt, String system,
+                                  boolean[] cancelledFlag, ChatListener listener, StreamPolicy p) {
         HttpURLConnection c = null;
+        final boolean[] fired = new boolean[] {false};
         try {
             JSONObject body = new JSONObject();
             body.put("stream", true);
@@ -460,7 +524,7 @@ public final class EngineCore {
             msgs.put(new JSONObject().put("role", "user").put("content", prompt));
             body.put("messages", msgs);
 
-            c = open("POST", join(url, "/api/chat"), timeoutMs);
+            c = open("POST", join(url, "/api/chat"), p.connectMs, p.readSliceMs);
             c.setRequestProperty("Content-Type", "application/json");
             c.setRequestProperty("Accept", "application/x-ndjson");
             c.setRequestProperty("X-Engine-Key", offKey);
@@ -471,39 +535,94 @@ public final class EngineCore {
 
             int status = c.getResponseCode();
             if (status != 200) {
-                listener.onDone(false, "chat HTTP " + status);
+                fire(listener, fired, false, describeStatus(status));
                 return;
             }
+
             try (BufferedReader r = new BufferedReader(
                     new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = r.readLine()) != null) {
+                long start = System.currentTimeMillis();
+                long lastLine = start;
+                while (true) {
+                    /* Checked BEFORE the read as well as after. With a stalled
+                       socket the old loop could not reach its cancel check for
+                       the whole read timeout, so pressing stop appeared to do
+                       nothing and the bubble stayed on "generating" for ever. */
                     if (cancelledFlag != null && cancelledFlag[0]) {
-                        listener.onDone(false, "cancelled");
+                        fire(listener, fired, false, "cancelled");
                         return;
                     }
+                    String line;
+                    try {
+                        line = r.readLine();
+                    } catch (java.net.SocketTimeoutException ste) {
+                        long now = System.currentTimeMillis();
+                        if (now - lastLine > p.stallMs) {
+                            fire(listener, fired, false, "engine went quiet for "
+                                    + ((now - lastLine) / 1000)
+                                    + "s -- the tunnel or the kernel is gone");
+                            return;
+                        }
+                        if (now - start > p.totalMs) {
+                            fire(listener, fired, false, "turn ran past "
+                                    + (p.totalMs / 1000) + "s and was stopped");
+                            return;
+                        }
+                        continue;      // surface again: cancel, stall, deadline
+                    }
+                    if (line == null) {
+                        /* Server closed the stream: a normal end, not a hang. */
+                        fire(listener, fired, true, null);
+                        return;
+                    }
+                    lastLine = System.currentTimeMillis();
                     line = line.trim();
                     if (line.isEmpty()) continue;
                     JSONObject o;
                     try { o = new JSONObject(line); } catch (Exception e) { continue; }
 
+                    /* Payload FIRST. The engine's fallback path re-emits raw
+                       Ollama lines, where the final object can carry the last
+                       of the content AND done:true together; checking done
+                       first silently dropped that content. */
+                    JSONObject msg = o.optJSONObject("message");
+                    if (msg != null) {
+                        String thinking = msg.optString("thinking", "");
+                        if (!thinking.isEmpty()) listener.onThinking(thinking);
+                        String content = msg.optString("content", "");
+                        if (!content.isEmpty()) listener.onContent(content);
+                    }
                     if (o.optBoolean("done", false)) {
-                        listener.onDone(true, null);
+                        fire(listener, fired, true, null);
                         return;
                     }
-                    JSONObject msg = o.optJSONObject("message");
-                    if (msg == null) continue;
-                    String thinking = msg.optString("thinking", "");
-                    if (!thinking.isEmpty()) listener.onThinking(thinking);
-                    String content = msg.optString("content", "");
-                    if (!content.isEmpty()) listener.onContent(content);
                 }
-                listener.onDone(true, null);
             }
         } catch (Exception e) {
-            listener.onDone(false, e.getMessage() == null ? "stream failed" : e.getMessage());
+            fire(listener, fired, false,
+                    e.getMessage() == null ? "stream failed" : e.getMessage());
         } finally {
             if (c != null) c.disconnect();
+        }
+    }
+
+    /** Exactly-once terminal callback, so the UI can never be left mid-turn. */
+    private static void fire(ChatListener listener, boolean[] fired, boolean ok, String err) {
+        if (fired[0]) return;
+        fired[0] = true;
+        listener.onDone(ok, err);
+    }
+
+    /** Say what an HTTP status actually means here instead of just the number. */
+    private static String describeStatus(int status) {
+        switch (status) {
+            case 403: return "engine rejected the key (HTTP 403)";
+            case 404: return "engine has no /api/chat (HTTP 404) -- wrong URL?";
+            case 502: return "engine unreachable (HTTP 502) -- kernel died or tunnel closed";
+            case 503: return "engine unavailable (HTTP 503) -- still booting?";
+            case 504: return "engine timed out (HTTP 504)";
+            case 530: return "tunnel is gone (HTTP 530) -- the engine is off";
+            default:  return "chat HTTP " + status;
         }
     }
 

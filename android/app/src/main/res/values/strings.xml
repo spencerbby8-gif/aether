@@ -41,4 +41,7 @@
     <string name="no_live_url">no live URL for this engine — it has no tunnel to answer on</string>
     <string name="checking">checking…</string>
     <string name="splash_sub">three engines · one thread</string>
+    <string name="check_now">Check status now</string>
+    <string name="pin_and_wake">Pin and wake it</string>
+    <string name="just_pin">Just pin it</string>
 </resources>
