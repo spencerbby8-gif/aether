@@ -4,5 +4,7 @@
         <item name="android:windowBackground">@color/aether_bg</item>
         <item name="android:statusBarColor">@color/aether_bg</item>
         <item name="android:navigationBarColor">@color/aether_bg</item>
+        <item name="android:textColorPrimary">@color/aether_fg</item>
+        <item name="android:colorAccent">@color/aether_accent</item>
     </style>
 </resources>

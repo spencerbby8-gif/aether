@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="page_pad">16dp</dimen>
+    <dimen name="bubble_radius">14dp</dimen>
+    <dimen name="field_radius">12dp</dimen>
+    <dimen name="card_radius">14dp</dimen>
+    <dimen name="bubble_pad_h">14dp</dimen>
+    <dimen name="bubble_pad_v">10dp</dimen>
+    <dimen name="msg_side_margin">40dp</dimen>
+    <dimen name="composer_pad">10dp</dimen>
+    <dimen name="send_size">46dp</dimen>
+    <dimen name="text_msg">15sp</dimen>
+    <dimen name="text_meta">11sp</dimen>
+    <dimen name="text_title">17sp</dimen>
+    <dimen name="text_sub">12sp</dimen>
+</resources>

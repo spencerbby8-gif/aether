@@ -10,15 +10,17 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.Aether">
-        <activity android:name=".EnginesActivity" android:exported="true"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode">
+        <!-- Chat is the opening screen. Engine selection, status, wake and
+             shutdown live in Settings, reached from the header. -->
+        <activity android:name=".ChatActivity" android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".MainActivity" android:exported="false"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
-            android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".SettingsActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
     </application>
 </manifest>

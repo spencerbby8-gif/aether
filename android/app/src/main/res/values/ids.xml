@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="status" type="id" />
+    <item name="wake" type="id" />
+    <item name="off" type="id" />
+</resources>

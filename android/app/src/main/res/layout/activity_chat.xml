@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/aether_bg">
+
+    <!-- Header: mark + engine status chip + settings. No engine panel here --
+         selection, wake and shutdown live in Settings. -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical"
+        android:paddingLeft="16dp" android:paddingRight="12dp"
+        android:paddingTop="14dp" android:paddingBottom="10dp">
+
+        <ImageView android:layout_width="30dp" android:layout_height="30dp"
+            android:src="@drawable/ic_launcher_foreground"
+            android:importantForAccessibility="no" />
+
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:orientation="vertical"
+            android:layout_marginStart="10dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="@string/app_name" android:textColor="@color/aether_fg"
+                android:textSize="@dimen/text_title" android:textStyle="bold" />
+            <TextView android:id="@+id/header_sub" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:textColor="@color/aether_muted"
+                android:textSize="@dimen/text_sub" />
+        </LinearLayout>
+
+        <TextView android:id="@+id/engine_chip" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:background="@drawable/bg_status_chip"
+            android:textColor="@color/aether_muted" android:textSize="12sp"
+            android:paddingLeft="12dp" android:paddingRight="12dp"
+            android:paddingTop="6dp" android:paddingBottom="6dp"
+            android:layout_marginEnd="6dp" />
+
+        <TextView android:id="@+id/settings_btn" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="⚙"
+            android:textColor="@color/aether_accent" android:textSize="20sp"
+            android:padding="8dp" android:contentDescription="@string/settings" />
+    </LinearLayout>
+
+    <!-- Messages -->
+    <ScrollView android:id="@+id/chat_scroll" android:layout_width="match_parent"
+        android:layout_height="0dp" android:layout_weight="1"
+        android:fillViewport="true"
+        android:paddingLeft="14dp" android:paddingRight="14dp"
+        android:clipToPadding="false" android:paddingBottom="8dp">
+        <LinearLayout android:id="@+id/msg_list" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical" />
+    </ScrollView>
+
+    <!-- Composer: field + send beside it, on a surface card. ReplyMate's pattern. -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:background="@color/aether_surface"
+        android:padding="@dimen/composer_pad">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="bottom">
+
+            <EditText android:id="@+id/input" android:layout_width="0dp"
+                android:layout_height="wrap_content" android:layout_weight="1"
+                android:hint="@string/composer_hint"
+                android:textColorHint="@color/aether_dim"
+                android:textColor="@color/aether_fg" android:textSize="@dimen/text_msg"
+                android:background="@drawable/bg_field" android:padding="12dp"
+                android:minLines="1" android:maxLines="5"
+                android:gravity="center_vertical|start"
+                android:inputType="textMultiLine|textCapSentences"
+                android:importantForAutofill="no" />
+
+            <FrameLayout android:layout_width="@dimen/send_size"
+                android:layout_height="@dimen/send_size" android:layout_marginStart="8dp">
+                <ImageButton android:id="@+id/send_btn" android:layout_width="match_parent"
+                    android:layout_height="match_parent" android:background="@drawable/bg_pill_accent"
+                    android:src="@drawable/ic_send" android:contentDescription="Send"
+                    android:scaleType="centerInside" />
+                <ImageButton android:id="@+id/stop_btn" android:layout_width="match_parent"
+                    android:layout_height="match_parent" android:background="@drawable/bg_pill_ghost"
+                    android:src="@drawable/ic_stop" android:contentDescription="@string/stop"
+                    android:scaleType="centerInside" android:visibility="gone" />
+            </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
