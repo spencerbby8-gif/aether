@@ -85,12 +85,16 @@ threading.Thread(target=srv.serve_forever, daemon=True).start()
 #                tokens -> "Bad request syntax" -> 400.
 #
 #   PIPELINED  - the client writes the next request before reading the previous
-#                response (what a pooled reverse proxy such as cloudflared does).
-#                The body has no newline, so it merges with the next request
-#                line: words[-1] is "HTTP/1.1", which validates, and then
-#                'do_{"model":' does not exist -> 501 Unsupported method.
+#                response. Same desync, different framing.
 #
-# The live engine showed 403/501 alternation; that is the pipelined shape.
+# NOTE on 400 vs 501: it is NOT the Python version, and not the pipelining. The
+# fused line is tokenised by whitespace and words[-1] is always "HTTP/1.1", so
+# what decides it is the token COUNT, i.e. how the JSON body is formatted:
+#   compact {"model":"m",...}  -> 3 tokens -> method lookup fails -> 501
+#   spaced  json.dumps(...)    -> 9 tokens -> "Bad request syntax" -> 400
+# Aether sends JSON.stringify output (compact), which is why the LIVE engine
+# returned 501. scripts/proofs/engine-sweep.py uses a compact body and reproduces
+# the 501 -- including the message text -- exactly.
 
 conn = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
 body = json.dumps({"model": "m", "messages": [{"role": "user", "content": "hi"}]}).encode()

@@ -116,15 +116,34 @@ Engine process gone, GPU released.
   fused to the next request line:
   `Bad request syntax ('{"model": "m", ...}POST /api/chat HTTP/1.1')`
 
-  **Honest caveat on 400 vs 501.** The status depends on the Python version's
-  `parse_request` strictness, not on the bug. CPython 3.13 (this sandbox) rejects
-  a request line with more than three whitespace tokens up front
-  (`if not 2 <= len(words) <= 3` → 400 "Bad request syntax"). Looser versions
-  accept `len(words) >= 3`, take `words[-1]` as the version — which is `HTTP/1.1`,
-  valid — and then fail on the method lookup (`do_{"model":` does not exist) →
-  **501 "Unsupported method"**, which is what the live engine returned. Both are
-  the same desync; the fix removes both. I did not record the live 501's message
-  text at the time, so the version attribution is an inference, not a measurement.
+  **Which status you get, and why — reproduced exactly.** An earlier draft of
+  this section blamed the CPython version's `parse_request` strictness. That was
+  **wrong and is retracted**. The variable is the *formatting of the JSON body*.
+
+  `BaseHTTPRequestHandler` reads a request line with `readline()`, i.e. up to the
+  first `\n`. A JSON body contains no newline, so when the next request's bytes
+  arrive the leftover body fuses with it. The unread body has no `Content-Length`
+  of its own at that point, so the fused line is tokenised by whitespace and
+  `words[-1]` is `HTTP/1.1` — a *valid* version. What happens next depends only on
+  how many whitespace tokens there are:
+
+  | body formatting | tokens | result |
+  |---|---|---|
+  | compact — `{"model":"m","messages":[…]}` | **3** | version validates, then `do_{"model":"m",…}POST` does not exist → **501 Unsupported method** |
+  | spaced — `json.dumps(...)` default | 9 | `if not 2 <= len(words) <= 3` → **400 Bad request syntax** |
+
+  Reproduced verbatim, including the message text, by sending two compact-JSON
+  POSTs down one socket against the pre-fix shipped handler:
+
+      response 1: HTTP/1.1 403 Forbidden
+      response 2: HTTP/1.1 501 Unsupported method
+                  ('{"model":"m","messages":[{"role":"user","content":"hi"}]}POST')
+
+  Aether's client bodies come from Node's `JSON.stringify`, which emits compact
+  JSON with no spaces — verified:
+  `{"model":"m","messages":[{"role":"user","content":"hi"}]}`, byte-identical to
+  the body above. That is precisely why the **live** engine returned 501 and not
+  400. Both statuses are the same desync, and both are gone after the fix.
 - One GPU only (`gpus=1`), so this proves the single-engine path. A/B/C
   failover across three live engines was not exercised.
 - Tool calls (`web_search`, `run_command`) were not exercised; the prompt was
