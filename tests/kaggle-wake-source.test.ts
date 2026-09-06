@@ -57,7 +57,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("5891989f37c57762cc9a9f27e33a7acc5104a2ca191b05fec4310599bdd050c8");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("794df4372dd6bc03b10188beefdac6034366252936644533ad019b0c9b0cfd3a");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -120,7 +120,7 @@ describe("engine source — rendering", () => {
      * this now pins the current rendered size rather than the original one.
      */
     const rendered = renderAetherNotebook(DUMMY);
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(40198);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(40475);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
@@ -321,5 +321,20 @@ describe("engine source — keep-alive socket hygiene (the 501 bug)", () => {
     const py = enginePython();
     expect(py).toContain("self._sent = False");
     expect(py).toContain("if getattr(self, '_sent', False):");
+    /*
+     * The flag must be raised where the status line actually goes out, i.e.
+     * inside agent_stream next to end_headers(). Setting it only after
+     * agent_stream() RETURNS left a mid-generation failure looking like "nothing
+     * sent yet", so do_POST's error handler wrote a SECOND "HTTP/1.1 200 OK" into
+     * the open chunked body -- reproduced by
+     * scripts/proofs/double-status-proof.py (2 status lines before, 1 after).
+     */
+    expect(py).toContain("handler._sent = True");
+    const raise = py.indexOf("handler._sent = True");
+    const endHeaders = py.indexOf("handler.end_headers()");
+    expect(endHeaders).toBeGreaterThan(-1);
+    expect(raise).toBeGreaterThan(endHeaders);
+    /* do_POST must no longer set it on the success path -- that was the bug. */
+    expect(py).not.toMatch(/agent_stream\(self, payload\)\s*\n\s*self\._sent = True/);
   });
 });
