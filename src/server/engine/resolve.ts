@@ -11,8 +11,17 @@ import {
   engineOffKey,
   engineUrlOverride,
   type EngineId,
+  KAGGLE_API,
+  wakeTrackTtlMs,
 } from "./contract";
 import { verifyAnnouncement } from "./beacon";
+import {
+  durableGuardActive,
+  hydrateEngineState,
+  recordWakeDispatch,
+  wakeDispatchedWithin,
+} from "./state-store";
+import { shutdownConfirmed, shutdownEngineUrl } from "./shutdown";
 
 /**
  * Aether engine control layer — THE single server-side control implementation.
@@ -36,7 +45,7 @@ import { verifyAnnouncement } from "./beacon";
 
 const DEFAULT_KERNEL_SLUG = "qwen-3-8-27b-uncensored-chat";
 const KERNEL_TITLE = "Qwen 3.8 27B Uncensored Chat";
-const KAGGLE_API = "https://www.kaggle.com/api/v1";
+
 export const ENGINE_MODEL = "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS";
 
 export interface EngineLink {
@@ -61,7 +70,12 @@ export interface ResolveResult {
 
 export interface KillResult {
   status: "off" | "error";
-  killed: Array<{ url: string; result: string }>;
+  /**
+   * `slot` is carried alongside the URL because the HTTP layer identifies
+   * engines by slot and never exposes the URL (audit C2). It is null only when
+   * a link was announced without a recognisable engine tag.
+   */
+  killed: Array<{ url: string; result: string; slot?: EngineId | null }>;
   message?: string;
 }
 
@@ -248,7 +262,6 @@ let discoveryCache: { at: number; result: DiscoverResult } | null = null;
  * Wake-in-progress tracking, per slot. Lets the status endpoint report "waking"
  * truthfully for the full boot instead of reverting to "off".
  */
-const WAKE_TRACK_TTL_MS = 15 * 60_000;
 const wakePushAt = new Map<EngineId, number>();
 
 export function markWakeDispatched(slot?: EngineId): void {
@@ -260,15 +273,16 @@ function isWakeInFlight(slot?: EngineId): boolean {
   const now = Date.now();
   if (slot) {
     const at = wakePushAt.get(slot);
-    return at !== undefined && now - at < WAKE_TRACK_TTL_MS;
+    return at !== undefined && now - at < wakeTrackTtlMs();
   }
-  return [...wakePushAt.values()].some((at) => now - at < WAKE_TRACK_TTL_MS);
+  return [...wakePushAt.values()].some((at) => now - at < wakeTrackTtlMs());
 }
 
 /** Test hook: clear caches between scenarios. */
 export function resetDiscoveryCache(): void {
   discoveryCache = null;
   wakePushAt.clear();
+  healthCache = null;
 }
 
 /** Candidate URLs for a slot: explicit override first, then attributed beacon. */
@@ -416,8 +430,29 @@ export async function wakeSlot(slot: EngineId): Promise<{ state: "waking" | "quo
     if (st === "queued" || st === "starting" || st === "running") {
       return { state: "waking", detail: `kernel ${st} on ${acc.user}` };
     }
+    /*
+     * FIX (audit R3): refuse to push a kernel that ANOTHER INSTANCE already
+     * pushed. `wakePushAt` above is per-process, so on a serverless host two
+     * instances answering the same wake request each pushed their own kernel —
+     * measured in the runtime proof as 2 Kaggle pushes for one logical wake,
+     * against a 30 h/week GPU quota.
+     *
+     * Gated on a durable backend being configured: within one process
+     * `activeWakes` and `isWakeInFlight()` already prevent a duplicate, so there
+     * is nothing for this guard to add.
+     */
+    if (durableGuardActive()) {
+      await hydrateEngineState();
+      if (wakeDispatchedWithin(slot, wakeTrackTtlMs())) {
+        return {
+          state: "waking",
+          detail: `wake already dispatched for engine ${slot} — not pushing a duplicate kernel`,
+        };
+      }
+    }
     await wakeKernel(acc);
     markWakeDispatched(slot);
+    recordWakeDispatch(slot);
     return { state: "waking", detail: `wake push sent to ${acc.user}` };
   } catch (error) {
     const msg = String((error as Error)?.message ?? error);
@@ -543,24 +578,16 @@ export async function killAllEngines(): Promise<KillResult> {
     return { status: "off", killed: [], message: "no running engines found - all engines already off" };
   }
 
-  const killed: Array<{ url: string; result: string }> = [];
+  const killed: Array<{ url: string; result: string; slot?: EngineId | null }> = [];
   for (const t of targets) {
-    try {
-      const r = await fetchJson(
-        `${t.url.replace(/\/$/, "")}${ENGINE_OFF_PATH}`,
-        { method: "POST", headers: { [ENGINE_OFF_HEADER]: KEY, "Content-Type": "application/json" } },
-        10_000,
-      );
-      if (r.code === 200) killed.push({ url: t.url, result: "shutdown" });
-      else if (r.code === 403) killed.push({ url: t.url, result: "rejected-key" });
-      else killed.push({ url: t.url, result: `http-${r.code}` });
-    } catch {
-      /* Unreachable may mean already gone — confirm rather than assume. */
-      killed.push({ url: t.url, result: (await isEngineAlive(t.url, 4_000)) ? "unreachable" : "already-off" });
-    }
+    /* The one and only shutdown implementation (audit B1). */
+    const result = await shutdownEngineUrl(t.url, KEY, {
+      isAlive: (u) => isEngineAlive(u, 4_000),
+    });
+    killed.push({ url: t.url, result, slot: t.slot ?? null });
   }
 
-  const confirmed = killed.filter((k) => k.result === "shutdown" || k.result === "already-off");
+  const confirmed = killed.filter((k) => shutdownConfirmed(k.result as never));
   const failed = killed.length - confirmed.length;
   return {
     status: failed > 0 && confirmed.length === 0 ? "error" : "off",
@@ -574,3 +601,85 @@ export async function killAllEngines(): Promise<KillResult> {
 
 /** Convenience re-export so callers have one import for the chat path. */
 export { ENGINE_CHAT_PATH };
+
+/* ------------------------------------------------------------------------ */
+/* Per-slot fleet health                                                     */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Real per-engine health, from an actual `/api/ps` probe.
+ *
+ * FIX (audit §4.1 / P2.12): the UI used to render "ready"/"no key" from
+ * `engineConfigured()`, i.e. "is the env var set" — so a dead engine displayed
+ * as ready and a healthy engine with a rotated key displayed as broken. Health
+ * and credential presence are different facts and are now reported separately.
+ */
+export interface SlotHealth {
+  slot: EngineId;
+  state: "live" | "waking" | "offline";
+  /** Round-trip time of the successful /api/ps probe, when there was one. */
+  latencyMs: number | null;
+  /** True when at least one candidate URL was actually probed. */
+  checked: boolean;
+  /** A previously bound URL failed its health check and must be evicted (audit A5). */
+  staleUrl: boolean;
+}
+
+export type FleetHealth = Record<EngineId, SlotHealth>;
+
+const HEALTH_CACHE_TTL_MS = 5_000;
+let healthCache: { at: number; result: FleetHealth } | null = null;
+
+/**
+ * Probe every slot independently. A slot is "live" only when its OWN attributed
+ * URL answers `/api/ps` — never inherited from another slot's engine.
+ *
+ * `bound` lets the caller (the state route) contribute the URLs the manager has
+ * already bound, so a rotated tunnel is detected and reported as stale instead
+ * of continuing to be trusted.
+ */
+export async function probeFleetHealth(
+  bound: Partial<Record<EngineId, string | null>> = {},
+  opts: { force?: boolean } = {},
+): Promise<FleetHealth> {
+  if (!opts.force && healthCache && Date.now() - healthCache.at < HEALTH_CACHE_TTL_MS) {
+    return healthCache.result;
+  }
+
+  /* One beacon read shared by all three slots — not one per slot. */
+  const links = await getEngineLinks();
+
+  const probe = async (slot: EngineId): Promise<SlotHealth> => {
+    const override = engineUrlOverride(slot);
+    const tagged = links.filter((l) => l.slot === slot).map((l) => l.url);
+    const boundUrl = bound[slot] ?? null;
+    /* Order matters: explicit override, then what we last bound, then beacon. */
+    const candidates = [...new Set([override, boundUrl, ...tagged].filter((u): u is string => Boolean(u)))];
+
+    let checked = false;
+    let staleUrl = false;
+    for (const url of candidates) {
+      const started = Date.now();
+      const alive = await isEngineAlive(url);
+      checked = true;
+      if (alive) {
+        return { slot, state: "live", latencyMs: Date.now() - started, checked, staleUrl: false };
+      }
+      /* A URL we had bound but can no longer reach is stale, by definition. */
+      if (url === boundUrl) staleUrl = true;
+    }
+
+    if (isWakeInFlight(slot)) return { slot, state: "waking", latencyMs: null, checked, staleUrl };
+    return { slot, state: "offline", latencyMs: null, checked, staleUrl };
+  };
+
+  const entries = await Promise.all(ENGINE_IDS.map(probe));
+  const result = Object.fromEntries(entries.map((e) => [e.slot, e])) as FleetHealth;
+  healthCache = { at: Date.now(), result };
+  return result;
+}
+
+/** Test hook. */
+export function resetHealthCache(): void {
+  healthCache = null;
+}

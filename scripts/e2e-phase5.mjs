@@ -107,8 +107,22 @@ const walk = (dir) => {
     if (entry.isDirectory()) walk(full);
     else if (entry.name.endsWith(".js")) {
       const content = readFileSync(full, "utf-8");
-      for (const pattern of ["KAGGLE_KEY", "KAGGLE_USERNAME", "kaggle.com/api", "ENGINE_KERNEL_", "webhook.site/token/72131bf4", "REMOVED_BEACON_TOPIC", "Basic "]) {
-        if (content.includes(pattern)) findings.push({ file: full, pattern });
+      /*
+       * Patterns, never the literal leaked values (audit C3). The previous list
+       * embedded the real webhook.site token and ntfy topic, which re-published
+       * the very secrets the scan exists to catch.
+       */
+      for (const re of [
+        /KAGGLE_KEY/,
+        /KAGGLE_USERNAME/,
+        /kaggle\.com\/api/,
+        /ENGINE_KERNEL_/,
+        /webhook\.site\/(?:token\/)?[0-9a-f-]{36}/,
+        /ntfy\.sh\/[A-Za-z0-9_-]{4,}/,
+        /nxoff-[A-Za-z0-9]{8,}/,
+        /Basic /,
+      ]) {
+        if (re.test(content)) findings.push({ file: full, pattern: String(re) });
       }
     }
   }

@@ -1,15 +1,28 @@
 # Aether — Netlify deployment configuration.
-# Engine control plane (from the verified aether-engine-runtime handoff):
-#   /.netlify/functions/ensure-alive  → wake + discover + A→B quota failover
-#   /.netlify/functions/engine-off    → one-button kill-all
-# Both Netlify Functions ship the pinned notebook via included_files.
+#
+# Engine control plane lives in the Next.js API routes, not in standalone
+# Netlify Functions:
+#   /api/netlify/ensure-alive  → wake + discover + A/B/C routing
+#   /api/netlify/engine-off    → one-button kill-all
+#
+# FIX (audit §3.3 / §6.3): the legacy netlify/functions handlers are deleted.
+# They were a second, drifted copy of the control plane, and `included_files`
+# shipped the 36 KB engine notebook — which contains the engine's OFF_KEY —
+# inside every deploy bundle. The notebook now exists in exactly one place,
+# src/server/engine/aether-engine-source.ts, sha256-pinned by test.
+#
+# KNOWN PLATFORM LIMIT (audit D3) — read this before deploying:
+#   Netlify caps SYNCHRONOUS function execution at 60 s and the limit is not
+#   configurable. Background Functions run 15 min but answer 202 immediately, so
+#   they cannot stream to the caller. Aether's engine generations routinely run
+#   longer than 60 s (a measured real generation took 64.1 s), so on Netlify they
+#   will be cut off mid-stream. The `maxDuration = 900` in the streaming route is
+#   honoured by a long-lived Node server and by Vercel, and ignored here.
+#   For full-length generations, run `next start` on a long-lived host.
+#   /api/engine/state reports the effective ceiling as `deployment`.
 [build]
   command = "next build"
   publish = ".next"
-
-[functions]
-  directory = "netlify/functions"
-  included_files = ["netlify/functions/ensure-alive/notebook.ipynb"]
 
 [build.environment]
   NODE_VERSION = "22"

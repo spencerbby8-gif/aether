@@ -11,9 +11,12 @@ import {
   type EngineId,
   type EngineInfo,
   type EngineState,
+  platformStreamCeilingSeconds,
 } from "./contract";
 import { engineConfigured } from "./kaggle";
 import { wakeSlot } from "./resolve";
+import { shutdownConfirmed, shutdownEngineUrl } from "./shutdown";
+import { engineStateStore } from "./state-store";
 
 /**
  * EngineManager — authoritative server-side lifecycle for the Kaggle engines.
@@ -424,29 +427,15 @@ export class EngineManager {
         continue;
       }
 
-      let outcome: string;
-      let accepted = false;
-      try {
-        const response = await this.http()(`${engine.url.replace(/\/$/, "")}${ENGINE_OFF_PATH}`, {
-          method: "POST",
-          headers: { [ENGINE_OFF_HEADER]: offKey, "content-type": "application/json" },
-          signal: AbortSignal.timeout(this.healthTimeoutMs),
-        });
-        if (response.ok) {
-          outcome = "off-accepted";
-          accepted = true;
-        } else if (response.status === 403) {
-          outcome = "off-rejected-key";
-        } else {
-          outcome = `off-http-${response.status}`;
-        }
-      } catch {
-        /* A dead tunnel also means the engine is gone — but only if we can
-           confirm it is no longer serving. Otherwise stay truthful. */
-        const stillUp = await this.health(engine.url);
-        outcome = stillUp ? "off-unreachable" : "off-already-gone";
-        accepted = !stillUp;
-      }
+      /* The one and only shutdown implementation (audit B1). This used to be a
+         second, hand-rolled copy of the wire call — and it had drifted to
+         /api/off + x-off-key, which the engine does not serve. */
+      const outcome = await shutdownEngineUrl(engine.url, offKey, {
+        isAlive: (u) => this.health(u),
+        fetchImpl: this.http(),
+        timeoutMs: this.healthTimeoutMs,
+      });
+      const accepted = shutdownConfirmed(outcome);
       results[slot] = outcome;
 
       if (accepted) {
@@ -459,7 +448,10 @@ export class EngineManager {
       }
     }
 
-    const allAccepted = Object.values(results).every((r) => r === "off-accepted" || r === "already-off" || r === "off-already-gone");
+    /* "no-url" for a slot that was already off is a truthful no-op, not a failure. */
+    const allAccepted = Object.values(results).every(
+      (r) => shutdownConfirmed(r as never) || r === "no-url" || r === "no-off-key",
+    );
     this.log(`off(${target}): ${JSON.stringify(results)}`);
     return {
       ok: allAccepted,
@@ -590,6 +582,21 @@ export class EngineManager {
       activeOperations: this.activeOperations,
       idleMs: this.idleMs(),
       idleLimitMinutes: idleMinutes(),
+      /*
+       * FIX (audit R3): an in-process idle clock only means something where a
+       * process actually lives between requests. On a serverless runtime every
+       * invocation can be a fresh instance, so `idleMs` would silently restart
+       * on each cold start and idle-off would never fire — yet the UI was
+       * rendering "~N min left" from it. Report the scope so the client can tell
+       * the truth instead of inheriting the server's assumption.
+       */
+      idleOff: idleOffStatus(this.idleTimer !== null),
+      /*
+       * FIX (audit D3): what this host can actually sustain. A client that does
+       * not know the platform ceiling cannot explain why a generation stopped,
+       * and `maxDuration` in the route source is not visible to it.
+       */
+      deployment: deploymentStatus(),
       /* Per-engine configuration flags — booleans only, never values. */
       kaggleConfigured: ENGINE_IDS.some((id) => engineConfigured(id)),
       kaggle: { a: engineConfigured("a"), b: engineConfigured("b"), c: engineConfigured("c") },
@@ -598,6 +605,129 @@ export class EngineManager {
   }
 }
 
-/* Singleton used by API routes (server process is authoritative). */
-export const engineManager = new EngineManager();
-engineManager.startIdleWatch();
+/* ------------------------------------------------------------------------- */
+/* Runtime capability (audit D3)                                              */
+/* ------------------------------------------------------------------------- */
+
+/** Which host we are on, and the streaming ceiling that implies. */
+export function deploymentStatus(): {
+  runtime: "netlify" | "vercel" | "node-server";
+  streamCeilingSeconds: number | null;
+  note: string;
+} {
+  const ceiling = platformStreamCeilingSeconds();
+  if (process.env.NETLIFY === "true") {
+    return {
+      runtime: "netlify",
+      streamCeilingSeconds: ceiling,
+      note:
+        "Netlify caps synchronous functions at 60 s and the limit is not configurable, so generations longer than that are cut off mid-stream. Background Functions run 15 min but answer 202 immediately and cannot stream. Long generations need a long-lived Node runtime.",
+    };
+  }
+  if (process.env.VERCEL) {
+    return {
+      runtime: "vercel",
+      streamCeilingSeconds: ceiling,
+      note: "Vercel honours maxDuration up to the plan ceiling (800 s on Pro/Enterprise).",
+    };
+  }
+  return {
+    runtime: "node-server",
+    streamCeilingSeconds: null,
+    note: "Long-lived Node server: no platform ceiling on a streaming response.",
+  };
+}
+
+/* ------------------------------------------------------------------------- */
+/* Idle-off runtime scope (audit R3)                                          */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * True when the host recycles the process between requests, so an in-memory
+ * idle clock cannot span the idle window. Netlify and Vercel both mark
+ * themselves in the environment.
+ */
+export function serverlessRuntime(): boolean {
+  return process.env.NETLIFY === "true" || Boolean(process.env.VERCEL);
+}
+
+/** What the client may honestly claim about idle shutdown. */
+export function idleOffStatus(timerRunning: boolean): {
+  running: boolean;
+  authoritative: boolean;
+  enforcedBy: "aether-server" | "engine";
+  reason: string;
+} {
+  if (timerRunning && !serverlessRuntime()) {
+    return {
+      running: true,
+      authoritative: true,
+      enforcedBy: "aether-server",
+      reason: "This process stays alive between requests, so the server enforces idle-off itself.",
+    };
+  }
+  return {
+    running: timerRunning,
+    authoritative: false,
+    enforcedBy: "engine",
+    reason: serverlessRuntime()
+      ? "Serverless runtime: the process is recycled between requests, so a server-side idle clock would restart on every cold start. Idle shutdown is enforced by the engine's own timeout."
+      : "No idle timer is running in this process; idle shutdown is enforced by the engine's own timeout.",
+  };
+}
+
+/*
+ * Singleton used by API routes (server process is authoritative).
+ *
+ * The idle watch is only started where it can work. On a serverless host it is
+ * deliberately NOT started: a timer that dies with the instance would burn a
+ * handle and, worse, make `idleMs` look meaningful when it is not.
+ */
+/*
+ * FIX (audit R3 / §7 P1 item 9): the singleton used to be constructed with
+ * module memory, so on a serverless host every fresh instance started from
+ * "active = a", an empty push-cooldown map and no bound URLs — engine selection
+ * never persisted and the same kernel got pushed again, burning real Kaggle
+ * quota. The store is now durable (Netlify Blobs on Netlify, a JSON file
+ * elsewhere) and is hydrated before the manager is handed out.
+ *
+ * getEngineManager() is async on purpose: a caller that could touch state
+ * before hydration would silently read an empty snapshot.
+ */
+/* The SAME instance resolve.ts uses, so the wake-dispatch guard and the
+   manager agree on one snapshot. */
+const durableStore = engineStateStore();
+
+let managerPromise: Promise<EngineManager> | null = null;
+
+export async function getEngineManager(): Promise<EngineManager> {
+  if (!managerPromise) {
+    managerPromise = (async () => {
+      const manager = new EngineManager({ store: durableStore });
+      /* The idle watch is only started where a timer can actually fire. On a
+         serverless host it is deliberately NOT started: a timer that dies with
+         the instance would burn a handle and make `idleMs` look meaningful when
+         it is not — the engine's own watchdog is the authority there. */
+      if (!serverlessRuntime()) manager.startIdleWatch();
+      return manager;
+      })();
+  }
+  const manager = await managerPromise;
+  /*
+   * Re-read durable state on EVERY request. A warm serverless container would
+   * otherwise keep serving the snapshot it loaded at first use, long after
+   * another instance had superseded it.
+   */
+  await durableStore.hydrate();
+  return manager;
+}
+
+/** Which durable backend the engine state is using (diagnostics + tests). */
+export function engineStateBackend(): string {
+  return durableStore.backendLabel;
+}
+
+/** Push any pending state write out. Call at the end of a request. */
+export function flushEngineState(): Promise<void> {
+  return durableStore.flush();
+}

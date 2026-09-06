@@ -78,7 +78,10 @@ async function stubAlive(url: string) {
   const netlify = await import("@/server/engine/netlify");
   vi.mocked(netlify.ensureAliveHandler).mockResolvedValue({
     status: 200,
-    body: { status: "alive", url, model: "fixture-model" },
+    /* The public body carries no URL (audit C2); the stream route dials via
+       `internal`, which is the only place a tunnel URL may live. */
+    body: { status: "alive", urlPresent: true, model: "fixture-model" },
+    internal: { url, slot: "a" },
   });
 }
 

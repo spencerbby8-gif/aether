@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+next-env.d.ts
+
+# typescript
+*.tsbuildinfo
+
+# runtime workspace (engine state, artifacts, tool scratch)
+.aether-run/
+
+# durable engine state must never be committed — it holds live tunnel URLs
+engine-state.json
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# proof harness scratch
+/tmp/
+*.log
+
+# os
+.DS_Store

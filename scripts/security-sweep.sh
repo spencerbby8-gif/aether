@@ -5,7 +5,9 @@ set -u
 FINDINGS=0
 
 echo "=== 1. client bundle (.next/static) ==="
-if grep -rlE "KAGGLE_KEY|KAGGLE_USERNAME|kaggle\.com/api|ENGINE_KERNEL_|72131bf4-534d|REMOVED_BEACON_TOPIC|ENGINE_OFF_KEY|KAGGLE_KEY_B|KAGGLE_USERNAME_B" .next/static/ 2>/dev/null; then
+# Beacon/OFF_KEY shapes rather than the leaked literals (audit C3): embedding the
+# real token and topic here would re-publish the secrets this sweep looks for.
+if grep -rlE "KAGGLE_KEY|KAGGLE_USERNAME|kaggle\.com/api|ENGINE_KERNEL_|webhook\.site/(token/)?[0-9a-f-]{36}|ntfy\.sh/[A-Za-z0-9_-]{4,}|nxoff-[A-Za-z0-9]{8,}|ENGINE_OFF_KEY|KAGGLE_KEY_B|KAGGLE_USERNAME_B" .next/static/ 2>/dev/null; then
   echo "FINDING: kaggle references in client bundle"; FINDINGS=1
 else
   echo "CLEAN: no kaggle references in client bundle"

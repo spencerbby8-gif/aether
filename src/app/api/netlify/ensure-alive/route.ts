@@ -17,14 +17,38 @@ export const maxDuration = 120;
  *   {status:"error", message}  (502 — e.g. all accounts out of quota)
  * Optional ?engine=a|b|c for strict single-account wake; omitted = AUTO (A→B→C).
  */
-function accountFrom(param: string | null): "a" | "b" | "c" | undefined {
-  return param === "a" || param === "b" || param === "c" ? param : undefined;
+/**
+ * FIX (audit B3/C5): an absent ?engine means AUTO (A→B→C). A PRESENT but invalid
+ * value used to be silently downgraded to AUTO as well, so a caller asking for
+ * engine "z" got a fleet-wide wake and a 502 with no indication that its own
+ * request was malformed. Invalid slots are now rejected with 400. Slot letters
+ * are accepted case-insensitively, matching ENGINE_TAG_RE in resolve.ts.
+ */
+type Account = "a" | "b" | "c";
+
+function accountFrom(param: string | null): Account | undefined | null {
+  if (param === null || param === "") return undefined; // absent -> AUTO
+  const lowered = param.trim().toLowerCase();
+  return lowered === "a" || lowered === "b" || lowered === "c" ? lowered : null; // null -> invalid
+}
+
+function invalidSlotResponse(raw: string): Response {
+  return Response.json(
+    {
+      status: "error",
+      slot: null,
+      message: `Invalid engine slot "${raw}". Use a, b, c, or omit the parameter for AUTO (A→B→C).`,
+    },
+    { status: 400 },
+  );
 }
 
 export async function GET(request: Request) {
   const denied = requireControlAuth(request);
   if (denied) return denied;
-  const account = accountFrom(new URL(request.url).searchParams.get("engine"));
+  const raw = new URL(request.url).searchParams.get("engine");
+  const account = accountFrom(raw);
+  if (account === null) return invalidSlotResponse(raw ?? "");
   const { status, body } = await ensureAliveHandler(account);
   return Response.json(body, { status });
 }
@@ -35,6 +59,8 @@ export async function POST(request: Request) {
   let engine: string | null = new URL(request.url).searchParams.get("engine");
   const body = (await request.json().catch(() => null)) as { engine?: string } | null;
   engine = engine ?? body?.engine ?? null;
-  const { status, body: result } = await ensureAliveHandler(accountFrom(engine));
+  const account = accountFrom(engine);
+  if (account === null) return invalidSlotResponse(engine ?? "");
+  const { status, body: result } = await ensureAliveHandler(account);
   return Response.json(result, { status });
 }

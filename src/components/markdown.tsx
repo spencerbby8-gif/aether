@@ -95,11 +95,21 @@ function MediaDownload({ href, name }: { href: string; name: string }) {
   );
 }
 
+/*
+ * Media wrappers use <span className="block"> rather than <div>.
+ *
+ * FIX (audit R5 / A7): react-markdown renders an image node inside the
+ * surrounding <p>, and a <div> there is invalid HTML — the browser silently
+ * closes the paragraph, so the server HTML and the hydrated tree disagree and
+ * React 19 reports "In HTML, <div> cannot be a descendant of <p>. This will
+ * cause a hydration error." A span with display:block is valid inside <p> and
+ * renders identically.
+ */
 function renderInlineMedia(href: string, children: ReactNode): ReactNode {
   if (IMAGE_EXT.test(href)) {
     const fileName = href.split("/").pop() ?? "generated-image.jpg";
     return (
-      <div className="my-2">
+      <span className="my-2 block">
         <a
           href={href}
           target="_blank"
@@ -115,33 +125,33 @@ function renderInlineMedia(href: string, children: ReactNode): ReactNode {
             decoding="async"
           />
         </a>
-        <div className="mt-1.5 flex items-center gap-2">
+        <span className="mt-1.5 flex items-center gap-2">
           <MediaDownload href={href} name={fileName} />
           <span className="text-[10.5px] text-fog-600">{fileName}</span>
-        </div>
-      </div>
+        </span>
+      </span>
     );
   }
   if (AUDIO_EXT.test(href)) {
     const fileName = href.split("/").pop() ?? "generated-audio.wav";
     return (
-      <div className="my-2">
+      <span className="my-2 block">
         <audio src={href} controls className="block h-10 w-full max-w-sm" />
-        <div className="mt-1.5">
+        <span className="mt-1.5 block">
           <MediaDownload href={href} name={fileName} />
-        </div>
-      </div>
+        </span>
+      </span>
     );
   }
   if (VIDEO_EXT.test(href)) {
     const fileName = href.split("/").pop() ?? "generated-video.mp4";
     return (
-      <div className="my-2">
+      <span className="my-2 block">
         <video src={href} controls className="block max-h-80 max-w-full rounded-lg border border-line" />
-        <div className="mt-1.5">
+        <span className="mt-1.5 block">
           <MediaDownload href={href} name={fileName} />
-        </div>
-      </div>
+        </span>
+      </span>
     );
   }
   return null;
@@ -182,7 +192,7 @@ const components = {
     }
     const fileName = src.split("/").pop() ?? "generated-image";
     return (
-      <div className="my-2">
+      <span className="my-2 block">
         <a
           href={src}
           target="_blank"
@@ -198,11 +208,11 @@ const components = {
             decoding="async"
           />
         </a>
-        <div className="mt-1.5 flex items-center gap-2">
+        <span className="mt-1.5 flex items-center gap-2">
           <MediaDownload href={src} name={fileName} />
           <span className="text-[10.5px] text-fog-600">{fileName}</span>
-        </div>
-      </div>
+        </span>
+      </span>
     );
   },
 } as unknown as Components;

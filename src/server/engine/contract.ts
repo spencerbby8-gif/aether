@@ -48,12 +48,19 @@ export function engineUrlOverride(slot: EngineId): string | null {
   return url && /^https?:\/\//i.test(url) ? url.replace(/\/+$/, "") : null;
 }
 
-export const WAKE_URL = "/.netlify/functions/ensure-alive";
-export const OFF_URL = "/.netlify/functions/engine-off";
 
 /** Three-engine fleet: A, B, and C. AUTO failover order is A → B → C. */
 export type EngineId = "a" | "b" | "c";
 export const ENGINE_IDS: EngineId[] = ["a", "b", "c"];
+
+/**
+ * Kaggle REST base URL.
+ *
+ * Overridable from SERVER env only (never bundled, never NEXT_PUBLIC_) so the
+ * documented push/status contract can be exercised against a recording endpoint
+ * in proofs without spending real GPU quota. Defaults to the real API.
+ */
+export const KAGGLE_API = process.env.KAGGLE_API_URL ?? "https://www.kaggle.com/api/v1";
 
 /**
  * Engine lifecycle states.
@@ -98,7 +105,50 @@ export function engineOffKey(): string | null {
 }
 
 /** Idle shutdown — 20 minutes of true inactivity (overridable for testing). */
-export const DEFAULT_IDLE_MINUTES = 20;
+/**
+ * The engine's OWN idle watchdog, read from the shipped notebook
+ * (`IDLE_LIMIT = 3600.0`, "60 min idle -> shutdown to save quota").
+ *
+ * FIX (audit §5 / D2): the server used to default to 20 minutes while the
+ * engine allowed 60, so the two disagreed and the server always fired first —
+ * making the engine's watchdog dead code and killing engines 40 minutes before
+ * either side intended. They now share one number. Set ENGINE_IDLE_MINUTES
+ * lower if you want the server to shut engines down sooner than they would
+ * shut themselves down.
+ */
+export const ENGINE_SELF_IDLE_MINUTES = 60;
+
+export const DEFAULT_IDLE_MINUTES = ENGINE_SELF_IDLE_MINUTES;
+
+/**
+ * Synchronous serverless execution ceiling, in seconds, for the host we detect.
+ *
+ * FIX (audit R1 / D3): Netlify caps synchronous function execution at 60 s and
+ * the limit is NOT configurable; its Background Functions run 15 min but answer
+ * 202 immediately and therefore cannot stream to the caller. `maxDuration = 900`
+ * on the streaming route is honoured by a long-lived Node server and by Vercel
+ * (up to 800 s on Pro) but is simply ignored by Netlify, which will cut a
+ * generation off mid-stream. A measured real generation here took 64.1 s — past
+ * that cap — so this is a deployment constraint, not a theoretical one.
+ */
+export function platformStreamCeilingSeconds(): number | null {
+  if (process.env.NETLIFY === "true") return 60;
+  if (process.env.VERCEL) return 800; // Vercel Pro/Enterprise GA ceiling
+  return null; // long-lived Node server: no platform ceiling
+}
+
+/**
+ * How long a dispatched wake is reported as "waking" before the fleet probe is
+ * allowed to call the slot offline again.
+ *
+ * Overridable from SERVER env so the expiry behaviour can be proven without
+ * waiting out the real 15-minute boot window. A slot whose engine never
+ * announces must eventually stop claiming to be waking.
+ */
+export function wakeTrackTtlMs(): number {
+  const raw = Number(process.env.ENGINE_WAKE_TRACK_TTL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 15 * 60_000;
+}
 
 export function idleMinutes(): number {
   const raw = Number(process.env.ENGINE_IDLE_MINUTES);

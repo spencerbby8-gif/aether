@@ -112,6 +112,15 @@ function setEnv(a = true, b = true, c = true) {
 beforeEach(() => {
   setEnv(true, true, true);
   process.env.BEACON_URL = "https://webhook.site/token/test";
+
+  /*
+   * The engine notebook is a TEMPLATE rendered with server secrets at push time
+   * (audit C3/C5), so the wake path cannot run without them. These are dummies;
+   * no real credential appears in this repo.
+   */
+  process.env.ENGINE_OFF_KEY = "test-off-key-0001";
+  process.env.ENGINE_BEACON_TOKEN = "00000000-0000-4000-8000-000000000000";
+  process.env.ENGINE_BEACON_TOPIC = "test-topic";
   process.env.BEACON_BACKUP_URL = "https://ntfy.sh/test/json?poll=1";
   delete process.env.BEACON_SECRET;
   delete process.env.ENGINE_URL_A;

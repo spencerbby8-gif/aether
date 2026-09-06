@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EngineManager } from "@/server/engine/manager";
-import { DEFAULT_IDLE_MINUTES, idleMinutes } from "@/server/engine/contract";
+import {
+  DEFAULT_IDLE_MINUTES,
+  idleMinutes,
+  ENGINE_SELF_IDLE_MINUTES,
+} from "@/server/engine/contract";
 
 const BEACON = "https://beacon.test/token";
 const BEACON_BACKUP = "https://ntfy.test/topic/json?poll=1";
@@ -9,6 +13,10 @@ const TUNNEL_B = "https://beta.trycloudflare.com";
 const TUNNEL_C = "https://gamma.trycloudflare.com";
 
 /**
+ * Unified shutdown vocabulary (audit B1): both the manager and killAllEngines
+ * now report "shutdown" | "rejected-key" | "http-N" | "unreachable" |
+ * "already-off" from the single shutdownEngineUrl() implementation.
+ *
  * Scripted fetch: beacons + engine health + the engine's REAL shutdown contract
  * (POST /off with X-Engine-Key). There is deliberately no `/api/off` handler —
  * the real engine proxies unknown paths to ollama and returns 502, so any code
@@ -202,7 +210,7 @@ describe("EngineManager — shutdown uses the engine's REAL contract (audit C3)"
     await manager.resolve({ engine: "a" });
     const result = await manager.off("all");
     expect(result.ok).toBe(true);
-    expect(result.results.a).toBe("off-accepted");
+    expect(result.results.a).toBe("shutdown");
     expect(calls).toContain(`${TUNNEL_A}/off`);
     expect(calls.some((c) => c.endsWith("/api/off"))).toBe(false);
     expect(offRequests[0]?.key).toBe("test-off-key");
@@ -216,7 +224,7 @@ describe("EngineManager — shutdown uses the engine's REAL contract (audit C3)"
     await manager.resolve({ engine: "a" });
     const result = await manager.off("all");
     expect(result.ok).toBe(false);
-    expect(result.results.a).toBe("off-rejected-key");
+    expect(result.results.a).toBe("rejected-key");
     /* The engine is still running — the state must say so. */
     expect(manager.snapshot().engines.a.state).toBe("alive");
     expect(manager.snapshot().engines.a.url).toBe(TUNNEL_A);
@@ -237,7 +245,7 @@ describe("EngineManager — shutdown uses the engine's REAL contract (audit C3)"
     await broken.resolve({ engine: "a" });
     const result = await broken.off("all");
     expect(result.ok).toBe(false);
-    expect(result.results.a).toBe("off-http-502");
+    expect(result.results.a).toBe("http-502");
     expect(broken.snapshot().engines.a.state).toBe("alive");
   });
 
@@ -252,7 +260,7 @@ describe("EngineManager — shutdown uses the engine's REAL contract (audit C3)"
     manager.endOperation();
     const accepted = await manager.off("all");
     expect(accepted.ok).toBe(true);
-    expect(accepted.results.a).toMatch(/off-accepted|no-url|already-off/);
+    expect(accepted.results.a).toMatch(/shutdown|no-url|already-off/);
   });
 
   it("refuses shutdown entirely when ENGINE_OFF_KEY is not configured", async () => {
@@ -271,11 +279,19 @@ describe("EngineManager — idle shutdown", () => {
     delete process.env.ENGINE_IDLE_MINUTES;
   });
 
-  it("defaults to 20 minutes and honours the override", () => {
-    expect(DEFAULT_IDLE_MINUTES).toBe(20);
-    expect(idleMinutes()).toBe(20);
+  /*
+   * FIX (audit D2): the server used to default to 20 minutes while the engine's
+   * own watchdog (IDLE_LIMIT = 3600 in the shipped notebook) allowed 60, so the
+   * two disagreed and the server always fired first — the engine's watchdog was
+   * dead code and engines died 40 minutes before either side intended.
+   */
+  it("defaults to the engine's own 60-minute watchdog and honours the override", () => {
+    expect(ENGINE_SELF_IDLE_MINUTES).toBe(60);
+    expect(DEFAULT_IDLE_MINUTES).toBe(ENGINE_SELF_IDLE_MINUTES);
+    expect(idleMinutes()).toBe(60);
     process.env.ENGINE_IDLE_MINUTES = "5";
     expect(idleMinutes()).toBe(5);
+    delete process.env.ENGINE_IDLE_MINUTES;
   });
 
   it("never idles out while an operation is in flight", async () => {

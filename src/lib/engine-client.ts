@@ -12,23 +12,63 @@ export type EngineState = "alive" | "waking" | "off" | "quota" | "unreachable" |
 
 export type EngineSlot = "a" | "b" | "c";
 
+/** Real per-engine health, from that slot's own /api/ps probe. */
+export type SlotHealth = "live" | "waking" | "offline";
+
+export interface EngineSlotInfo {
+  id: string;
+  /** Truth: did THIS slot's own engine answer /api/ps? */
+  health: SlotHealth;
+  latencyMs: number | null;
+  healthChecked: boolean;
+  /** Credential presence — deliberately NOT health. */
+  configured: boolean;
+  state: EngineState;
+  /**
+   * Whether the server holds a URL for this slot. The URL itself is never sent
+   * to the browser: it is an unauthenticated RCE endpoint on the engine host.
+   */
+  urlPresent: boolean;
+  lastSeen: number | null;
+  lastError?: string;
+}
+
 export interface EngineSnapshot {
   active: EngineSlot;
-  engines: Record<EngineSlot, { id: string; state: EngineState; url: string | null; lastSeen: number | null }>;
+  engines: Record<EngineSlot, EngineSlotInfo>;
   activeOperations: number;
   idleMs: number;
   idleLimitMinutes: number;
+  /**
+   * Where idle shutdown is actually enforced (audit R3). `authoritative` is
+   * false on a serverless runtime, where a server-side idle clock restarts on
+   * every cold start and therefore must not be shown as a countdown.
+   */
+  idleOff?: {
+    running: boolean;
+    authoritative: boolean;
+    enforcedBy: "aether-server" | "engine";
+    reason: string;
+  };
+  /**
+   * What the hosting platform can actually sustain (audit D3). A null ceiling
+   * means a long-lived Node server; 60 means Netlify will cut a generation off.
+   */
+  deployment?: {
+    runtime: "netlify" | "vercel" | "node-server";
+    streamCeilingSeconds: number | null;
+    note: string;
+  };
   kaggleConfigured: boolean;
   /** Per-engine configuration flags (booleans only — never credentials). */
   kaggle?: { a: boolean; b: boolean; c: boolean };
   model?: string;
   events: Array<{ at: number; text: string }>;
   /**
-   * FRESH /api/ps health check — the single source of truth for whether an
-   * engine is ACTUALLY live. Never a cached/stale read. `alive` is only true
-   * when /api/ps returned 200 + models[].
+   * FRESH fleet-wide /api/ps health check. `alive` is only true when /api/ps
+   * returned 200 + models[]. Never carries a tunnel URL.
    */
-  live?: { alive: boolean; url: string | null; waking: boolean; latencyMs: number; checked: number };
+  live?: { alive: boolean; urlPresent: boolean; waking: boolean; latencyMs: number; checked: number; slot: EngineSlot | null };
 }
 
 export async function engineState(): Promise<EngineSnapshot | null> {
@@ -41,11 +81,19 @@ export async function engineState(): Promise<EngineSnapshot | null> {
   }
 }
 
-/** Real ensure-alive response shapes (handoff contract). */
+/**
+ * Real ensure-alive response shapes (handoff contract).
+ *
+ * FIX (audit C2): carries NO tunnel URL. The browser never dials an engine
+ * directly — the server proxies every engine request — so the URL is server-
+ * internal. `urlPresent` says whether the server holds one; `slot` says which
+ * engine it is.
+ */
 export interface EnsureAliveResponse {
   status: "alive" | "waking" | "error";
-  url?: string;
-  engines?: Array<{ url: string; ageMinutes: number }>;
+  slot?: EngineSlot | null;
+  urlPresent?: boolean;
+  engines?: Array<{ slot: EngineSlot | null; ageMinutes: number }>;
   model?: string;
   ageMinutes?: number;
   etaMinutes?: number;
@@ -79,7 +127,8 @@ export async function engineWake(
 
 export interface EngineOffResponse {
   status: "off" | "error";
-  killed: Array<{ url: string; result: string }>;
+  /** Identified by slot, never by tunnel URL (audit C2). */
+  killed: Array<{ slot: EngineSlot | null; result: string }>;
   message?: string;
 }
 
@@ -108,7 +157,12 @@ export interface EngineStatusResponse {
   /** True runtime state, confirmed by /api/ps. */
   state: EngineRuntimeState;
   alive: boolean;
-  url: string | null;
+  /**
+   * Whether an engine is addressable. The URL itself is never sent to the
+   * browser (audit A8 / §6.6): it is an unauthenticated RCE endpoint on the
+   * engine host, and the beacons that publish it are world-readable.
+   */
+  urlPresent: boolean;
   model: string | null;
   checked: number;
   waking: boolean;
@@ -117,7 +171,7 @@ export interface EngineStatusResponse {
 
 /**
  * Read-only engine state (never wakes). Powers the header power-button.
- *   GET /api/netlify/engine-status → { state, alive, url, model, checked }
+ *   GET /api/netlify/engine-status → { state, alive, urlPresent, model, checked }
  * `alive` is only true once /api/ps has confirmed the engine — never a
  * stale beacon read.
  */
@@ -131,7 +185,7 @@ export async function engineStatus(timeoutMs: number = 12_000): Promise<EngineSt
   return {
     state: body.state ?? (body.alive ? "live" : "offline"),
     alive: body.alive ?? false,
-    url: body.url ?? null,
+    urlPresent: body.urlPresent ?? false,
     model: body.model ?? null,
     checked: body.checked ?? 0,
     waking: body.waking ?? false,

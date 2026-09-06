@@ -93,3 +93,51 @@ export function redactToken(value: string): string {
   if (!token) return value;
   return value.split(token).join("[redacted-control-token]");
 }
+
+/* ------------------------------------------------------------------------ */
+/* Signed artifact URLs                                                      */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Artifacts are rendered through <img>/<audio> tags, which cannot send an
+ * Authorization header. Gating /api/tools/artifact with the control token would
+ * therefore break every generated image — but leaving it open meant anyone could
+ * enumerate and read the run workspace (audit B7 / §6).
+ *
+ * The compromise is a signed, expiring URL: the server mints it, the browser
+ * fetches it with no credentials, and the signature cannot be forged or extended.
+ */
+const ARTIFACT_TTL_SECONDS = 3_600;
+
+function artifactSecret(): string | null {
+  const explicit = process.env.AETHER_ARTIFACT_SECRET;
+  if (explicit && explicit.length >= 16) return explicit;
+  return controlToken();
+}
+
+function artifactSignature(id: string, exp: number): string {
+  const secret = artifactSecret();
+  if (!secret) return "";
+  return crypto.createHmac("sha256", secret).update(`${id}|${exp}`).digest("hex");
+}
+
+/** Mint a signed, time-limited artifact URL for use in media tags. */
+export function signArtifactUrl(id: string, ttlSeconds: number = ARTIFACT_TTL_SECONDS): string {
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const sig = artifactSignature(id, exp);
+  const q = new URLSearchParams({ id, exp: String(exp), sig });
+  return `/api/tools/artifact?${q.toString()}`;
+}
+
+/** Verify a signed artifact URL. False when unsigned, expired, or forged. */
+export function verifyArtifactUrl(id: string, exp: string | null, sig: string | null): boolean {
+  const secret = artifactSecret();
+  /* No secret configured: refuse rather than serve the workspace openly. */
+  if (!secret) return localAnonymousAllowed();
+  if (!id || !exp || !sig) return false;
+  const expNum = Number(exp);
+  if (!Number.isFinite(expNum) || expNum < Math.floor(Date.now() / 1000)) return false;
+  const expected = artifactSignature(id, expNum);
+  if (expected.length !== sig.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig, "hex"));
+}

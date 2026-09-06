@@ -1,7 +1,13 @@
-import { engineManager } from "@/server/engine/manager";
-import { MODEL_NAME, streamIdleTimeoutMs, streamTotalTimeoutMs, type EngineId } from "@/server/engine/contract";
-import { ensureAliveHandler } from "@/server/engine/netlify";
-import type { ResolveResult } from "@/server/engine/resolve";
+import { getEngineManager } from "@/server/engine/manager";
+import {
+  ENGINE_OFF_HEADER,
+  MODEL_NAME,
+  engineOffKey,
+  streamIdleTimeoutMs,
+  streamTotalTimeoutMs,
+  type EngineId,
+} from "@/server/engine/contract";
+import { ensureAliveHandler, type PublicResolveBody } from "@/server/engine/netlify";
 import { requireControlAuth } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
@@ -146,6 +152,10 @@ export async function POST(request: Request) {
   const authError = requireControlAuth(request);
   if (authError) return authError;
 
+  /* FIX (audit R3): hydrate durable engine state before anything reads it. On a
+     serverless host this instance may be brand new and its module memory empty. */
+  const engineManager = await getEngineManager();
+
   let body: { messages?: unknown; engine?: string };
   try {
     body = (await request.json()) as typeof body;
@@ -174,8 +184,13 @@ export async function POST(request: Request) {
   try {
     const account = mode === "auto" ? undefined : mode;
     const wake = await ensureAliveHandler(account);
-    const wakeBody = wake.body as ResolveResult;
-    if (wakeBody.status !== "alive" || !wakeBody.url) {
+    const wakeBody = wake.body as PublicResolveBody;
+    /*
+     * The engine URL lives on `internal`, never on the public body (audit C2).
+     * This route is the only consumer that genuinely needs to dial the engine.
+     */
+    const engineUrl = wake.internal?.url;
+    if (wakeBody.status !== "alive" || !engineUrl) {
       release();
       const errorMessage =
         wakeBody.status === "waking"
@@ -187,7 +202,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const base = wakeBody.url;
+    const base = engineUrl;
     const slot: EngineId = mode === "auto" ? engineManager.snapshot().active : mode;
 
     let base2 = base;
@@ -196,6 +211,8 @@ export async function POST(request: Request) {
 
     const idleTimeoutMs = streamIdleTimeoutMs();
     const totalTimeoutMs = streamTotalTimeoutMs();
+    /* Server-side only; never sent to the browser. */
+    const offKey = engineOffKey();
 
     const openChat = async (): Promise<Response | null> => {
       for (;;) {
@@ -205,7 +222,15 @@ export async function POST(request: Request) {
         try {
           const response = await fetch(`${base2.replace(/\/$/, "")}/api/chat`, {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            /*
+             * FIX (audit C5): the engine now authenticates every POST. Without
+             * this header the engine answers 403 — previously /api/chat was open
+             * to anyone who learned the tunnel URL, and it exposes run_command.
+             */
+            headers: {
+              "content-type": "application/json",
+              ...(offKey ? { [ENGINE_OFF_HEADER]: offKey } : {}),
+            },
             body: JSON.stringify({ model: MODEL_NAME, messages, stream: true }),
             signal: guard.signal,
           });

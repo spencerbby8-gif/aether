@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SearchResult, Settings } from "@/lib/types";
 import { cn, timeAgo, toast } from "@/lib/utils";
-import { engineOff, engineWake, useEngineSnapshot, type EngineSnapshot } from "@/lib/engine-client";
+import { engineOff, engineWake, useEngineSnapshot, type EngineSnapshot, type SlotHealth } from "@/lib/engine-client";
 import { ConversationStore } from "@/storage";
 import { Icon } from "./icons";
 
@@ -164,23 +164,48 @@ const ENGINE_STATE_STYLE: Record<string, string> = {
   error: "border-danger-400/30 bg-danger-400/10 text-danger-400",
 };
 
+/**
+ * Per-slot health chip. Driven by a real /api/ps probe of that slot's OWN
+ * engine — never by credential presence.
+ *
+ * FIX (audit §4.1 / P2.12): the old badge rendered "ready"/"no key" from
+ * `engineConfigured()`, so a dead engine displayed as ready and a healthy engine
+ * whose key had rotated displayed as broken.
+ */
+function HealthChip({ health, checked }: { health: SlotHealth; checked: boolean }) {
+  const map: Record<SlotHealth, { label: string; cls: string; pulse: boolean }> = {
+    live: { label: "live", cls: "border-ok-400/30 bg-ok-400/10 text-ok-400", pulse: false },
+    waking: { label: "waking", cls: "border-ember-400/30 bg-ember-400/10 text-ember-300", pulse: true },
+    offline: { label: checked ? "offline" : "no url", cls: "border-line bg-ink-750 text-fog-500", pulse: false },
+  };
+  const m = map[health];
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium", m.cls)}>
+      <span className={cn("size-1.5 rounded-full bg-current", m.pulse && "anim-pulse")} />
+      {m.label}
+    </span>
+  );
+}
+
+const ENGINE_SLOTS = ["a", "b", "c"] as const;
+
 function EnginePanel({ busy, snapshot, onRefresh }: { busy: boolean; snapshot: EngineSnapshot | null; onRefresh: () => void }) {
-  const [acting, setActing] = useState(false);
+  /* Which slot is mid-wake, so each button shows its OWN state (audit §4.3). */
+  const [wakingSlot, setWakingSlot] = useState<"a" | "b" | "c" | null>(null);
 
-  const locked = busy || acting || (snapshot?.activeOperations ?? 0) > 0;
+  const locked = busy || (snapshot?.activeOperations ?? 0) > 0;
 
-  /* THE truth: a fresh /api/ps check. An engine is only "live" when this
-     says so — never inferred from selection, cached URLs, or stale state. */
+  /* THE truth: a fresh fleet-wide /api/ps check. */
   const live = snapshot?.live;
   const actuallyLive = live?.alive ?? false;
-  const waking = live?.waking ?? false;
+  const anyWaking = ENGINE_SLOTS.some((id) => (snapshot?.engines[id]?.health ?? "offline") === "waking");
 
   const wake = async (engine: "a" | "b" | "c") => {
-    setActing(true);
+    setWakingSlot(engine);
     try {
       const result = await engineWake(engine);
       if (result.status === "alive") {
-        toast(`Engine ${engine.toUpperCase()} is alive${result.url ? ` — ${result.url}` : ""}`, "ok");
+        toast(`Engine ${engine.toUpperCase()} is live.`, "ok");
       } else if (result.status === "waking") {
         toast(`Engine ${engine.toUpperCase()} is waking (${result.reason ?? "boot in progress"})…`, "info");
       } else {
@@ -188,25 +213,32 @@ function EnginePanel({ busy, snapshot, onRefresh }: { busy: boolean; snapshot: E
       }
       onRefresh();
     } finally {
-      setActing(false);
+      setWakingSlot(null);
     }
   };
 
   const shutdown = async () => {
-    setActing(true);
+    setWakingSlot(null);
     try {
       const result = await engineOff();
       const anyShutdown = result.killed?.some((k) => k.result === "shutdown");
       toast(result.message ?? (anyShutdown ? "Engines shut down." : "No running engines."), anyShutdown ? "ok" : "info");
       onRefresh();
     } finally {
-      setActing(false);
+      onRefresh();
     }
   };
 
-  const idleMinutesLeft = snapshot
-    ? Math.max(0, snapshot.idleLimitMinutes - snapshot.idleMs / 60_000)
-    : null;
+  /*
+   * Only a server that stays alive between requests can honour this countdown.
+   * On a serverless runtime the clock restarts on every cold start, so showing
+   * "~N min left" would be a fabrication (audit R3).
+   */
+  const idleAuthoritative = snapshot?.idleOff?.authoritative ?? false;
+  const idleMinutesLeft =
+    snapshot && idleAuthoritative
+      ? Math.max(0, snapshot.idleLimitMinutes - snapshot.idleMs / 60_000)
+      : null;
 
   return (
     <div className="mt-1 px-1">
@@ -214,72 +246,86 @@ function EnginePanel({ busy, snapshot, onRefresh }: { busy: boolean; snapshot: E
         Engine power · three Kaggle GPUs
       </p>
       <div className="rounded-xl border border-line bg-ink-800 p-3.5">
-        {/* Truthful live banner — driven by a fresh /api/ps health check. */}
+        {/* Truthful live banner — driven by a fresh /api/ps health check.
+            FIX (audit A8 / §6.6): the internal tunnel URL is never rendered.
+            It is an unauthenticated RCE endpoint on the engine host. */}
         <div
           className={cn(
             "mb-2 flex items-center gap-2 rounded-lg border px-3 py-2",
             actuallyLive && "border-ok-400/30 bg-ok-400/10",
-            waking && "border-ember-400/30 bg-ember-400/10",
-            !actuallyLive && !waking && "border-line bg-ink-850",
+            !actuallyLive && anyWaking && "border-ember-400/30 bg-ember-400/10",
+            !actuallyLive && !anyWaking && "border-line bg-ink-850",
           )}
         >
           <span
             className={cn(
               "size-2 rounded-full",
-              actuallyLive ? "bg-ok-400" : waking ? "anim-pulse bg-ember-400" : "bg-fog-600",
+              actuallyLive ? "bg-ok-400" : anyWaking ? "anim-pulse bg-ember-400" : "bg-fog-600",
             )}
           />
           <div className="min-w-0 flex-1">
             <span
               className={cn(
                 "block text-[12px] font-semibold",
-                actuallyLive ? "text-ok-400" : waking ? "text-ember-300" : "text-fog-400",
+                actuallyLive ? "text-ok-400" : anyWaking ? "text-ember-300" : "text-fog-400",
               )}
             >
-              {actuallyLive ? "Engine live" : waking ? "Engine waking…" : "No engine live"}
+              {actuallyLive
+                ? `Engine ${(live?.slot ?? "a").toUpperCase()} live`
+                : anyWaking
+                  ? "Engine waking…"
+                  : "No engine live"}
             </span>
-            {actuallyLive && live?.url ? (
-              <span className="block truncate font-mono text-[10px] text-fog-500">{live.url}</span>
-            ) : null}
+            <span className="block truncate text-[10px] text-fog-600">
+              {actuallyLive ? "confirmed by /api/ps" : "health-checked just now"}
+            </span>
           </div>
           <span className="shrink-0 text-[9.5px] uppercase tracking-wide text-fog-600">
-            {actuallyLive ? "confirmed /api/ps" : "health-checked"}
+            {live?.latencyMs != null ? `${live.latencyMs} ms` : "—"}
           </span>
         </div>
 
         <div className="grid grid-cols-3 gap-2">
-          {(["a", "b", "c"] as const).map((id) => {
-            const configured = snapshot?.kaggle?.[id] ?? false;
-            const isWakeTarget = snapshot?.active === id;
+          {ENGINE_SLOTS.map((id) => {
+            const info = snapshot?.engines[id];
+            const health = info?.health ?? "offline";
+            const configured = info?.configured ?? false;
+            /* FIX (audit §4.2 / P2.13): a slot's Wake button is disabled only
+               when THAT slot is already live — you can now bring up B while A
+               is serving, which is what manual failover requires. */
+            const alreadyLive = health === "live";
+            const isWaking = wakingSlot === id || health === "waking";
+            /* FIX (audit A5): a rotated tunnel the server had to evict. */
+            const stale = info?.state === "unreachable";
             return (
               <div key={id} className="rounded-lg border border-line bg-ink-850 px-3 py-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-semibold text-fog-200">
-                    Engine {id.toUpperCase()}
-                    {isWakeTarget ? <span className="ml-1.5 text-[9.5px] font-medium uppercase text-ember-300">target</span> : null}
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[12px] font-semibold text-fog-200">Engine {id.toUpperCase()}</span>
+                  <HealthChip health={health} checked={info?.healthChecked ?? false} />
+                </div>
+                {/* Credential presence is a separate fact from health. */}
+                <div className="mt-1 flex items-center justify-between gap-1">
+                  <span className={cn("text-[9.5px]", configured ? "text-fog-600" : "text-danger-400")}>
+                    {configured ? "key set" : "no key"}
                   </span>
-                  <span
-                    className={cn(
-                      "rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                      configured ? "border-ok-400/30 bg-ok-400/10 text-ok-400" : "border-line bg-ink-750 text-fog-500",
-                    )}
-                  >
-                    {configured ? "ready" : "no key"}
-                  </span>
+                  {stale ? <span className="text-[9.5px] text-ember-300">url rotated</span> : null}
                 </div>
                 <button
                   type="button"
-                  disabled={busy || acting || actuallyLive}
+                  disabled={busy || isWaking || alreadyLive}
                   onClick={() => void wake(id)}
                   className="mt-2 w-full rounded-md border border-line-strong px-2 py-1 text-[11px] text-fog-300 transition-colors hover:bg-ink-700 disabled:opacity-40"
                 >
-                  {waking ? "Waking…" : "Wake"}
+                  {isWaking ? "Waking…" : alreadyLive ? "Live" : "Wake"}
                 </button>
               </div>
             );
           })}
         </div>
 
+        {/* FIX (audit §4.5 / P2.14): ONE shutdown control. The header power
+            button and this panel previously called two different code paths
+            with two different behaviours. */}
         <button
           type="button"
           disabled={locked || !actuallyLive}
@@ -299,18 +345,27 @@ function EnginePanel({ busy, snapshot, onRefresh }: { busy: boolean; snapshot: E
           </p>
           <p>
             Credentials:{" "}
-            {(["a", "b", "c"] as const).map((slot, i) => (
+            {ENGINE_SLOTS.map((slot, i) => (
               <span key={slot}>
                 {i > 0 ? " · " : ""}
-                <span className={snapshot?.kaggle?.[slot] ? "text-ok-400" : "text-fog-500"}>
-                  {slot.toUpperCase()} {snapshot?.kaggle?.[slot] ? "configured" : "not set"}
+                <span className={snapshot?.engines[slot]?.configured ? "text-ok-400" : "text-fog-500"}>
+                  {slot.toUpperCase()} {snapshot?.engines[slot]?.configured ? "set" : "missing"}
                 </span>
               </span>
             ))}
           </p>
           <p>
-            Auto idle-off after <span className="text-fog-400">{snapshot?.idleLimitMinutes ?? 20} min</span> of true
-            inactivity{idleMinutesLeft !== null && snapshot && snapshot.idleLimitMinutes > 0 ? ` — ~${Math.ceil(idleMinutesLeft)} min left` : ""}.
+            {idleAuthoritative ? (
+              <>
+                Auto idle-off after <span className="text-fog-400">{snapshot?.idleLimitMinutes ?? 20} min</span> of true
+                inactivity{idleMinutesLeft !== null && snapshot && snapshot.idleLimitMinutes > 0 ? ` — ~${Math.ceil(idleMinutesLeft)} min left` : ""}.
+              </>
+            ) : (
+              <>
+                Idle shutdown is enforced by <span className="text-fog-400">the engine itself</span>; this runtime
+                recycles the server process between requests, so it cannot hold an idle clock.
+              </>
+            )}
             {!snapshot?.kaggleConfigured ? " Set the Kaggle environment variables to activate the engines." : ""}
           </p>
         </div>
@@ -390,7 +445,13 @@ export function SettingsModal({
           {routes.map((route) => {
             const selected = settings.provider === route.id;
             const engineInfo = route.id === "auto" ? null : snapshot?.engines[route.id];
-            const state = engineInfo?.state ?? null;
+            /* FIX (audit A2 / §4.4): the chip reports REAL health from that
+               slot's own /api/ps probe. The old code showed the manager's
+               internal lifecycle `state`, which on serverless read "off"/"a"
+               regardless of what was actually serving. */
+            const health = engineInfo?.health ?? null;
+            /* Which slot is genuinely serving right now (fleet-wide probe). */
+            const servingSlot = snapshot?.live?.alive ? snapshot.live.slot : null;
             return (
               <button
                 key={route.id}
@@ -412,34 +473,24 @@ export function SettingsModal({
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2 text-[13.5px] font-medium text-fog-100">
                     {route.name}
-                    {snapshot?.active === route.id ? (
-                      <span className="rounded border border-ember-400/35 px-1.5 py-px text-[9.5px] uppercase tracking-wide text-ember-300">
-                        active
-                      </span>
-                    ) : null}
+                    {/* "serving" is only ever shown against a slot that a fresh
+                        /api/ps probe confirmed — and for AUTO, against the slot
+                        actually answering, so the two never disagree. */}
+                    {route.id === "auto"
+                      ? servingSlot
+                        ? <span className="rounded border border-ok-400/35 px-1.5 py-px text-[9.5px] uppercase tracking-wide text-ok-400">
+                            serving {servingSlot.toUpperCase()}
+                          </span>
+                        : null
+                      : servingSlot === route.id
+                        ? <span className="rounded border border-ok-400/35 px-1.5 py-px text-[9.5px] uppercase tracking-wide text-ok-400">
+                            serving
+                          </span>
+                        : null}
                   </span>
                   <span className="mt-0.5 block text-[12px] leading-relaxed text-fog-500">{route.desc}</span>
                 </span>
-                {state ? (
-                  <span
-                    className={cn(
-                      "mt-0.5 inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium capitalize",
-                      state === "alive" && "border-ok-400/30 bg-ok-400/10 text-ok-400",
-                      state === "waking" && "border-ember-400/30 bg-ember-400/10 text-ember-300",
-                      state === "off" && "border-line bg-ink-750 text-fog-500",
-                      (state === "quota" || state === "error" || state === "unreachable") &&
-                        "border-danger-400/30 bg-danger-400/10 text-danger-400",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "size-1.5 rounded-full bg-current",
-                        (state === "alive" || state === "waking") && "anim-pulse",
-                      )}
-                    />
-                    {state}
-                  </span>
-                ) : null}
+                {health ? <span className="mt-0.5 shrink-0"><HealthChip health={health} checked={engineInfo?.healthChecked ?? false} /></span> : null}
               </button>
             );
           })}

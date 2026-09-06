@@ -1,4 +1,5 @@
 import type { ArtifactMeta, AttachmentMeta, ToolSchema } from "@/lib/types";
+import { controlAuthHeaders } from "@/lib/control-auth";
 import { formatBytes, scoreRelevance } from "@/lib/utils";
 import { ConversationStore, FileStore, MemoryStore } from "@/storage";
 
@@ -262,7 +263,10 @@ export async function createFullRegistry(): Promise<{ registry: ToolRegistry; re
     registry.register(executor);
   }
   try {
-    const response = await fetch("/api/tools/schemas", { cache: "no-store" });
+    const response = await fetch("/api/tools/schemas", {
+      cache: "no-store",
+      headers: await controlAuthHeaders(),
+    });
     if (!response.ok) return { registry, remoteTools: 0 };
     const body = (await response.json()) as { tools?: ToolSchema[] };
     const schemas = Array.isArray(body.tools) ? body.tools : [];

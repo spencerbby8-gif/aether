@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { signArtifactUrl } from "@/server/auth";
 import path from "node:path";
 import type { ToolResult } from "@/lib/types";
 import { ToolSecurityError, WORKSPACE_ROOT, assertUrlAllowed, redactSecrets, shortId } from "./security";
@@ -69,7 +70,8 @@ export async function webScreenshot(args: Record<string, unknown>, taskId: strin
       name: fileName,
       mimeType: "image/png",
       size: buffer.byteLength,
-      url: `/api/tools/artifact?id=${encodeURIComponent(`${path.basename(artifactDir)}/${fileName}`)}`,
+      /* Signed + expiring: media tags cannot carry an Authorization header. */
+      url: signArtifactUrl(`${path.basename(artifactDir)}/${fileName}`),
     };
     return {
       ok: true,

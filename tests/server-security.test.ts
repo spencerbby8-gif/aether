@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   ToolSecurityError,
   assertUrlAllowed,
@@ -93,5 +93,48 @@ describe("tool failure classification (audit §6.7)", () => {
     const r = await executeTool("no.such.tool", {}, "proof");
     expect(r.ok).toBe(false);
     expect(r.kind).toBe("invalid");
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* B5: Engine C must be present in every security path, not just A and B.     */
+/* ------------------------------------------------------------------------- */
+describe("redactSecrets covers all three engine accounts (audit B5)", () => {
+  const ORIGINAL = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL };
+  });
+
+  it("scrubs the A, B and C keys and usernames equally", () => {
+    /* Slot C credentials have historically been the ones left out of config and
+       redaction paths, so all three are asserted side by side. */
+    process.env.KAGGLE_USERNAME = "user-alpha";
+    process.env.KAGGLE_KEY = "key-alpha-0001";
+    process.env.KAGGLE_USERNAME_B = "user-beta";
+    process.env.KAGGLE_KEY_B = "key-beta-0002";
+    process.env.KAGGLE_USERNAME_C = "user-gamma";
+    process.env.KAGGLE_KEY_C = "key-gamma-0003";
+    process.env.ENGINE_OFF_KEY = "off-key-DO-NOT-SHIP";
+
+    const out = redactSecrets(
+      "a=user-alpha/key-alpha-0001 b=user-beta/key-beta-0002 c=user-gamma/key-gamma-0003 off=off-key-DO-NOT-SHIP",
+    );
+
+    for (const secret of [
+      "user-alpha", "key-alpha-0001",
+      "user-beta", "key-beta-0002",
+      "user-gamma", "key-gamma-0003",
+      "off-key-DO-NOT-SHIP",
+    ]) {
+      expect(out, `expected ${secret} to be scrubbed`).not.toContain(secret);
+    }
+    expect(out).toContain("[redacted]");
+  });
+
+  it("never lets an engine tunnel URL through a tool result", () => {
+    const out = redactSecrets("live at https://abc-123.trycloudflare.com/api/chat now");
+    expect(out).not.toMatch(/trycloudflare\.com/);
+    expect(out).toContain("[engine-url]");
   });
 });

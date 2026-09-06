@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { APP_VERSION } from "@/lib/version";
 import type { Conversation, Project } from "@/lib/types";
 import { cn, dayBucket, timeAgo } from "@/lib/utils";
 import { Icon, Logo } from "./icons";
@@ -76,8 +77,12 @@ export function Sidebar({ aether, online, onClose, onSearch, onSettings }: Sideb
             <Logo size={18} />
           </span>
           <span className="font-display text-[17px] font-semibold tracking-[-0.015em]">Aether</span>
-          <span className="rounded-full border border-line px-2 py-0.5 text-[9.5px] font-medium uppercase tracking-[0.12em] text-fog-600">
-            Phase 5
+          {/* FIX (audit A9): was a hardcoded "Phase 5" roadmap label. */}
+          <span
+            className="rounded-full border border-line px-2 py-0.5 text-[9.5px] font-medium uppercase tracking-[0.12em] text-fog-600"
+            title={`Aether ${APP_VERSION}`}
+          >
+            v{APP_VERSION}
           </span>
         </div>
         <button

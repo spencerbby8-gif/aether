@@ -91,7 +91,9 @@ export function ChatHeader({
       .then((result) => {
         if (result.status === "alive") {
           setWakeRequested(false);
-          toast(`Engine is live${result.url ? ` — ${result.url}` : ""}`, "ok");
+          /* Never surface the tunnel URL (audit A8 / §6.6) — it is an
+             unauthenticated RCE endpoint on the engine host. */
+          toast("Engine is live.", "ok");
         } else if (result.status === "waking") {
           /* Keep the wake flag set — the boot is in progress. The polled
            * engine status will flip to "live" when /api/ps responds. */

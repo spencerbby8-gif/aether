@@ -5,12 +5,12 @@ describe("beacon parsing (real wire formats)", () => {
   it("parses webhook.site heartbeats carried as ?m= query params", () => {
     const events = parseWebhookRequests({
       data: [
-        { url: "https://webhook.site/72131bf4?m=stage%3A+starting+gpus%3D1", created_at: "2026-08-31T21:10:00Z" },
+        { url: "https://webhook.site/00000000-0000-4000-8000-000000000000?m=stage%3A+starting+gpus%3D1", created_at: "2026-08-31T21:10:00Z" },
         {
-          url: "https://webhook.site/72131bf4?m=AGENT+LIVE+LINK%3A+https%3A%2F%2Fadd-awarded-tablet-uncle.trycloudflare.com+(tools%3A+web_search)",
+          url: "https://webhook.site/00000000-0000-4000-8000-000000000000?m=AGENT+LIVE+LINK%3A+https%3A%2F%2Fadd-awarded-tablet-uncle.trycloudflare.com+(tools%3A+web_search)",
           created_at: "2026-08-31T21:12:00Z",
         },
-        { url: "https://webhook.site/72131bf4?m=alive%3A+https%3A%2F%2Fadd-awarded-tablet-uncle.trycloudflare.com+(idle+0+min)", created_at: "2026-08-31T21:13:00Z" },
+        { url: "https://webhook.site/00000000-0000-4000-8000-000000000000?m=alive%3A+https%3A%2F%2Fadd-awarded-tablet-uncle.trycloudflare.com+(idle+0+min)", created_at: "2026-08-31T21:13:00Z" },
       ],
     });
     expect(events).toHaveLength(3);

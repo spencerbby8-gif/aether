@@ -6,8 +6,9 @@
  * faithful rather than convenient:
  *
  *   GET  /api/ps   -> 200 {models:[...]} only once warm
- *   POST /api/chat -> 200 application/x-ndjson, chunked, agent tool loop
+ *   POST /api/chat -> requires `X-Engine-Key` === OFF_KEY, then 200 ndjson
  *   POST /off      -> requires header `X-Engine-Key` === OFF_KEY, else 403
+ *   (every POST is gated, exactly like the real engine since audit C5)
  *   GET  /files/x  -> generated media
  *   anything else  -> proxied to ollama (i.e. 502 for unknown routes)
  *
@@ -80,6 +81,17 @@ export async function startEngineSim(opts: EngineSimOptions = {}): Promise<Engin
     const path = (req.url ?? "/").split("?")[0];
     sim.requests.push(`${req.method} ${path}`);
 
+    /*
+     * FIX (audit C5): mirrors the real engine, which now authenticates EVERY
+     * POST. Before this, only /off checked the key and /api/chat was wide open
+     * to anyone holding the tunnel URL — and /api/chat exposes run_command.
+     */
+    if (req.method === "POST" && enforceOffKey && req.headers["x-engine-key"] !== SIM_OFF_KEY) {
+      res.writeHead(403, { "content-type": "application/json" });
+      res.end(JSON.stringify({ status: "forbidden" }));
+      return;
+    }
+
     /* Unknown routes are proxied to ollama by the real engine -> 502. */
     if (path !== "/api/ps" && path !== "/api/chat" && path !== "/off" && !path.startsWith("/files")) {
       res.writeHead(502, { "content-type": "text/plain" });
@@ -135,7 +147,8 @@ export async function startEngineSim(opts: EngineSimOptions = {}): Promise<Engin
       res.writeHead(200, {
         "content-type": "application/x-ndjson",
         "transfer-encoding": "chunked",
-        "access-control-allow-origin": "*",
+        /* No wildcard CORS: the real engine stopped sending it (audit C5), and a
+           fixture that keeps it would hide a regression. */
       });
 
       let closed = false;

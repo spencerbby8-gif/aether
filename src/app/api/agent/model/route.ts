@@ -1,4 +1,5 @@
 import { brainPlan, brainStep, brainSummarize, brainValidate } from "@/agent/brain";
+import { requireControlAuth } from "@/server/auth";
 import type { ContextPack, Observation, TaskStep, ToolSchema } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,12 @@ const EMPTY_CONTEXT: ContextPack = {
 };
 
 export async function POST(request: Request) {
+  /* FIX (audit B7): this endpoint proxies to AETHER_AGENT_URL using the server's
+     AETHER_AGENT_KEY. Unauthenticated, it was an open relay that spent someone
+     else's model credentials. */
+  const denied = requireControlAuth(request);
+  if (denied) return denied;
+
   let body: ModelBody;
   try {
     body = (await request.json()) as ModelBody;

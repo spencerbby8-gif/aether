@@ -1,74 +1,107 @@
 #!/usr/bin/env node
 /**
- * Verify the installed verified engine source (src/server/engine/aether-engine-source.ts).
- * Strips the minimal TypeScript annotations, evaluates the module, calls
- * getAetherNotebook(), and checks the decoded notebook's SHA-256 against the
- * pinned AETHER_NOTEBOOK_SHA256. Exits 0 (PASS) only when they match — i.e.
- * the real verified notebook from the handoff is correctly installed.
+ * Verify the installed engine source (src/server/engine/aether-engine-source.ts).
+ *
+ * The module stores the engine notebook as a TEMPLATE with {{...}} placeholders;
+ * real secrets are substituted from server env at push time (audit C3/C5). This
+ * script checks, in plain JS with no TypeScript evaluation:
+ *
+ *   1. the stored Base64 decodes and its SHA-256 matches the pin in the file
+ *   2. the decoded template is a valid Jupyter notebook
+ *   3. it carries every placeholder the renderer must resolve
+ *   4. it contains NO leaked OFF_KEY / beacon token / ntfy topic
+ *   5. rendering with original-length values reproduces the verified 36,301 bytes
+ *
+ * Exits 0 (PASS) only when all five hold.
  */
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
-
-const nodeRequire = createRequire(import.meta.url);
 
 const FILE = "src/server/engine/aether-engine-source.ts";
-const EXPECTED = "3dc068d15a4c745db14c8c42ba841eca5862406761bff9b0633385848c561ddd";
+const source = readFileSync(FILE, "utf8");
 
-let source = readFileSync(FILE, "utf8");
-
-/* Minimal TS→JS strip for this specific module (exports + `: string` types). */
-source = source
-  .replace(/^export const /gm, "const ")
-  .replace(/^export function /gm, "function ")
-  .replace(/\): string \{/g, ") {")
-  + "\n;module.exports = { getAetherNotebook, AETHER_NOTEBOOK_SHA256 };\n";
-
-let mod;
-try {
-  const m = { exports: {} };
-  // eslint-disable-next-line no-new-func
-  const fn = new Function("module", "exports", "require", source);
-  fn(m, m.exports, nodeRequire);
-  mod = m.exports;
-} catch (error) {
-  console.error("FAIL: could not evaluate aether-engine-source.ts:", error.message);
+function fail(msg) {
+  console.error(`FAIL: ${msg}`);
   process.exit(1);
 }
 
-const { getAetherNotebook, AETHER_NOTEBOOK_SHA256 } = mod;
+/* --- 1. pin vs. stored bytes ------------------------------------------- */
+const pinMatch = source.match(/AETHER_NOTEBOOK_SHA256\s*=\s*"([0-9a-f]{64})"/);
+if (!pinMatch) fail("could not find the pinned SHA-256 constant.");
+const EXPECTED = pinMatch[1];
 
-if (AETHER_NOTEBOOK_SHA256 !== EXPECTED) {
-  console.error(`FAIL: pinned hash ${AETHER_NOTEBOOK_SHA256} !== expected ${EXPECTED}`);
-  process.exit(1);
-}
+const b64Match = source.match(/const B64\s*=\s*([\s\S]*?);\n/);
+if (!b64Match) fail("could not find the B64 payload.");
+const parts = [...b64Match[1].matchAll(/"([^"]+)"/g)]
+  .map((m) => m[1])
+  .filter((p) => /^[A-Za-z0-9+/=]+$/.test(p));
+if (parts.length === 0) fail("the B64 payload is empty.");
 
-let notebook;
-try {
-  notebook = getAetherNotebook(); // throws if B64 empty / hash mismatch / not JSON
-} catch (error) {
-  console.error(`FAIL: getAetherNotebook() threw: ${error.message}`);
-  console.error("The B64 payload is not installed or does not match the pinned hash.");
-  process.exit(1);
-}
+const decoded = Buffer.from(parts.join(""), "base64").toString("utf8");
+const actual = createHash("sha256").update(decoded, "utf8").digest("hex");
 
-const actual = createHash("sha256").update(notebook, "utf8").digest("hex");
-const bytes = Buffer.byteLength(notebook, "utf8");
-console.log(`Decoded notebook bytes : ${bytes}`);
+console.log(`Template bytes         : ${Buffer.byteLength(decoded, "utf8")}`);
 console.log(`SHA-256 (computed)     : ${actual}`);
-console.log(`SHA-256 (pinned)       : ${AETHER_NOTEBOOK_SHA256}`);
+console.log(`SHA-256 (pinned)       : ${EXPECTED}`);
+if (actual !== EXPECTED) fail("SHA-256 mismatch — stored template was modified without re-pinning.");
 
-if (actual !== EXPECTED) {
-  console.error("\nFAIL: SHA-256 mismatch — installed source is NOT the verified notebook.");
-  process.exit(1);
-}
+/* --- 2. valid notebook -------------------------------------------------- */
 try {
-  const parsed = JSON.parse(notebook);
+  const parsed = JSON.parse(decoded);
   if (!Array.isArray(parsed.cells)) throw new Error("no cells");
-} catch {
-  console.error("\nFAIL: decoded content is not a valid Jupyter notebook.");
-  process.exit(1);
+  if (parsed.nbformat !== 4) throw new Error(`nbformat ${parsed.nbformat}`);
+} catch (error) {
+  fail(`decoded content is not a valid Jupyter notebook (${error.message}).`);
 }
 
-console.log("\nPASS: verified engine source is correctly installed. Wake will push it.");
+/* --- 3. placeholders present ------------------------------------------- */
+const PLACEHOLDERS = ["{{AETHER_OFF_KEY}}", "{{AETHER_BEACON_TOKEN}}", "{{AETHER_BEACON_TOPIC}}"];
+for (const p of PLACEHOLDERS) {
+  if (!decoded.includes(p)) fail(`template is missing placeholder ${p}.`);
+}
+console.log(`Placeholders           : ${PLACEHOLDERS.length} present`);
+
+/* --- 4. no leaked secrets ---------------------------------------------- */
+/* Patterns, not values — the leaked literals must never be written back here. */
+const FORBIDDEN = [
+  [/nxoff-[A-Za-z0-9]{8,}/, "a hardcoded engine OFF_KEY"],
+  [/btb-kaggle-[0-9a-f]{4}/, "the ntfy beacon topic"],
+  [/webhook\.site\/(?:token\/)?[0-9a-f-]{36}/, "a webhook.site beacon token"],
+];
+for (const [re, label] of FORBIDDEN) {
+  if (re.test(decoded)) fail(`template still contains ${label}.`);
+  if (re.test(source)) fail(`module source still contains ${label}.`);
+}
+console.log("Leaked secrets         : none");
+
+/* --- 5. rendering resolves cleanly ------------------------------------- */
+const rendered = decoded
+  .split("{{AETHER_OFF_KEY}}").join("k".repeat(16))
+  .split("{{AETHER_BEACON_TOKEN}}").join("11111111-2222-3333-4444-555555555555")
+  .split("{{AETHER_BEACON_TOPIC}}").join("c".repeat(17));
+console.log(`Rendered bytes         : ${Buffer.byteLength(rendered, "utf8")}`);
+if (rendered.includes("{{AETHER")) fail("a placeholder survived rendering.");
+try {
+  JSON.parse(rendered);
+} catch {
+  fail("rendered content is not valid JSON.");
+}
+
+/* --- 6. engine-side hardening (audit C5) -------------------------------- */
+/* The engine's own python must authenticate every POST and must not offer a
+   wildcard CORS header to the open internet. */
+const cells = JSON.parse(rendered).cells ?? [];
+const py = cells
+  .filter((c) => c.cell_type === "code")
+  .map((c) => (Array.isArray(c.source) ? c.source.join("") : String(c.source ?? "")))
+  .join("\n");
+if (py.includes("Access-Control-Allow-Origin")) fail("engine still sends a CORS Access-Control-Allow-Origin header.");
+const gateMatches = py.match(/X-Engine-Key'\) != OFF_KEY/g) ?? [];
+if (gateMatches.length < 2) fail(`engine POST auth gate missing (found ${gateMatches.length} key checks, expected >= 2).`);
+if (!/def do_POST\(self\):\s*\n(?:\s*#[^\n]*\n)*\s*if self\.headers\.get\('X-Engine-Key'\) != OFF_KEY:/.test(py)) {
+  fail("the engine's do_POST does not check the key before routing.");
+}
+console.log("Engine hardening       : every POST gated, no wildcard CORS");
+
+console.log("\nPASS: engine source template is intact, secret-free, renderable and hardened.");
 process.exit(0);

@@ -11,6 +11,9 @@ const BEACON_SECRET = "proof-beacon-secret-fixed";
 const CONTROL_TOKEN = "proof-control-token-fixed";
 let announcements: string[] = [];
 
+const simA = await startEngineSim({ slot: "a", thinkSeconds: 60, contentSeconds: 4, keepAliveMs: 500 });
+const simB = await startEngineSim({ slot: "b", thinkSeconds: 0, contentSeconds: 2 });
+
 const beacon = http.createServer((req, res) => {
   const u = new URL(req.url ?? "/", "http://x");
   if (u.pathname.endsWith("/requests")) {
@@ -25,13 +28,30 @@ const beacon = http.createServer((req, res) => {
     res.end("ok");
     return;
   }
+  /* Admin endpoint: force a simulator healthy/unhealthy so a proof can put the
+     fleet into an exact state (e.g. A live + B dead) without guessing. */
+  if (u.pathname === "/__health") {
+    const slot = u.searchParams.get("slot");
+    const up = u.searchParams.get("up") === "1";
+    const sim = slot === "a" ? simA : slot === "b" ? simB : null;
+    if (sim) sim.healthy = up;
+    res.writeHead(200);
+    res.end(JSON.stringify({ slot, up }));
+    return;
+  }
+  /* Admin endpoint: read live simulator counters. */
+  if (u.pathname === "/__sims") {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      a: { healthy: simA.healthy, offCount: simA.offCount, abortedChats: simA.abortedChats, requests: simA.requests },
+      b: { healthy: simB.healthy, offCount: simB.offCount, abortedChats: simB.abortedChats, requests: simB.requests },
+    }));
+    return;
+  }
   res.writeHead(200);
   res.end("{}");
 });
 await new Promise((r) => beacon.listen(3200, "127.0.0.1", r));
-
-const simA = await startEngineSim({ slot: "a", thinkSeconds: 60, contentSeconds: 4, keepAliveMs: 500 });
-const simB = await startEngineSim({ slot: "b", thinkSeconds: 0, contentSeconds: 2 });
 
 function signed(slot, url) {
   const p = `engine=${slot} AGENT LIVE LINK: ${url} (tools: web_search fetch_page crawl_site run_command)`;

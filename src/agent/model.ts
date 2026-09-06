@@ -1,4 +1,5 @@
 import type { ContextPack, Observation, PlanStepSpec, Settings, TaskStep, ToolSchema } from "@/lib/types";
+import { controlAuthHeaders } from "@/lib/control-auth";
 import { sleep, uid } from "@/lib/utils";
 import { brainPlan, brainStep, brainSummarize, brainValidate } from "./brain";
 
@@ -145,7 +146,7 @@ export class ServerAgentModel implements AgentModel {
     try {
       response = await fetch("/api/agent/model", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...(await controlAuthHeaders()) },
         body: JSON.stringify({ mode, ...payload }),
         signal,
       });
