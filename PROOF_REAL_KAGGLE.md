@@ -85,12 +85,46 @@ Engine process gone, GPU released.
 
 ## Honest caveats
 
-- **The engine's control surface is intermittently flaky.** During one window,
-  `POST /off` and some `POST /api/chat` calls returned **501** with Python's
-  default `BaseHTTPRequestHandler` error page, alternating with correct 403s
-  from the same URL. Retrying `/off` succeeded on the next attempt. I did not
-  root-cause this; it looks like more than one handler answering behind the
-  tunnel. It is a real robustness bug and it is **not fixed**.
+- **The engine's control surface was intermittently flaky — NOW ROOT-CAUSED AND
+  FIXED.** During one window, `POST /off` and some `POST /api/chat` calls returned
+  **501** with Python's default `BaseHTTPRequestHandler` error page, alternating
+  with correct 403s from the same URL. Retrying `/off` succeeded on the next
+  attempt.
+
+  My original guess here — "more than one handler answering behind the tunnel" —
+  was **wrong** and is retracted. The decoded template contains exactly one
+  `class H(BaseHTTPRequestHandler)`, one `ThreadingHTTPServer(('0.0.0.0',8080),H)`
+  and one cloudflared tunnel.
+
+  Actual cause: the handler declares `protocol_version = 'HTTP/1.1'`, so sockets
+  are keep-alive, and the 403 auth gate returned **without consuming the request
+  body**. Those bytes stay in the socket and are parsed as the next request line.
+  After a desync the handler sets `close_connection`, so the proxy reconnects and
+  gets a clean 403 — which is precisely the observed perfect alternation.
+
+  Reproduced locally by exec'ing the *shipped* handler source (sliced out of the
+  decoded notebook with `ast`, not re-implemented) and driving it over one reused
+  socket — `scripts/proofs/keepalive-501-proof.py`:
+
+  | | pre-fix (`215376a`) | patched |
+  |---|---|---|
+  | sequential POSTs on one connection | `403,400,403,400,403,400,403,400` | `403 ×8` |
+  | pipelined pairs, 5 trials | `[403,400] ×5` | `[403,403] ×5` |
+  | desynced responses | **9 of 18** | **0 of 18** |
+
+  The server's own error text is the smoking gun — it shows the unread body
+  fused to the next request line:
+  `Bad request syntax ('{"model": "m", ...}POST /api/chat HTTP/1.1')`
+
+  **Honest caveat on 400 vs 501.** The status depends on the Python version's
+  `parse_request` strictness, not on the bug. CPython 3.13 (this sandbox) rejects
+  a request line with more than three whitespace tokens up front
+  (`if not 2 <= len(words) <= 3` → 400 "Bad request syntax"). Looser versions
+  accept `len(words) >= 3`, take `words[-1]` as the version — which is `HTTP/1.1`,
+  valid — and then fail on the method lookup (`do_{"model":` does not exist) →
+  **501 "Unsupported method"**, which is what the live engine returned. Both are
+  the same desync; the fix removes both. I did not record the live 501's message
+  text at the time, so the version attribution is an inference, not a measurement.
 - One GPU only (`gpus=1`), so this proves the single-engine path. A/B/C
   failover across three live engines was not exercised.
 - Tool calls (`web_search`, `run_command`) were not exercised; the prompt was
