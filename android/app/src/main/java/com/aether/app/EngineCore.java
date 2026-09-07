@@ -4,6 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -826,18 +827,41 @@ public final class EngineCore {
         }
 
         /**
-         * readSliceMs is 1s, not something larger, because it is what bounds how
-         * long "stop" can take to be noticed: the reader only re-checks the
-         * cancel flag when a read returns or times out. Measured with a local
-         * server, an 8s slice made stop take 8.0s; 1s makes it about a second,
-         * at the cost of one caught timeout per idle second.
+         * readSliceMs was 1s for a long time, on the reasoning that the reader
+         * only re-checks the cancel flag when a read returns or times out, so a
+         * short slice made "stop" land in about a second.
+         *
+         * That reasoning is true of the JDK and FALSE of Android, and it broke
+         * every chat on a real phone. On Android HttpURLConnection IS OkHttp,
+         * and OkHttp treats a read timeout as fatal: it throws
+         * SocketTimeoutException("timeout") and CLOSES THE SOCKET, so the next
+         * read fails with SocketException("Socket closed"). Those two strings
+         * are exactly what the user saw as "Engine error: timeout" and
+         * "socket is closed". On the JDK a read timeout is recoverable -- the
+         * loop catches it and simply reads again -- which is why every JVM
+         * proof of this code path passed while the phone failed every turn.
+         *
+         * The silence the slice has to survive is not hypothetical. Measured
+         * against a live engine (scripts/proofs/TtfbProbe.java and the gap
+         * trace in PROOF_CHAT_STREAM_TIMEOUT.md): the kernel emits its ⏳
+         * heartbeat, then goes quiet for 2243ms while the model produces its
+         * first token. A 1s slice is guaranteed to fire on the first token of
+         * every single reply. During a tool call the kernel emits nothing at
+         * all until the tool returns, for up to its own 1200s subprocess
+         * ceiling.
+         *
+         * So the slice is now sized to the engine's longest legitimate silence
+         * (same figure as stallMs), and "stop" no longer depends on it: the
+         * caller holds the live connection in a sink and disconnects it, which
+         * unblocks the read immediately on both runtimes. Stop is still about a
+         * second; a read timeout now means a genuine stall instead of normal
+         * operation.
          */
         public static StreamPolicy standard() {
-            /* 1260s stall = the kernel's longest tool timeout (1200s) plus a
-               margin, so no legitimate tool run is ever cut off. 2h total = ten
-               agent iterations each allowed a long tool. Stop still lands in
-               about a second, because it is checked on every read slice. */
-            return new StreamPolicy(15_000, 1_000, 1_260_000, 7_200_000);
+            /* 1260s = the kernel's longest tool timeout (1200s) plus a margin,
+               so no legitimate tool run is ever cut off. 2h total = ten agent
+               iterations each allowed a long tool. */
+            return new StreamPolicy(15_000, 1_260_000, 1_260_000, 7_200_000);
         }
     }
 
@@ -877,8 +901,60 @@ public final class EngineCore {
     public static void chatStream(String url, String offKey, List<Msg> history, String prompt,
                                   String system, boolean[] cancelledFlag, ChatListener listener,
                                   StreamPolicy p) {
+        chatStream(url, offKey, history, prompt, system, cancelledFlag, listener, p,
+                (TurnHandle) null);
+    }
+
+    /**
+     * The handle for one turn in flight. Cancelling has to interrupt a read
+     * that is legitimately blocked: the read timeout is now longer than any
+     * silence the engine produces, so a flag alone would leave "stop"
+     * unnoticed until the socket happened to deliver something.
+     *
+     * Measured, not assumed (scripts/proofs/StreamTimeoutProof.java): calling
+     * disconnect() alone did NOT interrupt a blocked read -- the turn ran on
+     * for 58.8s until the server let go, and then reported success. Closing the
+     * response stream is what actually breaks the read; disconnect is the
+     * follow-up that releases the socket. So cancel() does both.
+     *
+     * Safe to call from any thread and more than once; a no-op once the turn
+     * has finished.
+     */
+    public static final class TurnHandle {
+        private volatile InputStream in;
+        private volatile HttpURLConnection conn;
+
+        public void cancel() {
+            final InputStream s = in;
+            final HttpURLConnection c = conn;
+            /* On its own thread, because close() is not guaranteed to return
+               promptly: measured here, closing the response stream of a live
+               chunked reply blocked for 58.8s while it drained the body. The
+               turn itself is stopped by the polling loop the instant the
+               cancel flag is set; this only releases the socket behind it. */
+            Thread t = new Thread(() -> {
+                if (s != null) { try { s.close(); } catch (Exception ignored) { } }
+                if (c != null) { try { c.disconnect(); } catch (Exception ignored) { } }
+            }, "aether-turn-cancel");
+            t.setDaemon(true);
+            t.start();
+        }
+
+        void arm(HttpURLConnection c) { this.conn = c; }
+        void armStream(InputStream s) { this.in = s; }
+        void disarm() { this.in = null; this.conn = null; }
+    }
+
+    /**
+     * `handle`, when given, receives the live connection and its response
+     * stream so the caller can abort the turn. See TurnHandle.
+     */
+    public static void chatStream(String url, String offKey, List<Msg> history, String prompt,
+                                  String system, boolean[] cancelledFlag, ChatListener listener,
+                                  StreamPolicy p, TurnHandle handle) {
         HttpURLConnection c = null;
         final boolean[] fired = new boolean[] {false};
+        final long t0 = System.currentTimeMillis();
         try {
             JSONObject body = new JSONObject();
             body.put("stream", true);
@@ -899,6 +975,7 @@ public final class EngineCore {
             body.put("messages", msgs);
 
             c = open("POST", join(url, "/api/chat"), p.connectMs, p.readSliceMs);
+            if (handle != null) handle.arm(c);
             c.setRequestProperty("Content-Type", "application/json");
             c.setRequestProperty("Accept", "application/x-ndjson");
             c.setRequestProperty("X-Engine-Key", offKey);
@@ -913,23 +990,74 @@ public final class EngineCore {
                 return;
             }
 
-            try (BufferedReader r = new BufferedReader(
-                    new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
+            InputStream raw = c.getInputStream();
+            if (handle != null) handle.armStream(raw);
+            final BufferedReader r = new BufferedReader(
+                    new InputStreamReader(raw, StandardCharsets.UTF_8));
+
+            /* Lines are read on their own thread and handed over through a
+               queue; this loop only ever POLLS. That is the second half of the
+               timeout fix and it is not a style preference.
+
+               Cancelling a turn means interrupting a read that is legitimately
+               waiting for the next line. Measured (StreamTimeoutProof): neither
+               disconnecting the connection nor closing the response stream
+               interrupts a blocked readLine -- the turn ran on for 58.8s and
+               then reported success. So the turn never blocks on the socket at
+               all. It waits on the queue for 250ms at a time and re-checks the
+               cancel flag, the stall ceiling and the total deadline, which
+               makes "stop" land in about a quarter of a second on any runtime
+               while the socket read timeout stays longer than any silence the
+               engine can produce.
+
+               A reader left behind by a cancelled turn is a daemon thread; the
+               kernel ends its side of the work when the turn finishes. */
+            final java.util.concurrent.LinkedBlockingQueue<Object> q =
+                    new java.util.concurrent.LinkedBlockingQueue<>();
+            final Object eof = new Object();
+            Thread reader = new Thread(() -> {
+                try {
+                    String l;
+                    while (true) {
+                        try {
+                            l = r.readLine();
+                        } catch (java.net.SocketTimeoutException ste) {
+                            /* Not an event. The polling loop owns stall and
+                               deadline detection, and it needs the elapsed
+                               silence to describe them accurately. */
+                            continue;
+                        }
+                        if (l == null) break;
+                        q.offer(l);
+                    }
+                    q.offer(eof);
+                } catch (Exception ex) {
+                    /* The failure travels to the polling thread, which is the
+                       one that decides what the user is told. */
+                    q.offer(ex);
+                    q.offer(eof);
+                }
+            }, "aether-stream-reader");
+            reader.setDaemon(true);
+            reader.start();
+
+            try {
                 long start = System.currentTimeMillis();
                 long lastLine = start;
                 while (true) {
-                    /* Checked BEFORE the read as well as after. With a stalled
-                       socket the old loop could not reach its cancel check for
-                       the whole read timeout, so pressing stop appeared to do
-                       nothing and the bubble stayed on "generating" for ever. */
                     if (cancelledFlag != null && cancelledFlag[0]) {
                         fire(listener, fired, false, "cancelled");
                         return;
                     }
-                    String line;
+                    Object item;
                     try {
-                        line = r.readLine();
-                    } catch (java.net.SocketTimeoutException ste) {
+                        item = q.poll(250, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        fire(listener, fired, false, "cancelled");
+                        return;
+                    }
+                    if (item == null) {
                         long now = System.currentTimeMillis();
                         if (now - lastLine > p.stallMs) {
                             fire(listener, fired, false, "engine went quiet for "
@@ -942,15 +1070,16 @@ public final class EngineCore {
                                     + (p.totalMs / 1000) + "s and was stopped");
                             return;
                         }
-                        continue;      // surface again: cancel, stall, deadline
+                        continue;          // poll again: cancel, stall, deadline
                     }
-                    if (line == null) {
+                    if (item instanceof Exception) throw (Exception) item;
+                    if (item == eof) {
                         /* Server closed the stream: a normal end, not a hang. */
                         fire(listener, fired, true, null);
                         return;
                     }
                     lastLine = System.currentTimeMillis();
-                    line = line.trim();
+                    String line = item.toString().trim();
                     if (line.isEmpty()) continue;
                     JSONObject o;
                     try { o = new JSONObject(line); } catch (Exception e) { continue; }
@@ -971,13 +1100,44 @@ public final class EngineCore {
                         return;
                     }
                 }
+            } finally {
+                try { r.close(); } catch (Exception ignored) { }
             }
         } catch (Exception e) {
-            fire(listener, fired, false,
-                    e.getMessage() == null ? "stream failed" : e.getMessage());
+            /* Our own disconnect on cancel makes the read throw. That is a
+               stopped turn, not a failure, and must not be reported as one. */
+            if (cancelledFlag != null && cancelledFlag[0]) {
+                fire(listener, fired, false, "cancelled");
+                return;
+            }
+            fire(listener, fired, false, describeStreamFailure(e, System.currentTimeMillis() - t0));
         } finally {
+            if (handle != null) handle.disarm();
             if (c != null) c.disconnect();
         }
+    }
+
+    /**
+     * Say what a stream failure means instead of printing a Java exception
+     * message. "timeout" and "Socket closed" -- the raw messages OkHttp throws
+     * on Android -- told the user nothing about an engine that had stopped
+     * answering mid-reply.
+     */
+    private static String describeStreamFailure(Exception e, long elapsedMs) {
+        if (e instanceof java.net.SocketTimeoutException) {
+            return "engine went quiet after " + (elapsedMs / 1000)
+                    + "s -- the tunnel or the kernel is gone";
+        }
+        String m = e.getMessage() == null ? "" : e.getMessage();
+        String low = m.toLowerCase(java.util.Locale.ROOT);
+        if (e instanceof java.net.SocketException || low.contains("socket closed")
+                || low.contains("stream was reset") || low.contains("connection reset")
+                || low.contains("unexpected end of stream")) {
+            return "the connection to the engine dropped after " + (elapsedMs / 1000)
+                    + "s -- it will be retried on another engine";
+        }
+        if (e instanceof IOException && m.isEmpty()) return "the engine closed the stream";
+        return m.isEmpty() ? "stream failed" : m;
     }
 
     /** Exactly-once terminal callback, so the UI can never be left mid-turn. */

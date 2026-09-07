@@ -116,10 +116,19 @@ public class ChatActivity extends AppCompatActivity {
      * would appear not to save while an engine was booting.
      */
     private final ExecutorService storeExec = Executors.newSingleThreadExecutor();
+    /* Telemetry gets its own pool. A publish can block for its whole timeout,
+       and queueing that behind the single-threaded store or poll executors is
+       exactly how the buttons ended up dead behind the poll loop before. */
+    private final ExecutorService telemExec = Executors.newCachedThreadPool();
+    private boolean reportedFirstStream = false;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     /** Cancel flag for the in-flight turn. Polled by EngineCore between lines. */
     private boolean[] cancelFlag = null;
+    /* The turn that is streaming right now. Stop has to break its read: the
+       read timeout is deliberately longer than any silence the engine may
+       produce, so a flag alone would not interrupt it. */
+    private final EngineCore.TurnHandle turn = new EngineCore.TurnHandle();
 
     /**
      * The engine that answered last. Consecutive messages reuse it instead of
@@ -180,6 +189,7 @@ public class ChatActivity extends AppCompatActivity {
         sendBtn.setOnClickListener(v -> onSend());
         stopBtn.setOnClickListener(v -> {
             if (cancelFlag != null) cancelFlag[0] = true;
+            turn.cancel();
         });
 
         input.setOnEditorActionListener((v, actionId, event) -> {
@@ -1081,7 +1091,7 @@ public class ChatActivity extends AppCompatActivity {
                     @Override public void onDone(boolean good, String e) {
                         if (recorded.compareAndSet(false, true)) { ok[0] = good; err[0] = e; }
                     }
-                }, EngineCore.StreamPolicy.standard());
+                }, EngineCore.StreamPolicy.standard(), turn);
 
         boolean userStopped = cancel[0];
         boolean cancelled = "cancelled".equals(err[0]);
@@ -1128,6 +1138,8 @@ public class ChatActivity extends AppCompatActivity {
             } else if (!ok) {
                 forget();     // a failed engine must not be reused next message
                 if (b.model != null) markError(b.model, err);
+                telemetry("chat FAILED on engine " + engineOf(b) + " after " + (ms / 1000)
+                        + "s: " + err);
                 onError("Engine error: " + err, prompt);
             } else {
                 if (b.model != null) b.model.status = ChatMessage.STATUS_OK;
@@ -1135,10 +1147,32 @@ public class ChatActivity extends AppCompatActivity {
                         ? "engine " + b.model.engine.toUpperCase(Locale.ROOT) : "Aether";
                 b.meta.setText(who + " · " + (ms / 1000) + "s");
                 b.meta.setVisibility(View.VISIBLE);
+                if (!reportedFirstStream) {
+                    reportedFirstStream = true;
+                    telemetry("chat OK on engine " + engineOf(b) + " in " + (ms / 1000)
+                            + "s, " + b.raw.length() + " chars streamed");
+                }
             }
             persist();
             refreshChip();
         });
+    }
+
+    private static String engineOf(AssistantBubble b) {
+        return b != null && b.model != null && b.model.engine != null
+                ? b.model.engine.toUpperCase(java.util.Locale.ROOT) : "?";
+    }
+
+    /**
+     * Report what a turn did, so an installed build can be diagnosed from the
+     * build host. Nothing identifying: no keys, no account names, no tunnel
+     * URLs (scrubUrls runs here and inside publish).
+     */
+    private void telemetry(final String what) {
+        if (cfg == null || cfg.telemetryTopic == null || cfg.telemetryTopic.isEmpty()) return;
+        final String body = "build " + BuildConfig.VERSION_NAME + "(" + BuildConfig.VERSION_CODE
+                + ") " + EngineCore.scrubUrls(what);
+        telemExec.execute(() -> EngineCore.publish(cfg.telemetryTopic, body, 15_000));
     }
 
     /** Write the transcript, and keep the drawer in step with it. */

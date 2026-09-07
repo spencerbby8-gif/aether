@@ -123,8 +123,17 @@ public final class ShutdownProof {
                 p.stallMs > 1_200_000, "stallMs " + p.stallMs);
         check("total ceiling leaves room for ten long iterations",
                 p.totalMs > 3_600_000, "totalMs " + p.totalMs);
-        check("stop is still checked about once a second",
-                p.readSliceMs <= 1_500, "readSliceMs " + p.readSliceMs);
+        /* Was: "stop is still checked about once a second", asserting
+           readSliceMs <= 1500. That requirement moved, it did not disappear.
+           A short slice is unusable now -- on Android a read timeout closes
+           the socket, and the engine is legitimately silent for 2243ms before
+           its first token and for up to 1200s during a tool call -- so stop is
+           no longer driven by the read timeout at all: the turn polls a queue
+           and notices the cancel flag within 250ms. Measured in
+           StreamTimeoutProof at 55ms. What the policy must guarantee here is
+           that the slice outlasts the kernel's silence. */
+        check("the read slice outlasts the kernel's 1200s tool silence",
+                p.readSliceMs > 1_200_000, "readSliceMs " + p.readSliceMs);
 
         // -------------------------------------------------- 4. real engine
         if (liveUrl != null && !liveUrl.isEmpty()) {

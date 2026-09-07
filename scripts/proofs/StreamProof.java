@@ -243,13 +243,19 @@ public final class StreamProof {
                 ms + "ms (read slice " + shipped.readSliceMs + "ms)");
         check("stop is prompt in absolute terms", ms < 4_000, ms + "ms");
 
-        /* The same stop with a deliberately long read slice, to show what the
-           slice is actually buying: this is the old behaviour, where stop could
-           not be noticed until the read timed out. */
-        EngineCore.StreamPolicy longSlice = new EngineCore.StreamPolicy(2_000, 8_000, 300_000, 60_000);
+        /* Stop must NOT depend on the read slice. This assertion used to
+           require the opposite: that a long slice delays stop by roughly that
+           slice, which is why the shipped slice was 1s. That trade is no
+           longer available -- on Android HttpURLConnection is OkHttp, where a
+           read timeout closes the socket and kills the turn -- so the shipped
+           slice is now longer than any silence the engine can produce and
+           promptness comes from the polling loop instead. Same test, inverted
+           requirement: with a 21 minute slice, stop must still land at once. */
+        EngineCore.StreamPolicy longSlice =
+                new EngineCore.StreamPolicy(2_000, 1_260_000, 1_260_000, 60_000);
         long slow = stopLatency(longSlice, 600);
-        check("a long read slice delays stop by roughly that slice",
-                slow > 6_000, slow + "ms -- this is why the shipped slice is 1s");
+        check("stop is prompt even with a long read slice", slow < 4_000,
+                slow + "ms (read slice " + longSlice.readSliceMs + "ms)");
     }
 
     private static Rec lastRec;
