@@ -1,0 +1,19 @@
+engine /api/ps  0.141s  models=1
+
+PROFILE: AFTER-adaptive-reasoning
+scenario           byte    actv  1st-tok 1st-tool    total    dlt   beat  tools per-tool
+--------------------------------------------------------------------------------------------------------
+text               0.1s    0.1s    21.5s        -    22.7s      7      3      0 -
+web-search         0.1s    0.1s    14.6s     9.2s   273.5s    213     31      6 web_search=1.9s,fetch_page=0.5s,run_command=0.2s,run_command=0.5s,run_command=0.1s,run_command=0.5s
+fetch-page         0.4s    0.4s    30.4s    28.3s    39.2s     50      5      1 fetch_page=0.2s
+command            0.1s    0.1s    21.1s    19.1s    28.8s     43      3      1 run_command=0.1s
+file-ops           0.3s    0.3s    48.2s    44.1s    54.7s     37      7      1 run_command=0.0s
+parallel-tools     0.1s    0.1s    18.2s    15.9s    38.8s    115      5      2 run_command=0.0s,run_command=0.0s
+image              0.1s    0.1s    35.8s    31.0s    40.3s     25      5      1 generate_image=2.9s
+voice              0.3s    0.3s    52.1s    12.5s    58.1s     34      6      1 generate_voice=9.8s
+--------------------------------------------------------------------------------------------------------
+completed 8/8
+  median first-token   30.4s
+  median first-tool    19.1s
+  median total         40.3s
+  median silent gap between first activity and first answer token  30.0s

@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("63d7344e8ad6d6a9d2282fbba09b40e361fcc0a99fe51c90f4e20036f5415d1b");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("fcac1917da9ef98edc1cc07a50e241492671c48d297547ec0ea33065d2d42143");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -130,7 +130,7 @@ describe("engine source — rendering", () => {
      * scripts/verify-engine-source.mjs computes the same figure independently.
      */
     const rendered = renderAetherNotebook(DUMMY);
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(55220);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(56627);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 

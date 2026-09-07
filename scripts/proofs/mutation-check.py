@@ -23,11 +23,13 @@ def setup(proof):
     return MUT + '/' + TPL_REL
 
 
-def mutate(path, fn):
+def mutate(path, fn, name=''):
     nb = json.load(open(path))
     src = nb['cells'][4]['source']
     new = fn(src)
-    assert new != src, "mutation did not change anything"
+    # Name the case: a stale anchor otherwise aborts the whole run with a
+    # traceback that does not say which mutation no longer matches.
+    assert new != src, "mutation '%s' did not change anything -- stale anchor" % name
     nb['cells'][4]['source'] = new
     open(path, 'w').write(json.dumps(nb, ensure_ascii=True, separators=(',', ':')))
 
@@ -41,7 +43,7 @@ def run(proof):
 
 def case(name, proof, fn):
     path = setup(proof)
-    mutate(path, fn)
+    mutate(path, fn, name)
     rc, out = run(proof)
     caught = rc != 0
     print("  %-52s %s  %s" % (name, "caught" if caught else "*** NOT CAUGHT ***", out))
@@ -100,11 +102,11 @@ ok += case("tool-result cap removed", 'agent-loop-check.py',
 
 tot += 1
 ok += case("media event keyed 'name' instead of 'source'", 'agent-loop-check.py',
-           lambda s: s.replace("'source': name},", "'name': name},"))
+           lambda s: s.replace("'source': nm},", "'name': nm},"))
 tot += 1
 ok += case("media event not emitted at all", 'agent-loop-check.py',
-           lambda s: s.replace("                    if result.startswith('IMAGE READY: ')",
-                               "                    if False and result.startswith('IMAGE READY: ')"))
+           lambda s: s.replace("                if result.startswith('IMAGE READY: ')",
+                               "                if False and result.startswith('IMAGE READY: ')"))
 tot += 1
 ok += case("reasoning turned off (THINK = False)", 'agent-loop-check.py',
            lambda s: s.replace("THINK = True", "THINK = False"))
@@ -114,7 +116,7 @@ ok += case("think flag hardcoded False in the payload", 'agent-loop-check.py',
 
 tot += 1
 ok += case("reasoning kept in the history sent back to the model", 'agent-loop-check.py',
-           lambda s: s.replace("_am = {k: v for k, v in m.items() if k != 'thinking'}",
+           lambda s: s.replace("_am = {k2: v2 for k2, v2 in m.items() if k2 != 'thinking'}",
                                "_am = m"))
 
 tot += 1
@@ -127,6 +129,19 @@ ok += case("needs_reasoning always False (reasoning never used)", 'agent-loop-ch
 tot += 1
 ok += case("needs_reasoning always True (reasoning always paid for)", 'agent-loop-check.py',
            lambda s: s.replace("def needs_reasoning(text):", "def needs_reasoning(text):\n    return True"))
+
+tot += 1
+ok += case("tool calls forced back to one at a time", 'agent-loop-check.py',
+           lambda s: s.replace("max_workers=min(4, len(fresh))", "max_workers=1"))
+tot += 1
+ok += case("assistant message re-appended per tool call", 'agent-loop-check.py',
+           lambda s: s.replace("            msgs.append(_am)\n            msgs.extend(tool_msgs)",
+                               "            for _tm in tool_msgs:\n                msgs.append(_am); msgs.append(_tm)"))
+tot += 1
+ok += case("web_search duckduckgo parse broken again", 'agent-loop-check.py',
+           lambda s: s.replace(
+               "for m in re.findall(r'<a[^>]*class=\"result__a\"[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>', h, re.S)[:8]:",
+               "for m in re.finditer(r'<a[^>]*class=\"result__a\"[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>', h, re.S)[:0] or re.findall(r'x', h)[:8]:"))
 
 print("\n%d/%d mutation cases behaved correctly" % (ok, tot))
 raise SystemExit(0 if ok == tot else 1)

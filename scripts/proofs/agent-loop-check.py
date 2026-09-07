@@ -123,6 +123,14 @@ def make_env(script):
     def plain_tool(**k):
         return "nothing generated here"
 
+    def slow_a(**k):
+        time.sleep(1.2)
+        return "a done"
+
+    def slow_b(**k):
+        time.sleep(1.2)
+        return "b done"
+
     def web_search(query=None, **k):
         return "result for " + str(query)
 
@@ -132,7 +140,8 @@ def make_env(script):
         'NUM_CTX': 16384, 'TOOL_RESULT_MAX': 2500,
         'EXEC': {'web_search': web_search, 'run_command': run_command,
                  'big_tool': big_tool, 'generate_image': gen_image,
-                 'generate_voice': gen_voice, 'plain_tool': plain_tool},
+                 'generate_voice': gen_voice, 'plain_tool': plain_tool,
+                 'slow_a': slow_a, 'slow_b': slow_b},
         'TOOLS': [{"type": "function", "function": {"name": "web_search"}},
                   {"type": "function", "function": {"name": "run_command"}}],
         'ollama_stream': ollama_stream,
@@ -153,7 +162,10 @@ def tc(name, **args):
 
 
 def step_tools(*calls):
-    return {'message': {'content': '', 'tool_calls': list(calls)}, 'done': True}
+    # role is set because real Ollama returns it, and the message is appended
+    # to the prompt verbatim -- a fixture without it proves nothing about shape.
+    return {'message': {'role': 'assistant', 'content': '',
+                        'tool_calls': list(calls)}, 'done': True}
 
 
 def step_text(text):
@@ -330,6 +342,80 @@ chk("the history still grows with real turns",
 chk("tool results are still in the history",
     any(m.get('role') == 'tool' for m in PAYLOADS[-1]['messages']),
     str([m.get('role') for m in PAYLOADS[-1]['messages']]))
+
+print("== independent tool calls run concurrently ==")
+# Two unrelated calls in one step used to run back to back, so the step cost
+# the sum of both. They share nothing, so they run at the same time now.
+import time as _t
+PAYLOADS.clear()
+ns_p, _ = make_env([step_tools(tc('slow_a'), tc('slow_b')), step_text('both done')]
+                   + [step_text('x')] * 8)
+h_p = FakeHandler()
+_t0 = _t.time()
+ns_p['agent_stream'](h_p, {'messages': [{'role': 'user', 'content': 'do two things'}]})
+_elapsed = _t.time() - _t0
+chk("two 1.2s tools in one step finish in parallel, not in series",
+    _elapsed < 2.0, "elapsed = %.2fs for two 1.2s tools (series would be >= 2.4s)" % _elapsed)
+chk("both results still reached the model",
+    len(PAYLOADS) >= 2 and sum(1 for m in PAYLOADS[1]['messages'] if m.get('role') == 'tool') == 2,
+    str([m.get('role') for m in PAYLOADS[1]['messages']]) if len(PAYLOADS) >= 2 else "no second call")
+
+print("== one assistant message per step, however many calls it made ==")
+# The assistant message was appended inside the per-call loop, so a step with
+# three calls put three copies into the prompt. That bloat is re-sent on every
+# later iteration and paid for in prompt evaluation each time.
+PAYLOADS.clear()
+ns_a, _ = make_env([step_tools(tc('run_command', command='a'), tc('run_command', command='b'),
+                               tc('web_search', query='c')),
+                    step_text('done')] + [step_text('x')] * 8)
+h_a = FakeHandler()
+ns_a['agent_stream'](h_a, {'messages': [{'role': 'user', 'content': 'three things'}]})
+_second = PAYLOADS[1]['messages'] if len(PAYLOADS) >= 2 else []
+_n_asst = sum(1 for m in _second if m.get('role') == 'assistant')
+_n_tool = sum(1 for m in _second if m.get('role') == 'tool')
+chk("a 3-call step adds exactly one assistant message", _n_asst == 1,
+    "assistant=%d tool=%d roles=%s" % (_n_asst, _n_tool, [m.get('role') for m in _second]))
+chk("...and one tool result per call", _n_tool == 3, "tool=%d" % _n_tool)
+chk("tool results stay in the order the model asked for them",
+    [m.get('content') for m in _second if m.get('role') == 'tool']
+    == [m.get('content') for m in _second if m.get('role') == 'tool'][:3]
+    and _n_tool == 3, "n=%d" % _n_tool)
+
+print("== web_search really parses duckduckgo, not just the wikipedia fallback ==")
+# re.finditer(...)[:0] raised TypeError, which the surrounding except swallowed,
+# so both duckduckgo endpoints were skipped on every call and every search
+# silently fell through to Wikipedia. This lifts the real function and feeds it
+# real-shaped duckduckgo HTML through a fake subprocess.
+import html as _htmlmod
+import urllib.parse as _urlparse
+
+class _FakeProc:
+    def __init__(self, out): self.stdout = out; self.returncode = 0; self.stderr = ''
+
+DDG_HTML = (
+    '<div class="result"><a rel="nofollow" class="result__a" '
+    'href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Freal-source.example%2Farticle&rut=x">'
+    'Lagos population report</a>'
+    '<a class="result__snippet" href="#">Lagos has about 15 million people.</a></div>'
+)
+
+class _FakeSub:
+    def __init__(self): self.calls = []
+    def run(self, *a, **k):
+        self.calls.append(a)
+        return _FakeProc(DDG_HTML)
+
+_ws_src = src[src.index('def t_web_search'):src.index("def _readable")]
+import re as _re_mod
+_ws_ns = {'re': _re_mod, 'subprocess': _FakeSub(), 'urllib': type('U', (), {'parse': _urlparse})(),
+          'htmlmod': _htmlmod, 'json': json}
+exec(_ws_src, _ws_ns)
+_out = _ws_ns['t_web_search']('Lagos population')
+chk("duckduckgo results are returned instead of the wikipedia fallback",
+    'real-source.example' in _out, _out[:160])
+chk("the redirect wrapper is unwrapped to the real url",
+    'uddg=' not in _out, _out[:160])
+chk("the title survives", 'Lagos population report' in _out, _out[:160])
 
 print("\n%d passed, %d failed" % (ok, fail))
 raise SystemExit(0 if fail == 0 else 1)
