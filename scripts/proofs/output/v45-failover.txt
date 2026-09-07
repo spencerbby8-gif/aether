@@ -21,3 +21,9 @@
   PASS  pinning the dead slot C refuses instead of lying   [decision=null reason=engine C is not live (health -1)]
 
   chatting through the routed engine a...
+  PASS  the routed engine answered   [done=true error=null engineEvents=42]
+  PASS  the answer came back as a stream, not one block   [2 deltas]
+  PASS  the answer is not empty   [[routed]]
+  answer: routed
+
+FAILOVER PROOF  14 passed, 0 failed   (live=[a, b] dead=[c])
