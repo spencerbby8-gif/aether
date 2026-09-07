@@ -5,3 +5,45 @@
      models: hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
 
 == reasoning is actually on
+     http=200 lines=128 first_byte=0.15s first_token=274.14s total=290.0s done=True reason=stop
+     tools: run_command({"command": "python3 -c \"\nprice_per_pen = 2/3\ntotal = 7
+  PASS  turn completed
+  PASS  model produced reasoning text
+  PASS  the answer is the correct change ($5.33, not the pen price)
+  PASS  the answer is not a dump of the reasoning
+
+== real command execution on the engine host
+     http=200 lines=41 first_byte=0.38s first_token=52.37s total=57.1s done=True reason=stop
+     tools: run_command({"command": "echo AETHER_CMD_OK && uname -sr && python3 -c
+  PASS  turn completed
+  PASS  run_command was invoked
+  PASS  the real echo marker came back
+  PASS  python really executed
+  PASS  cwd reported
+
+== fetching a real page
+     http=200 lines=3 first_byte=0.16s first_token=n/a total=16.7s done=False reason=None
+  FAIL  turn completed   [no done]
+  FAIL  fetch_page was invoked   [[]]
+  FAIL  real page content came back   [answer=[]]
+
+== downloading a real file to engine storage
+     http=None lines=0 first_byte=n/a first_token=n/a total=0.1s done=False reason=None
+     error: HTTPError: HTTP Error 502: Bad Gateway
+  FAIL  turn completed   [HTTPError: HTTP Error 502: Bad Gateway]
+  FAIL  run_command was invoked   [[]]
+  FAIL  the downloaded file has the expected size   [answer=[]]
+
+== generating an image, delivered as media
+     http=None lines=0 first_byte=n/a first_token=n/a total=0.1s done=False reason=None
+     error: HTTPError: HTTP Error 502: Bad Gateway
+  FAIL  turn completed   [HTTPError: HTTP Error 502: Bad Gateway]
+  FAIL  a media event arrived   [media=0 tools=[]]
+
+== generating voice, delivered as media
+     http=None lines=0 first_byte=n/a first_token=n/a total=0.2s done=False reason=None
+     error: HTTPError: HTTP Error 502: Bad Gateway
+  FAIL  turn completed   [HTTPError: HTTP Error 502: Bad Gateway]
+  FAIL  a media event arrived   [media=0 tools=[]]
+
+CAPABILITY PROOF  11 passed, 10 failed
