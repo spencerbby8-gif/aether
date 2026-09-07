@@ -116,8 +116,12 @@ public final class ExecutorProof {
         check("polling has its own executor", src.contains("pollExec.execute(() -> pollLoop"),
                 count(src, "pollExec.execute") + " poll submissions");
         check("every action goes to the action pool",
-                count(src, "actionExec.execute") == 3,
-                count(src, "actionExec.execute") + " actions (wake, shutdown, shutdown all)");
+                count(src, "actionExec.execute") >= 4,
+                count(src, "actionExec.execute")
+                        + " actions (wake, shutdown, shutdown all, diagnostics)");
+        check("the poll loop is the only thing on the poll thread",
+                count(src, "pollExec.execute") == 2,
+                count(src, "pollExec.execute") + " poll submissions (onResume, checkNow)");
         check("both executors are shut down on destroy",
                 src.contains("pollExec.shutdownNow()") && src.contains("actionExec.shutdownNow()"),
                 "onDestroy");

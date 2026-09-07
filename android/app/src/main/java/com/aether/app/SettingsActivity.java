@@ -194,6 +194,66 @@ public class SettingsActivity extends AppCompatActivity {
         render();
         int gen = generation.incrementAndGet();
         pollExec.execute(() -> pollLoop(gen));
+        /* And print exactly what this phone can and cannot reach. The failure is
+           on a device nobody can inspect from here, so the phone has to be the
+           one that reports it. */
+        actionExec.execute(() -> {
+            final String report = diagnostics();
+            ui.post(() -> note.setText(report));
+        });
+    }
+
+    /**
+     * Every dependency of the status pipeline, measured and printed on screen.
+     *
+     * This exists because "WAKING for ever" has at least three causes that look
+     * identical from the outside -- the engine still loading, the discovery
+     * service unreachable, or the tunnels unreachable -- and only the phone can
+     * tell them apart. Read line 1: if discovery says FAILED, nothing downstream
+     * can work, and that is the whole problem.
+     */
+    private String diagnostics() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("DIAGNOSTICS  build ").append(BuildConfig.VERSION_NAME)
+                .append(" (").append(BuildConfig.VERSION_CODE).append(")  ")
+                .append(getPackageName()).append('\n');
+
+        // 1. Discovery: can this phone read the beacon at all?
+        try {
+            List<EngineCore.LiveLink> links = EngineCore.liveLinks(
+                    cfg.beaconTopic, cfg.beaconSecret, BEACON_LOOKBACK_S, 20_000);
+            sb.append("1 discovery ntfy.sh: OK, ").append(links.size())
+                    .append(" announcement(s) in ").append(BEACON_LOOKBACK_S / 3600).append("h\n");
+        } catch (Exception ex) {
+            sb.append("1 discovery ntfy.sh: FAILED -- ").append(ex.getMessage())
+                    .append("\n   ^ if this says FAILED, no engine can ever be found\n");
+        }
+
+        // 2. Kaggle, and every tunnel each engine has announced.
+        for (EngineCore.Engine e : cfg.engines) {
+            String kg;
+            try { kg = EngineCore.kernelStatus(e, 20_000); }
+            catch (Exception ex) { kg = "FAILED: " + ex.getMessage(); }
+            List<String> urls = new ArrayList<>();
+            try {
+                urls = EngineCore.urlsFor(cfg.beaconTopic, cfg.beaconSecret, e.slot,
+                        BEACON_LOOKBACK_S, 20_000, 6);
+            } catch (Exception ignored) { }
+            sb.append("2 engine ").append(e.slot.toUpperCase(Locale.ROOT))
+                    .append(": Kaggle=").append(kg)
+                    .append(", ").append(urls.size()).append(" tunnel(s)");
+            for (int i = 0; i < urls.size(); i++) {
+                EngineCore.Health h = EngineCore.health(urls.get(i), 15_000);
+                sb.append(i == 0 ? " -> " : ", ")
+                        .append('[').append(i).append("] HTTP ").append(h.status)
+                        .append(h.models.isEmpty() ? "" : " models=" + h.models.size());
+            }
+            sb.append('\n');
+        }
+        sb.append("3 how to read it: HTTP 200 with models = LIVE. 200 with no models = ")
+                .append("still loading. 530 or -1 = that tunnel is dead. 0 tunnels with ")
+                .append("Kaggle running = booting, no tunnel yet, about 5 minutes.");
+        return EngineCore.scrubUrls(sb.toString());
     }
 
     // ------------------------------------------------------------- routing
