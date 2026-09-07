@@ -37,6 +37,9 @@ public final class ChatMessage {
     public String engine;
     public List<Attachment> attachments;
 
+    /** Images and voice clips the engine generated during this turn. */
+    public List<MediaItem> media;
+
     public ChatMessage(String role) {
         this.role = role;
         this.content = "";
@@ -73,6 +76,9 @@ public final class ChatMessage {
         if (attachments != null && !attachments.isEmpty()) {
             o.put("attachments", Attachment.arrayToJson(attachments));
         }
+        if (media != null && !media.isEmpty()) {
+            o.put("media", MediaItem.arrayToJson(media));
+        }
         return o;
     }
 
@@ -93,6 +99,7 @@ public final class ChatMessage {
             }
         }
         m.attachments = Attachment.arrayFromJson(o.optJSONArray("attachments"));
+        m.media = MediaItem.arrayFromJson(o.optJSONArray("media"));
         return m;
     }
 }

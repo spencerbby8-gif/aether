@@ -112,6 +112,17 @@ def make_env(script):
     def big_tool(**k):
         return "x" * 9000
 
+    def gen_image(**k):
+        return ("IMAGE READY: https://tunnel.example/files/pic.jpg (48213 bytes) "
+                "- give the user this URL and they can view it in the browser.")
+
+    def gen_voice(**k):
+        return ("AUDIO READY: https://tunnel.example/files/say.wav (90112 bytes) "
+                "- give the user this URL so they can play it.")
+
+    def plain_tool(**k):
+        return "nothing generated here"
+
     def web_search(query=None, **k):
         return "result for " + str(query)
 
@@ -120,7 +131,8 @@ def make_env(script):
         'SYSMSG': 'You are AETHER.', 'MODEL': 'test-model',
         'NUM_CTX': 16384, 'TOOL_RESULT_MAX': 2500,
         'EXEC': {'web_search': web_search, 'run_command': run_command,
-                 'big_tool': big_tool},
+                 'big_tool': big_tool, 'generate_image': gen_image,
+                 'generate_voice': gen_voice, 'plain_tool': plain_tool},
         'TOOLS': [{"type": "function", "function": {"name": "web_search"}},
                   {"type": "function", "function": {"name": "run_command"}}],
         'ollama_stream': ollama_stream,
@@ -201,6 +213,61 @@ last_tools = [m for p in PAYLOADS for m in p['messages'] if m.get('role') == 'to
 chk("an oversized tool result is capped before it is resent",
     bool(last_tools) and all(len(str(m.get('content'))) <= 2600 for m in last_tools),
     "tool result lengths = %s" % [len(str(m.get('content'))) for m in last_tools])
+
+print("== generated media is reported as a structured event ==")
+
+
+def media_events(handler):
+    out = []
+    for line in handler.wfile.buf.getvalue().decode("utf-8", "replace").split("\n"):
+        line = line.strip()
+        if line.startswith("{") and '"media"' in line:
+            try:
+                d = json.loads(line)
+                if d.get("media"):
+                    out.append(d["media"])
+            except Exception:
+                pass
+    return out
+
+
+PAYLOADS.clear()
+ns5, _ = make_env([step_tools(tc('generate_image', prompt='a sunset')),
+                   step_text('here is your image')] + [step_text('x')] * 8)
+h5 = FakeHandler()
+ns5['agent_stream'](h5, {'messages': [{'role': 'user', 'content': 'draw a sunset'}]})
+me = media_events(h5)
+chk("an image produces exactly one media event", len(me) == 1, "events = %d" % len(me))
+chk("the media event carries kind and the real url",
+    bool(me) and me[0].get('kind') == 'image'
+    and me[0].get('url') == 'https://tunnel.example/files/pic.jpg', str(me[:1]))
+
+# The client stores this as MediaItem.source and shows it as provenance. The
+# key name must match what EngineCore reads ("source"); an event keyed "name"
+# parses fine and lands as an empty string, which is why this is asserted.
+chk("the media event names the tool that made it, under the key the client reads",
+    bool(me) and me[0].get('source') == 'generate_image', str(me[:1]))
+
+ns6, _ = make_env([step_tools(tc('generate_voice', text='hello')),
+                   step_text('here you go')] + [step_text('x')] * 8)
+h6 = FakeHandler()
+ns6['agent_stream'](h6, {'messages': [{'role': 'user', 'content': 'say hello'}]})
+me6 = media_events(h6)
+chk("audio produces a media event with kind audio",
+    len(me6) == 1 and me6[0].get('kind') == 'audio'
+    and me6[0].get('url') == 'https://tunnel.example/files/say.wav', str(me6[:1]))
+chk("audio names its tool too",
+    len(me6) == 1 and me6[0].get('source') == 'generate_voice', str(me6[:1]))
+
+ns7, _ = make_env([step_tools(tc('plain_tool')), step_text('done')] + [step_text('x')] * 8)
+h7 = FakeHandler()
+ns7['agent_stream'](h7, {'messages': [{'role': 'user', 'content': 'q'}]})
+chk("a tool that generates nothing emits no media event",
+    len(media_events(h7)) == 0, "events = %d" % len(media_events(h7)))
+
+chk("reasoning is requested from the model",
+    all(p.get('think') is True for p in PAYLOADS) if PAYLOADS else False,
+    "think = %s" % [p.get('think') for p in PAYLOADS])
 
 print("\n%d passed, %d failed" % (ok, fail))
 raise SystemExit(0 if fail == 0 else 1)

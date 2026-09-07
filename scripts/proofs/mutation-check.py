@@ -98,5 +98,19 @@ tot += 1
 ok += case("tool-result cap removed", 'agent-loop-check.py',
            lambda s: s.replace("                if len(result) > TOOL_RESULT_MAX:", "                if False:"))
 
+tot += 1
+ok += case("media event keyed 'name' instead of 'source'", 'agent-loop-check.py',
+           lambda s: s.replace("'source': name},", "'name': name},"))
+tot += 1
+ok += case("media event not emitted at all", 'agent-loop-check.py',
+           lambda s: s.replace("                    if result.startswith('IMAGE READY: ')",
+                               "                    if False and result.startswith('IMAGE READY: ')"))
+tot += 1
+ok += case("reasoning turned off (THINK = False)", 'agent-loop-check.py',
+           lambda s: s.replace("THINK = True", "THINK = False"))
+tot += 1
+ok += case("think flag hardcoded False in the payload", 'agent-loop-check.py',
+           lambda s: s.replace("'think': THINK", "'think': False"))
+
 print("\n%d/%d mutation cases behaved correctly" % (ok, tot))
 raise SystemExit(0 if ok == tot else 1)

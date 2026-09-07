@@ -29,12 +29,20 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.drawerlayout.widget.DrawerLayout;
 
+import android.content.ContentValues;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.MediaStore;
+
 import com.aether.app.core.AgentActivity;
 import com.aether.app.core.AnswerBlocks;
 import com.aether.app.core.Attachment;
 import com.aether.app.core.ChatMessage;
 import com.aether.app.core.ChatSession;
 import com.aether.app.core.ChatStore;
+import com.aether.app.core.MediaItem;
 import com.aether.app.core.TextNormalizer;
 
 import java.io.ByteArrayOutputStream;
@@ -125,6 +133,10 @@ public class ChatActivity extends AppCompatActivity {
        and queueing that behind the single-threaded store or poll executors is
        exactly how the buttons ended up dead behind the poll loop before. */
     private final ExecutorService telemExec = Executors.newCachedThreadPool();
+    /* Media gets its own pool too: a download or an image decode is slow and
+       must not queue behind the store or the poll loop, and two saves can run
+       at once. */
+    private final ExecutorService mediaExec = Executors.newCachedThreadPool();
     private boolean reportedFirstStream = false;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -224,6 +236,7 @@ public class ChatActivity extends AppCompatActivity {
         bg.shutdownNow();
         pollExec.shutdownNow();
         storeExec.shutdownNow();
+        mediaExec.shutdownNow();
     }
 
     private void openSettings() {
@@ -444,6 +457,10 @@ public class ChatActivity extends AppCompatActivity {
                    any animation before the message is even on screen. */
                 for (String line : m.toolLines) b.activity.event(line);
                 b.activity.finish();
+                if (m.media != null && !m.media.isEmpty()) {
+                    b.media.addAll(m.media);
+                    renderMedia(b);
+                }
                 if (m.content != null && !m.content.isEmpty()) {
                     b.raw.append(m.content);
                     renderAnswer(b, true);
@@ -609,6 +626,9 @@ public class ChatActivity extends AppCompatActivity {
         LinearLayout contentZone;
         /** Real sources this turn used, rendered only when there are any. */
         LinearLayout sources;
+        /** Images and voice clips the engine generated, with a save action. */
+        LinearLayout mediaZone;
+        final List<MediaItem> media = new ArrayList<>();
         /** Compact activity strip, driven only by real engine events. */
         ActivityPanel activity;
         boolean hasContent = false;
@@ -654,6 +674,16 @@ public class ChatActivity extends AppCompatActivity {
         clp.gravity = Gravity.START;
         clp.setMargins(0, 0, Ui.dp(this, 40), 0);
         b.contentZone.addView(b.content, clp);
+
+        /* Generated media, above the sources: a picture or a voice clip the
+           user can open or save. Empty until the engine reports one. */
+        b.mediaZone = new LinearLayout(this);
+        b.mediaZone.setOrientation(LinearLayout.VERTICAL);
+        b.mediaZone.setVisibility(View.GONE);
+        LinearLayout.LayoutParams mz = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mz.topMargin = Ui.dp(this, 8);
+        b.wrap.addView(b.mediaZone, mz);
 
         /* App-level notices (an engine waking, for example). Not agent activity. */
         b.notice = Ui.tv(this, "", 12, Ui.DIM);
@@ -931,6 +961,192 @@ public class ChatActivity extends AppCompatActivity {
             b.sources.addView(row, lp);
         }
         b.sources.setVisibility(View.VISIBLE);
+    }
+
+    // ------------------------------------------------- generated media
+
+    /**
+     * Render the images and voice clips the engine produced this turn.
+     *
+     * Each one gets its own card with a save action, because a URL in the
+     * transcript is not something a phone user can keep: the tunnel that
+     * served it goes away when the engine shuts down.
+     */
+    private void renderMedia(AssistantBubble b) {
+        b.mediaZone.removeAllViews();
+        if (b.media.isEmpty()) {
+            b.mediaZone.setVisibility(View.GONE);
+            return;
+        }
+        for (MediaItem item : b.media) b.mediaZone.addView(mediaCard(item));
+        b.mediaZone.setVisibility(View.VISIBLE);
+    }
+
+    private View mediaCard(final MediaItem item) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_card);
+        card.setPadding(Ui.dp(this, 10), Ui.dp(this, 10), Ui.dp(this, 10), Ui.dp(this, 10));
+
+        final TextView status = Ui.tv(this, "", 11, Ui.DIM);
+
+        if (item.isImage()) {
+            final ImageView iv = new ImageView(this);
+            iv.setAdjustViewBounds(true);
+            iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 190));
+            card.addView(iv, ilp);
+            loadImage(item.url, iv, status);
+        }
+
+        TextView title = Ui.tv(this,
+                (item.isAudio() ? "\u266a  Voice clip  " : "\u25a2  Image  ") + item.suggestedName(),
+                12, Ui.PRIMARY);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tlp.topMargin = Ui.dp(this, item.isImage() ? 8 : 0);
+        card.addView(title, tlp);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rlp.topMargin = Ui.dp(this, 8);
+
+        TextView save = Ui.tv(this, item.savedName != null ? "\u2713 Saved" : "\u2193 Save",
+                12, Ui.ACCENT);
+        save.setBackgroundResource(R.drawable.bg_pill_ghost);
+        save.setPadding(Ui.dp(this, 12), Ui.dp(this, 6), Ui.dp(this, 12), Ui.dp(this, 6));
+        save.setOnClickListener(v -> saveMedia(item, save, status));
+        row.addView(save);
+
+        TextView open = Ui.tv(this, "Open", 12, Ui.DIM);
+        open.setBackgroundResource(R.drawable.bg_pill_ghost);
+        open.setPadding(Ui.dp(this, 12), Ui.dp(this, 6), Ui.dp(this, 12), Ui.dp(this, 6));
+        LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        olp.leftMargin = Ui.dp(this, 6);
+        open.setOnClickListener(v -> {
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(item.url))); }
+            catch (Exception e) { toast("Nothing on this phone can open that file"); }
+        });
+        row.addView(open, olp);
+
+        card.addView(row, rlp);
+
+        if (item.savedName != null) status.setText("saved as " + item.savedName);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.topMargin = Ui.dp(this, 6);
+        card.addView(status, slp);
+
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clp.topMargin = Ui.dp(this, 6);
+        clp.rightMargin = Ui.dp(this, 40);
+        card.setLayoutParams(clp);
+        return card;
+    }
+
+    /** Decode off the UI thread; a full-size image must not stall the list. */
+    private void loadImage(final String url, final ImageView into, final TextView status) {
+        status.setText("loading image\u2026");
+        mediaExec.execute(() -> {
+            try {
+                byte[] data = EngineCore.fetch(url, 90_000);
+                BitmapFactory.Options probe = new BitmapFactory.Options();
+                probe.inJustDecodeBounds = true;
+                BitmapFactory.decodeByteArray(data, 0, data.length, probe);
+                int sample = 1;
+                while (probe.outWidth / (sample * 2) >= 1400
+                        && probe.outHeight / (sample * 2) >= 1400) sample *= 2;
+                BitmapFactory.Options opt = new BitmapFactory.Options();
+                opt.inSampleSize = sample;
+                final Bitmap bmp = BitmapFactory.decodeByteArray(data, 0, data.length, opt);
+                ui.post(() -> {
+                    if (bmp == null) {
+                        status.setText("image could not be decoded");
+                        return;
+                    }
+                    into.setImageBitmap(bmp);
+                    status.setText("");
+                });
+            } catch (Exception e) {
+                ui.post(() -> status.setText("image unavailable: "
+                        + EngineCore.scrubUrls(String.valueOf(e.getMessage()))));
+            }
+        });
+    }
+
+    private void saveMedia(final MediaItem item, final TextView button, final TextView status) {
+        if (item.savedName != null) {
+            toast("already saved as " + item.savedName);
+            return;
+        }
+        button.setText("saving\u2026");
+        status.setText("downloading\u2026");
+        mediaExec.execute(() -> {
+            try {
+                byte[] data = EngineCore.fetch(item.url, 120_000);
+                String name = item.suggestedName();
+                String where = writeToDownloads(name,
+                        item.isAudio() ? "audio/wav" : "image/jpeg", data);
+                item.savedName = name;
+                ui.post(() -> {
+                    button.setText("\u2713 Saved");
+                    status.setText("saved to " + where);
+                    persist();
+                    toast("Saved to " + where);
+                });
+            } catch (Exception e) {
+                ui.post(() -> {
+                    button.setText("\u2193 Save");
+                    status.setText("could not save: "
+                            + EngineCore.scrubUrls(String.valueOf(e.getMessage())));
+                });
+            }
+        });
+    }
+
+    /**
+     * Put the file somewhere the user can find it.
+     *
+     * On Android 10+ that is the shared Downloads collection through
+     * MediaStore, which needs no permission. Below that the shared folder
+     * needs a runtime permission this app does not hold, so it goes to the
+     * app's own external downloads folder instead and the path is shown --
+     * a real path beats a permission dialog that can be denied and leave the
+     * button dead.
+     */
+    private String writeToDownloads(String name, String mime, byte[] data) throws Exception {
+        if (Build.VERSION.SDK_INT >= 29) {
+            ContentValues cv = new ContentValues();
+            cv.put(MediaStore.Downloads.DISPLAY_NAME, name);
+            cv.put(MediaStore.Downloads.MIME_TYPE, mime);
+            cv.put(MediaStore.Downloads.RELATIVE_PATH,
+                    Environment.DIRECTORY_DOWNLOADS + "/Aether");
+            cv.put(MediaStore.Downloads.IS_PENDING, 1);
+            Uri uri = getContentResolver()
+                    .insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+            if (uri == null) throw new java.io.IOException("no Downloads collection");
+            try (java.io.OutputStream os = getContentResolver().openOutputStream(uri)) {
+                if (os == null) throw new java.io.IOException("cannot open output");
+                os.write(data);
+            }
+            cv.clear();
+            cv.put(MediaStore.Downloads.IS_PENDING, 0);
+            getContentResolver().update(uri, cv, null, null);
+            return "Downloads/Aether/" + name;
+        }
+        java.io.File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (dir == null) throw new java.io.IOException("no external storage");
+        if (!dir.exists() && !dir.mkdirs()) throw new java.io.IOException("cannot create folder");
+        java.io.File f = new java.io.File(dir, name);
+        try (java.io.FileOutputStream fos = new java.io.FileOutputStream(f)) {
+            fos.write(data);
+        }
+        return f.getAbsolutePath();
     }
 
     private void onError(String text, String prompt) {
@@ -1328,6 +1544,23 @@ public class ChatActivity extends AppCompatActivity {
                     }
                     @Override public void onDone(boolean good, String e) {
                         if (recorded.compareAndSet(false, true)) { ok[0] = good; err[0] = e; }
+                    }
+                    @Override public void onMedia(String kind, String url, String source) {
+                        /* Structured event from the kernel, not a URL scraped
+                           out of the prose. Recorded on the model message so it
+                           survives a restart. */
+                        final MediaItem item = new MediaItem(kind, url, source);
+                        ui.post(() -> {
+                            if (b.model != null) {
+                                if (b.model.media == null) {
+                                    b.model.media = new ArrayList<>();
+                                }
+                                b.model.media.add(item);
+                            }
+                            b.media.add(item);
+                            renderMedia(b);
+                            persist();
+                        });
                     }
                 }, EngineCore.StreamPolicy.standard(), turn);
 

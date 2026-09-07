@@ -763,6 +763,16 @@ public final class EngineCore {
         void onThinking(String text);
         void onContent(String text);
         void onDone(boolean ok, String error);
+
+        /**
+         * The engine generated a file for the user -- an image or a voice clip.
+         *
+         * Default, not abstract: seven proof harnesses implement this interface
+         * and none of them care about media. The kernel reports media as a
+         * structured field rather than leaving the client to scrape a URL out
+         * of the model's prose, which it may reword or drop.
+         */
+        default void onMedia(String kind, String url, String source) { }
     }
 
     /**
@@ -862,6 +872,38 @@ public final class EngineCore {
                so no legitimate tool run is ever cut off. 2h total = ten agent
                iterations each allowed a long tool. */
             return new StreamPolicy(15_000, 1_260_000, 1_260_000, 7_200_000);
+        }
+    }
+
+    /**
+     * Download a whole body as bytes, for saving engine-generated media.
+     *
+     * Deliberately separate from the chat path: a media file is fetched once,
+     * in full, with its own timeout, and a failure must not disturb a turn.
+     */
+    public static byte[] fetch(String url, int timeoutMs) throws EngineException {
+        HttpURLConnection c = null;
+        try {
+            c = open("GET", url, Math.min(timeoutMs, 20_000), timeoutMs);
+            int code = c.getResponseCode();
+            if (code != 200) {
+                throw new EngineException("download failed: HTTP " + code, code);
+            }
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[16384];
+            try (java.io.InputStream in = c.getInputStream()) {
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            }
+            byte[] data = out.toByteArray();
+            if (data.length == 0) throw new EngineException("download was empty", 0);
+            return data;
+        } catch (EngineException e) {
+            throw e;                       // already carries the real status
+        } catch (Exception e) {
+            throw new EngineException("download failed: " + e.getMessage(), 0);
+        } finally {
+            if (c != null) try { c.disconnect(); } catch (Exception ignored) { }
         }
     }
 
@@ -1088,6 +1130,17 @@ public final class EngineCore {
                        Ollama lines, where the final object can carry the last
                        of the content AND done:true together; checking done
                        first silently dropped that content. */
+                    /* Media first: it is its own event and carries no content,
+                       so it must not be missed by the done check below. */
+                    JSONObject media = o.optJSONObject("media");
+                    if (media != null) {
+                        String murl = media.optString("url", "");
+                        if (murl.startsWith("http")) {
+                            listener.onMedia(media.optString("kind", "image"), murl,
+                                    media.optString("source", ""));
+                        }
+                    }
+
                     JSONObject msg = o.optJSONObject("message");
                     if (msg != null) {
                         String thinking = msg.optString("thinking", "");
