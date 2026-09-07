@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""Runs the REAL agent_stream from the kernel template against a scripted fake
+model, so the loop logic is tested without a nine-minute Kaggle boot.
+
+Nothing about the loop is reimplemented here: the function source is lifted
+verbatim out of the notebook and only its dependencies are stubbed.
+
+  python3 scripts/proofs/agent-loop-check.py
+"""
+import io
+import json
+import os
+import queue
+import threading
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TPL = os.path.join(HERE, "..", "..", "android", "app", "src", "main",
+                   "assets", "aether-notebook-template.json")
+src = json.load(open(TPL))['cells'][4]['source']
+
+i = src.index('def agent_stream(handler, user_payload):')
+# agent_stream is the last function before the page markup begins
+j = src.index('PAGE_HTML = r"""', i)
+func_src = src[i:j]
+
+# also need the two helpers it calls
+h_i = src.index('def has_user_query')
+h_j = src.index('def agent_stream')
+helpers = src[h_i:h_j]
+
+ok = fail = 0
+
+
+def chk(w, c, s):
+    global ok, fail
+    print(("  ok   " if c else "  FAIL ") + w + " -> " + s)
+    ok += bool(c)
+    fail += (not c)
+
+
+class FakeW:
+    def __init__(self):
+        self.buf = io.BytesIO()
+
+    def write(self, b):
+        return self.buf.write(b)
+
+    def flush(self):
+        pass
+
+
+class FakeHandler:
+    def __init__(self):
+        self.wfile = FakeW()
+        self._sent = False
+
+    def send_response(self, *a):
+        pass
+
+    def send_header(self, *a):
+        pass
+
+    def end_headers(self):
+        pass
+
+    close_connection = False
+
+
+class FakeProc:
+    def __init__(self, lines):
+        self.stdout = lines
+
+    def kill(self):
+        pass
+
+
+class FakeSubprocess:
+    """Stands in for the curl call the final-answer path makes."""
+
+    PIPE = -1
+
+    def __init__(self, lines):
+        self.lines = lines
+
+    def Popen(self, *a, **k):
+        return FakeProc(self.lines)
+
+
+TOOL_CALLS_SEEN = []
+
+
+def make_env(script):
+    """script: list of model responses, one per iteration."""
+    calls = {'n': 0}
+
+    def ollama_stream(payload, push):
+        k = calls['n']
+        calls['n'] += 1
+        TOOL_CALLS_SEEN.append([tc['function']['name']
+                                for tc in (script[k].get('message', {}).get('tool_calls') or [])])
+        m = dict(script[k].get('message', {}))
+        if m.get('content'):
+            push(m['content'])
+        return {'message': m, 'done': True, 'eval_count': 1}
+
+    def run_command(command=None, **k):
+        return "Mon Sep 7 15:00:00 UTC 2026"
+
+    def web_search(query=None, **k):
+        return "result for " + str(query)
+
+    ns = {
+        'json': json, 'queue': queue, 'threading': threading, 'time': time,
+        'SYSMSG': 'You are AETHER.', 'MODEL': 'test-model',
+        'NUM_CTX': 16384, 'TOOL_RESULT_MAX': 2500,
+        'EXEC': {'web_search': web_search, 'run_command': run_command},
+        'TOOLS': [{"type": "function", "function": {"name": "web_search"}},
+                  {"type": "function", "function": {"name": "run_command"}}],
+        'ollama_stream': ollama_stream,
+        # the post-loop final answer call shells out; give it a canned reply
+        'subprocess': FakeSubprocess([
+            json.dumps({'message': {'content': 'FINAL ANSWER'}, 'done': False}).encode(),
+            json.dumps({'message': {'content': ''}, 'done': True}).encode(),
+        ]),
+        'LAST_HIT': {'t': 0},
+    }
+    exec(helpers, ns)
+    exec(func_src, ns)
+    return ns, calls
+
+
+def tc(name, **args):
+    return {"function": {"name": name, "arguments": args}}
+
+
+def step_tools(*calls):
+    return {'message': {'content': '', 'tool_calls': list(calls)}, 'done': True}
+
+
+def step_text(text):
+    return {'message': {'content': text}, 'done': True}
+
+
+print("== a model that loops on identical calls must be stopped ==")
+script = [step_tools(tc('web_search', query='news'), tc('run_command', command='date -u'))] * 10
+script += [step_text('final answer')]
+ns, calls = make_env(script)
+TOOL_CALLS_SEEN.clear()
+h = FakeHandler()
+ns['agent_stream'](h, {'messages': [{'role': 'user', 'content': 'search and run a command'}]})
+body = h.wfile.buf.getvalue().decode('utf-8', 'replace')
+chk("looping model does not use all 10 iterations", calls['n'] < 10,
+    "model calls = %d" % calls['n'])
+chk("the identical step was executed once, not repeatedly",
+    TOOL_CALLS_SEEN.count(['web_search', 'run_command']) <= 2,
+    "identical steps seen = %d" % TOOL_CALLS_SEEN.count(['web_search', 'run_command']))
+chk("the turn still ends with done:true", '"done": true' in body,
+    "done present = %s" % ('"done": true' in body))
+
+print("== distinct calls are still allowed to run ==")
+script2 = [step_tools(tc('web_search', query='lagos')),
+           step_tools(tc('web_search', query='kano')),
+           step_tools(tc('run_command', command='date -u')),
+           step_text('done')]
+script2 += [step_text('extra')] * 8
+ns2, calls2 = make_env(script2)
+TOOL_CALLS_SEEN.clear()
+h2 = FakeHandler()
+ns2['agent_stream'](h2, {'messages': [{'role': 'user', 'content': 'three different things'}]})
+chk("three distinct tool calls all ran", calls2['n'] == 4,
+    "model calls = %d (3 tool steps + 1 answer)" % calls2['n'])
+
+print("== a partially repeated step keeps going, it is not a full loop ==")
+script3 = [step_tools(tc('web_search', query='lagos')),
+           step_tools(tc('web_search', query='lagos'), tc('web_search', query='kano')),
+           step_text('done')]
+script3 += [step_text('extra')] * 8
+ns3, calls3 = make_env(script3)
+h3 = FakeHandler()
+ns3['agent_stream'](h3, {'messages': [{'role': 'user', 'content': 'two states'}]})
+chk("a mixed step is not treated as a loop", calls3['n'] == 3,
+    "model calls = %d" % calls3['n'])
+
+print("\n%d passed, %d failed" % (ok, fail))
+raise SystemExit(0 if fail == 0 else 1)
