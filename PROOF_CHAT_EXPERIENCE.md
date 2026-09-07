@@ -268,3 +268,103 @@ in the shipped artifact: `bg_code` present in resources.arsc, **0** plaintext
 Still unverified, unchanged: this APK has never been installed. There is no
 emulator possible in this sandbox, so the code blocks, activity strip and source
 cards have still never been seen rendering on a device.
+
+---
+
+## 10. The HTTP 500 on multi-tool turns — found, reproduced and fixed
+
+Reported from a real device: the turn ran a web search, showed the activity
+strip, then failed with
+
+```
+(engine error: HTTP 500 {"error":"{\"error\":{\"code\":500,\"message\":\"\\n------------\\n
+While executing CallExpression at line 100, column 24 in source:
+...lti_step_tool %}↵    {{- raise_exception('No user quer)
+```
+
+### 10.1 Root cause, read off the running engine
+
+I pulled the model's real chat template from the live kernel (`POST /api/show`,
+8 952 bytes, 170 lines) instead of guessing at it. Lines 88–100:
+
+```jinja
+{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}
+{%- for message in messages[::-1] %}
+    {%- if ns.multi_step_tool and message.role == "user" %}
+        {%- set content = render_content(message.content, false)|trim %}
+        {%- if not(content.startswith('<tool_response>') and content.endswith('</tool_response>')) %}
+            {%- set ns.multi_step_tool = false %}
+{%- if ns.multi_step_tool %}
+    {{- raise_exception('No user query found in messages.') }}
+```
+
+The template scans **backwards** for the last `user` message that is *not*
+wrapped in `<tool_response>`. Tool results are rendered as user turns
+wrapped in that tag (line 148–153), so they never satisfy the check. If the
+window contains no plain user message, the whole request dies.
+
+The kernel sent `msgs[-24:]`. Once a conversation plus its tool traffic passes
+24 messages, the user's actual question is sliced off — and every subsequent
+request 500s. A search-then-fetch-then-run turn appends two messages per tool
+call, so 12 tool calls is enough on their own.
+
+### 10.2 Reproduced against the live engine
+
+`scripts/proofs/template-error-repro.py`, against the deployed kernel:
+
+```
+window length: 24 | unwrapped user messages: 0
+BROKEN window (no user)  -> (engine error: HTTP 500 {"error":"{\"error\":{\"code\":500,...
+                            raise_exception('No user quer)      <- byte-identical to the report
+FIXED window (user kept) -> calling a tool  OK
+```
+
+### 10.3 The fix
+
+`history_window()` replaces both `msgs[-24:]` call sites. It always keeps the
+system prompt and the newest real user query, then adds older history back in
+complete assistant/tool pairs. The message cap governs **only** older history:
+the current turn is sent whole, because dropping its tool results would blind
+the model to output it just asked for. The real context guard is a character
+budget that trims oversized tool results instead.
+
+`scripts/proofs/history-window-check.py` — **12 passed, 0 failed**, including
+the assertion that the old slice yields `users = 0` on the failing shape.
+
+### 10.4 Verified on the real deployed engine
+
+Kernel v32 pushed after `AllOff` confirmed nothing was serving; boot 261 s.
+`scripts/proofs/MultiToolTurnProof.py` drives the shipped `/api/chat`:
+
+```
+tool #1..#12  web_search x6 + run_command x6, one per state
+tool calls: 12 -> messages appended: 24 -> conversation at the final iteration: 26
+under the OLD slice msgs[-24:] the question WOULD have been dropped
+elapsed 92.4s | content deltas 75 | done:true True
+RESULT: PASS
+```
+
+`scripts/proofs/HistoryTurnProof.py` (prior turns + one multi-tool turn):
+9 tool events, 44 content deltas, first token 10.6 s, `done:true`, no errors.
+
+Web gate after the template change: **249 passed, 5 skipped**, `tsc` 0.
+`verify-engine-source.mjs` PASS (46 303 B stored / 46 275 B rendered).
+APK **1.9.2 (21)**, 734 136 B — the embedded notebook hashes to `44fe57b2…` and
+contains `history_window`.
+
+### 10.5 One honest caveat about that first run
+
+My first end-to-end run passed with only 9 tool calls. That turn reached 28
+messages, but the question sat at index 9, so it was still inside the last-24
+window — **the old code would have survived that input too.** It proved the
+fixed engine works; it did not prove the fix. `MultiToolTurnProof.py` above is
+the one that actually crosses the threshold.
+
+### 10.6 Also observed, not caused by this change
+
+The first instance I pushed (v31) announced, served `/api/ps` with models, then
+went unreachable when its Cloudflare quick tunnel dropped; Kaggle still reported
+the kernel `running`. The heartbeat lives in notebook cell 5, which this change
+does not touch. Shutting everything down and re-pushing produced a clean
+instance. Quick tunnels dying under a live kernel is a known failure mode here,
+and it is what makes the app re-discover the engine on every send.
