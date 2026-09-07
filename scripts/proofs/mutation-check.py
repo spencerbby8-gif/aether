@@ -112,5 +112,10 @@ tot += 1
 ok += case("think flag hardcoded False in the payload", 'agent-loop-check.py',
            lambda s: s.replace("'think': THINK", "'think': False"))
 
+tot += 1
+ok += case("reasoning kept in the history sent back to the model", 'agent-loop-check.py',
+           lambda s: s.replace("_am = {k: v for k, v in m.items() if k != 'thinking'}",
+                               "_am = m"))
+
 print("\n%d/%d mutation cases behaved correctly" % (ok, tot))
 raise SystemExit(0 if ok == tot else 1)

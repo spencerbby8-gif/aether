@@ -6,3 +6,54 @@ engine A found in 1262ms (raises-polo-attorney-namely.***)
   PASS  the connection is accepted   [HTTP 200]
   time to first byte (response headers): 63ms
   PASS  response headers arrive fast   [63ms]
+
+== stress: 20 consecutive turns in one conversation ==
+  turn  1  completed   6839ms  ttft  5946ms  tools 0  turn 1 acknowledged.
+  turn  2  completed 100266ms  ttft 28662ms  tools 3  The search results didn't directly show ...
+  turn  3  completed  24768ms  ttft 19574ms  tools 1  The current UTC time is: **Mon Sep 7 05:...
+  turn  4  completed  10652ms  ttft  9582ms  tools 0  Python Java Rust
+  turn  5  completed  75014ms  ttft 59838ms  tools 3  Based on my search, **Lagos, Nigeria** h...
+  turn  6  completed  13360ms  ttft 12453ms  tools 0  turn 6 acknowledged.
+  turn  7  completed  54032ms  ttft 38505ms  tools 1  The Eiffel Tower was completed in **1889...
+  turn  8  completed  23545ms  ttft 18187ms  tools 1  The current UTC time is: **Mon Sep 7 05:...
+  turn  9  completed  12537ms  ttft 11464ms  tools 0  Python Java Rust
+  turn 10  completed  48119ms  ttft 33042ms  tools 1  Based on my search, **Lagos, Nigeria** h...
+  turn 11  completed   9402ms  ttft  8330ms  tools 0  turn 11 acknowledged.
+  turn 12  completed  91876ms  ttft 76610ms  tools 2  The Eiffel Tower was completed in **1889...
+  turn 13  completed  29441ms  ttft 24255ms  tools 1  The current UTC time is: **Mon Sep 7 05:...
+  turn 14  completed  12500ms  ttft 11422ms  tools 0  Python Java Rust
+  turn 15  completed  48990ms  ttft 33952ms  tools 1  Based on my search, **Lagos, Nigeria** h...
+  turn 16  completed   8854ms  ttft  7745ms  tools 0  turn 16 acknowledged.
+  turn 17  completed 104651ms  ttft 89156ms  tools 2  The Eiffel Tower was completed in **1889...
+  turn 18  completed  28770ms  ttft 23600ms  tools 1  The current UTC time is: **Mon Sep 7 05:...
+  turn 19  completed   9741ms  ttft  8665ms  tools 0  Python Java Rust
+  turn 20  completed  52770ms  ttft 37750ms  tools 1  Based on my search, **Lagos, Nigeria** h...
+
+  20 completed, 0 error, 0 left without a terminal state
+  PASS  every one of 20 turns reached a terminal state   [0 hung]
+  PASS  no turn was left thinking for ever   [0 hung]
+  PASS  consecutive turns keep working   [20/20 completed]
+
+-- lifecycle
+  PASS  a plain turn completes   [completed]
+  PASS  a plain turn produced an answer   [The capital of France is Paris. It is the country's largest ...]
+  PASS  the first byte arrived well before the answer   [first event 38ms, first token 32006ms]
+  PASS  tokens stream, they are not delivered in one block   [26 content deltas]
+
+-- tools
+  PASS  the search turn completed   [completed]
+  PASS  the search turn really used a tool   [9 step(s)]
+  PASS  tool activity was mapped to a human label   [Searching the web]
+  PASS  the command turn completed   [completed]
+  PASS  a real source was preserved for citation   [[https://www.bbc.com/news/world/africa, https://www.arise.tv/news/, https://www.arise.tv/, https://www.premiumtimesng.com/news/]]
+
+-- stop
+  PASS  stop ended the turn as aborted   [aborted]
+  PASS  stop landed quickly   [4041ms]
+  PASS  partial content was kept   [0 chars]
+
+-- context
+  PASS  a long-context turn completes   [completed]
+  PASS  the answer refers to the earlier turn   [You asked me about France.]
+
+20 passed, 0 failed

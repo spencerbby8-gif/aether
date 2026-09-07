@@ -269,5 +269,41 @@ chk("reasoning is requested from the model",
     all(p.get('think') is True for p in PAYLOADS) if PAYLOADS else False,
     "think = %s" % [p.get('think') for p in PAYLOADS])
 
+print("== reasoning must not be re-sent as history ==")
+# With think=True the model returns a 'thinking' field on every assistant
+# message. agent_stream appends that message to msgs for the next tool
+# iteration, so unless the reasoning is stripped it is re-sent on every pass.
+# Several thousand reasoning tokens times ten iterations is exactly the kind of
+# growth that pushes the prompt past num_ctx, and Ollama trims from the front
+# -- which is what produced the original 'No user query found' HTTP 500.
+def step_tools_think(*calls):
+    # role is set because real Ollama returns it; the message is appended to
+    # history verbatim, so the fixture has to look like the real thing.
+    return {'message': {'role': 'assistant', 'content': '', 'thinking': 'R' * 3000,
+                        'tool_calls': list(calls)}, 'done': True}
+
+# Distinct commands each time, otherwise the repeat cap correctly stops the
+# loop after two calls and there is no history growth to measure.
+_cmds = ['date -u', 'date +%s', 'pwd', 'whoami']
+script_th = [step_tools_think(tc('run_command', command=c)) for c in _cmds]
+script_th += [step_text('all done')]
+PAYLOADS.clear()
+ns_th, _ = make_env(script_th)
+h_th = FakeHandler()
+ns_th['agent_stream'](h_th, {'messages': [{'role': 'user', 'content': 'run date a few times'}]})
+
+leaked = [len(m.get('thinking') or '')
+          for p in PAYLOADS for m in p['messages'] if m.get('thinking')]
+chk("no reasoning text is sent back to the model as history",
+    not leaked, "%d history messages carry reasoning, up to %d chars"
+    % (len(leaked), max(leaked) if leaked else 0))
+chk("the history still grows with real turns",
+    len(PAYLOADS) >= 4 and len(PAYLOADS[-1]['messages']) > len(PAYLOADS[0]['messages']),
+    "payloads=%d msgs=%d->%d" % (len(PAYLOADS), len(PAYLOADS[0]['messages']),
+                                 len(PAYLOADS[-1]['messages'])))
+chk("tool results are still in the history",
+    any(m.get('role') == 'tool' for m in PAYLOADS[-1]['messages']),
+    str([m.get('role') for m in PAYLOADS[-1]['messages']]))
+
 print("\n%d passed, %d failed" % (ok, fail))
 raise SystemExit(0 if fail == 0 else 1)
