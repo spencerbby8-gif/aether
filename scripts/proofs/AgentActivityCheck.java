@@ -37,6 +37,7 @@ public final class AgentActivityCheck {
         sourcesArePreservedButNotDumped();
         truncatedArgumentsStillYieldADetail();
         persistenceRoundTrip();
+        browserActionsReadAsCleanStates();
 
         System.out.println("\n" + pass + " passed, " + fail + " failed");
         if (fail > 0) System.exit(1);
@@ -180,6 +181,47 @@ public final class AgentActivityCheck {
         check("a two-tool turn summarises both",
                 a.summary().contains("Searched") && a.summary().contains("Ran"),
                 "\"" + a.summary() + "\"");
+    }
+
+    /**
+     * The engine reports one tool named "browser" for every action, so the verb
+     * has to come from the action argument. Otherwise a whole sign-in flow
+     * would read as "Using a tool" over and over.
+     */
+    static void browserActionsReadAsCleanStates() {
+        System.out.println();
+        System.out.println("== browser activity reads as clean states ==");
+        AgentActivity a = new AgentActivity();
+        check("opening a site", a.feed("\ud83d\udee0\ufe0f browser({\"action\":\"navigate\",\"url\":\"https://example.com/signin\"})"), "accepted");
+        check("the label is 'Opening site', not 'Using a tool'",
+                "Opening site".equals(a.labelNow()), a.labelNow());
+        check("filling a form", a.feed("\ud83d\udee0\ufe0f browser({\"action\":\"fill\",\"selector\":\"#email\"})"), "accepted");
+        check("the label is 'Filling form'", "Filling form".equals(a.labelNow()), a.labelNow());
+        a.feed("\u21b3 browser returned 84 chars");
+        check("waiting", a.feed("\ud83d\udee0\ufe0f browser({\"action\":\"wait\",\"selector\":\"#dash\"})"), "accepted");
+        check("the label is 'Waiting'", "Waiting".equals(a.labelNow()), a.labelNow());
+        a.feed("\u21b3 browser returned 20 chars");
+        check("a screenshot", a.feed("\ud83d\udee0\ufe0f browser({\"action\":\"screenshot\"})"), "accepted");
+        check("the label is 'Taking a screenshot'",
+                "Taking a screenshot".equals(a.labelNow()), a.labelNow());
+        a.feed("\u21b3 browser returned 90 chars");
+        a.finish();
+        String summary = a.summary();
+        check("the finished summary is past tense and browser-specific",
+                summary.contains("Opened site") && summary.contains("Filled form"), summary);
+        check("the summary never says 'Used a tool' for a browser step",
+                !summary.contains("Used a tool"), summary);
+
+        /* The verb lives in the arguments, which are not kept, so the finished
+           wording has to survive being written to and read back from storage. */
+        AgentActivity b = new AgentActivity();
+        b.feed("\ud83d\udee0\ufe0f browser({\"action\":\"navigate\",\"url\":\"https://example.com\"})");
+        b.feed("\u21b3 browser returned 60 chars");
+        b.finish();
+        List<AgentActivity.Step> back = AgentActivity.fromJson(b.toJson());
+        check("the past wording survives a save and reload",
+                !back.isEmpty() && "Opened site".equals(back.get(0).past),
+                back.isEmpty() ? "no steps" : back.get(0).past);
     }
 
     static void check(String what, boolean ok, String seen) {

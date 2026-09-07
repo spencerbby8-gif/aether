@@ -143,5 +143,12 @@ ok += case("web_search duckduckgo parse broken again", 'agent-loop-check.py',
                "for m in re.findall(r'<a[^>]*class=\"result__a\"[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>', h, re.S)[:8]:",
                "for m in re.finditer(r'<a[^>]*class=\"result__a\"[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>', h, re.S)[:0] or re.findall(r'x', h)[:8]:"))
 
+tot += 1
+# Stretching the wait past the tool's runtime is equivalent to removing the
+# heartbeat, and avoids matching an escape sequence through two layers of
+# quoting -- the template stores the six characters "\\u23f3", not the glyph.
+ok += case("no heartbeat while a tool runs (wait outlives it)", 'agent-loop-check.py',
+           lambda s: s.replace("_cf.wait(_pending, timeout=8)", "_cf.wait(_pending, timeout=600)"))
+
 print("\n%d/%d mutation cases behaved correctly" % (ok, tot))
 raise SystemExit(0 if ok == tot else 1)

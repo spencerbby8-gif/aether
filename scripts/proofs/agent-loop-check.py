@@ -131,6 +131,10 @@ def make_env(script):
         time.sleep(1.2)
         return "b done"
 
+    def very_slow(**k):
+        time.sleep(9.5)
+        return "slow done"
+
     def web_search(query=None, **k):
         return "result for " + str(query)
 
@@ -141,7 +145,7 @@ def make_env(script):
         'EXEC': {'web_search': web_search, 'run_command': run_command,
                  'big_tool': big_tool, 'generate_image': gen_image,
                  'generate_voice': gen_voice, 'plain_tool': plain_tool,
-                 'slow_a': slow_a, 'slow_b': slow_b},
+                 'slow_a': slow_a, 'slow_b': slow_b, 'very_slow': very_slow},
         'TOOLS': [{"type": "function", "function": {"name": "web_search"}},
                   {"type": "function", "function": {"name": "run_command"}}],
         'ollama_stream': ollama_stream,
@@ -416,6 +420,37 @@ chk("duckduckgo results are returned instead of the wikipedia fallback",
 chk("the redirect wrapper is unwrapped to the real url",
     'uddg=' not in _out, _out[:160])
 chk("the title survives", 'Lagos population report' in _out, _out[:160])
+
+print("== the response stays alive while a tool works ==")
+# A tool ran with the response silent. Short tools hid it; a browser install or
+# a long build does not, and an idle tunnel connection is dropped long before
+# the client's own stall timer. A heartbeat must go out while the tool runs.
+PAYLOADS.clear()
+ns_h, _ = make_env([step_tools(tc('very_slow')), step_text('done after the wait')]
+                   + [step_text('x')] * 8)
+h_h = FakeHandler()
+ns_h['agent_stream'](h_h, {'messages': [{'role': 'user', 'content': 'run something slow'}]})
+# json.dumps escapes non-ASCII, so the wire bytes carry the six characters
+# "\\u23f3" rather than the hourglass itself. Parse the lines instead of
+# string-matching, or the check silently looks for something never sent.
+_raw = h_h.wfile.buf.getvalue().decode("utf-8", "replace")
+_beats = []
+for _l in _raw.split("\n"):
+    _l = _l.strip()
+    if not _l.startswith("{"):
+        continue
+    try:
+        _d = json.loads(_l)
+    except Exception:
+        continue
+    if ((_d.get("message") or {}).get("thinking") or "") == "\u23f3":
+        _beats.append(_l)
+chk("a 9.5s tool produces a heartbeat before it returns", len(_beats) >= 1,
+    "heartbeats during the tool = %d" % len(_beats))
+chk("the slow tool still returned its result",
+    len(PAYLOADS) >= 2 and any('slow done' in (m.get('content') or '')
+                               for m in PAYLOADS[1]['messages'] if m.get('role') == 'tool'),
+    "payloads=%d" % len(PAYLOADS))
 
 print("\n%d passed, %d failed" % (ok, fail))
 raise SystemExit(0 if fail == 0 else 1)

@@ -38,14 +38,22 @@ public final class AgentActivity {
         public final String label;      // "Searching the web"
         public final String detail;     // compact and human: a query, or a host
         public final String source;     // the URL this step read, when it read one
+        /** Finished wording, resolved when the step starts because a browser
+            step's verb lives in its arguments, which are not kept. */
+        public final String past;
         public final long startMs;      // ms since the turn started
         public long durationMs;         // 0 while it is still running
         public int chars;               // from "returned N chars"
         public boolean done;
 
         Step(String tool, String label, String detail, String source, long startMs) {
+            this(tool, label, pastFor(tool), detail, source, startMs);
+        }
+
+        Step(String tool, String label, String past, String detail, String source, long startMs) {
             this.tool = tool;
             this.label = label;
+            this.past = past == null || past.isEmpty() ? pastFor(tool) : past;
             this.detail = detail;
             this.source = source;
             this.startMs = startMs;
@@ -58,6 +66,7 @@ public final class AgentActivity {
             try {
                 o.put("tool", tool);
                 o.put("label", label);
+                o.put("past", past);
                 o.put("start", startMs);
                 o.put("dur", durationMs);
                 if (detail != null && !detail.isEmpty()) o.put("detail", detail);
@@ -70,7 +79,8 @@ public final class AgentActivity {
 
         static Step fromJson(JSONObject o) {
             Step s = new Step(o.optString("tool", ""), o.optString("label", "Working"),
-                    o.optString("detail", ""), o.optString("source", ""), o.optLong("start", 0));
+                    o.optString("past", ""), o.optString("detail", ""),
+                    o.optString("source", ""), o.optLong("start", 0));
             s.durationMs = o.optLong("dur", 0);
             s.chars = o.optInt("chars", 0);
             s.done = o.optBoolean("done", true);
@@ -162,8 +172,8 @@ public final class AgentActivity {
             String args = line.substring(paren + 1);
             int close = args.lastIndexOf(')');
             if (close >= 0) args = args.substring(0, close);
-            Step s = new Step(name, labelFor(name), detailFor(name, args),
-                    sourceFor(name, args), now());
+            Step s = new Step(name, labelFor(name, args), pastFor(name, args),
+                    detailFor(name, args), sourceFor(name, args), now());
             steps.add(s);
             if (s.source != null) sources.add(s.source);
             return true;
@@ -205,7 +215,7 @@ public final class AgentActivity {
         String last = null;
         int run = 0;
         for (Step s : steps) {
-            String past = pastFor(s.tool);
+            String past = s.past;
             if (past.equals(last)) { run++; continue; }
             if (last != null) append(b, last + (run > 1 ? " \u00d7 " + (run + 1) : ""));
             last = past;
@@ -299,6 +309,36 @@ public final class AgentActivity {
     }
 
     public static String labelFor(String tool) {
+        return labelFor(tool, null);
+    }
+
+    /**
+     * Browser actions get their own labels. The engine reports one tool named
+     * "browser" for every action, so the verb comes from the action argument --
+     * otherwise the timeline would say "Using a tool" for the whole task.
+     */
+    public static String labelFor(String tool, String args) {
+        if ("browser".equals(tool)) {
+            String a = text(args, "action");
+            if (a == null) return "Using the browser";
+            switch (a) {
+                case "navigate":    return "Opening site";
+                case "back":        return "Going back";
+                case "click":       return "Clicking";
+                case "type":
+                case "fill":        return "Filling form";
+                case "select":      return "Choosing an option";
+                case "upload":      return "Uploading a file";
+                case "read":        return "Reading the page";
+                case "screenshot":  return "Taking a screenshot";
+                case "wait":        return "Waiting";
+                case "cookies":     return "Checking the session";
+                case "new_context": return "Opening a browser";
+                case "close":       return "Closing the browser";
+                case "list":        return "Checking open sessions";
+                default:            return "Using the browser";
+            }
+        }
         switch (tool) {
             case "web_search":     return "Searching the web";
             case "fetch_page":     return "Reading a source";
@@ -308,6 +348,30 @@ public final class AgentActivity {
             case "generate_voice": return "Generating audio";
             default:               return "Using a tool";
         }
+    }
+
+    private static String pastFor(String tool, String args) {
+        if ("browser".equals(tool)) {
+            String a = text(args, "action");
+            if (a == null) return "Used the browser";
+            switch (a) {
+                case "navigate":    return "Opened site";
+                case "back":        return "Went back";
+                case "click":       return "Clicked";
+                case "type":
+                case "fill":        return "Filled form";
+                case "select":      return "Chose an option";
+                case "upload":      return "Uploaded a file";
+                case "read":        return "Read the page";
+                case "screenshot":  return "Took a screenshot";
+                case "wait":        return "Waited";
+                case "cookies":     return "Checked the session";
+                case "new_context": return "Opened a browser";
+                case "close":       return "Closed the browser";
+                default:            return "Completed";
+            }
+        }
+        return pastFor(tool);
     }
 
     private static String pastFor(String tool) {

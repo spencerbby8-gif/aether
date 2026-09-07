@@ -1,0 +1,20 @@
+engine /api/ps  0.458s  models=1
+
+PROFILE: AFTER-round2-parallel
+scenario           byte    actv  1st-tok 1st-tool    total    dlt   beat  tools per-tool
+--------------------------------------------------------------------------------------------------------
+text               0.2s    0.2s    22.4s        -    23.6s      7      3      0 -
+web-search         0.2s    0.2s    46.9s     9.5s    88.7s    228      9      1 web_search=1.1s
+fetch-page         0.7s    0.7s    41.0s    39.1s    44.0s     16      5      1 fetch_page=0.1s
+command            0.3s    0.3s    21.8s    19.8s    53.2s    167      6      1 run_command=0.2s
+file-ops           0.4s    0.4s    37.7s    33.5s    46.0s     45      6      1 run_command=0.0s
+parallel-tools     0.3s    0.3s    52.3s    16.8s    65.1s     67      7      2 run_command=0.0s
+image              0.5s    0.5s    15.4s    13.0s    20.2s     26      3      1 generate_image=0.6s
+voice              0.2s    0.2s    46.4s    11.3s    48.4s     11      5      1 generate_voice=13.5s
+                NO done:true
+--------------------------------------------------------------------------------------------------------
+completed 7/8
+  median first-token   37.7s
+  median first-tool    19.8s
+  median total         46.0s
+  median silent gap between first activity and first answer token  37.3s
