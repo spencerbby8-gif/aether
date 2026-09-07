@@ -1,0 +1,22 @@
+engine /api/ps  0.110s  models=1
+
+PROFILE: BEFORE
+scenario           byte    actv  1st-tok 1st-tool    total    dlt   beat  tools per-tool
+--------------------------------------------------------------------------------------------------------
+text               0.1s    0.1s    45.9s        -    47.2s      7      5      0 -
+web-search         0.1s    0.1s    67.9s    33.9s   308.0s    179     33      5 web_search=1.9s,fetch_page=0.3s,web_search=1.9s,fetch_page=0.5s,run_command=0.3s
+fetch-page         0.3s    0.3s    38.4s    34.1s    47.3s     50      6      1 fetch_page=0.1s
+command            0.1s    0.1s    58.0s    21.5s    97.6s    223     11      1 run_command=0.1s
+file-ops           0.3s    0.3s    54.4s    46.4s    61.5s     40      7      1 run_command=0.0s
+parallel-tools     0.3s    0.3s    63.6s    24.8s    83.7s    113      9      2 run_command=0.0s,run_command=0.0s
+image              0.3s    0.3s    50.3s    17.3s    54.7s     25      6      1 generate_image=3.0s
+voice              0.1s    0.1s    24.2s    10.9s    35.0s     59      4      1 generate_voice=9.3s
+--------------------------------------------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/aether/scripts/proofs/latency-profile.py", line 172, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/user/aether/scripts/proofs/latency-profile.py", line 163, in main
+    ttft = [r["first_token"] for _, r in ok if r["first_token"]]
+                                 ^^^^
+ValueError: too many values to unpack (expected 2)

@@ -265,9 +265,35 @@ ns7['agent_stream'](h7, {'messages': [{'role': 'user', 'content': 'q'}]})
 chk("a tool that generates nothing emits no media event",
     len(media_events(h7)) == 0, "events = %d" % len(media_events(h7)))
 
-chk("reasoning is requested from the model",
-    all(p.get('think') is True for p in PAYLOADS) if PAYLOADS else False,
-    "think = %s" % [p.get('think') for p in PAYLOADS])
+print("== reasoning is spent only where it earns its cost ==")
+# Reasoning costs 25-65s per model call on this kernel and a tool turn pays it
+# on every iteration, so a turn reasons only when its prompt looks like it
+# needs to. These check both directions: the cheap path must actually be cheap,
+# and the analytical prompts must not silently lose their reasoning.
+def think_for(prompt):
+    PAYLOADS.clear()
+    ns, _ = make_env([step_text('answer')] + [step_text('x')] * 8)
+    h = FakeHandler()
+    ns['agent_stream'](h, {'messages': [{'role': 'user', 'content': prompt}]})
+    return [p.get('think') for p in PAYLOADS]
+
+chk("a plain factual question does not pay for reasoning",
+    think_for("Reply with one short sentence: what is the capital of France?") == [False],
+    str(think_for("Reply with one short sentence: what is the capital of France?")))
+chk("a 'why' question does reason",
+    think_for("Why does the sky look blue at sunset?") == [True],
+    str(think_for("Why does the sky look blue at sunset?")))
+chk("arithmetic in the prompt reasons",
+    think_for("what is 17 * 23") == [True], "arithmetic")
+chk("a long brief reasons",
+    think_for("x " * 250) == [True], "long prompt")
+chk("a multi-part question reasons",
+    think_for("What is X? And what is Y?") == [True], "two question marks")
+_multi = think_for("Compare these two options and tell me which is better.")
+chk("an analytical prompt reasons on every iteration, not just the first",
+    bool(_multi) and all(v is True for v in _multi), str(_multi))
+chk("the choice is decided once per turn and never flips mid-turn",
+    len(set(think_for("Just say hello."))) == 1, str(think_for("Just say hello.")))
 
 print("== reasoning must not be re-sent as history ==")
 # With think=True the model returns a 'thinking' field on every assistant

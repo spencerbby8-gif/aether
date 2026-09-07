@@ -110,12 +110,23 @@ ok += case("reasoning turned off (THINK = False)", 'agent-loop-check.py',
            lambda s: s.replace("THINK = True", "THINK = False"))
 tot += 1
 ok += case("think flag hardcoded False in the payload", 'agent-loop-check.py',
-           lambda s: s.replace("'think': THINK", "'think': False"))
+           lambda s: s.replace("'think': turn_think", "'think': False"))
 
 tot += 1
 ok += case("reasoning kept in the history sent back to the model", 'agent-loop-check.py',
            lambda s: s.replace("_am = {k: v for k, v in m.items() if k != 'thinking'}",
                                "_am = m"))
+
+tot += 1
+ok += case("adaptive reasoning reverted to always-on", 'agent-loop-check.py',
+           lambda s: s.replace("turn_think = THINK_ALWAYS or (THINK and needs_reasoning(last_user_text(msgs)))",
+                               "turn_think = THINK"))
+tot += 1
+ok += case("needs_reasoning always False (reasoning never used)", 'agent-loop-check.py',
+           lambda s: s.replace("def needs_reasoning(text):", "def needs_reasoning(text):\n    return False"))
+tot += 1
+ok += case("needs_reasoning always True (reasoning always paid for)", 'agent-loop-check.py',
+           lambda s: s.replace("def needs_reasoning(text):", "def needs_reasoning(text):\n    return True"))
 
 print("\n%d/%d mutation cases behaved correctly" % (ok, tot))
 raise SystemExit(0 if ok == tot else 1)
