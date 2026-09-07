@@ -37,7 +37,7 @@ public final class TtfbProbe {
         System.out.println("engine " + slot.toUpperCase(Locale.ROOT) + " is live, probing "
                 + url.replaceAll("https?://", "").replaceAll("\\..*", ".***") + "/api/chat");
 
-        String body = "{\"model\":\"x\",\"stream\":true,\"messages\":[{\"role\":\"user\","
+        String body = "{\"stream\":true,\"messages\":[{\"role\":\"user\","
                 + "\"content\":" + quote(prompt) + "}]}";
         byte[] out = body.getBytes(StandardCharsets.UTF_8);
 

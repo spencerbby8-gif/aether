@@ -75,8 +75,12 @@ public final class AgentActivityCheck {
         }
 
         check("the engine sent thinking events", thinking > 0, thinking + "");
-        check("not every thinking event becomes a row", shown < thinking,
-                shown + " of " + thinking + " shown");
+        /* Many events must collapse into few rows. A turn that searched four
+           times and read a page emits 21 thinking events -- heartbeats every
+           10s, one line per iteration, a start and a finish per tool -- and
+           the conversation should carry five short lines, not twenty-one. */
+        check("events collapse into far fewer rows", a.steps().size() * 2 < thinking,
+                a.steps().size() + " rows from " + thinking + " events");
         check("at least one real activity was recognised", !a.steps().isEmpty(),
                 a.steps().size() + " step(s)");
         for (AgentActivity.Step s : a.steps()) {

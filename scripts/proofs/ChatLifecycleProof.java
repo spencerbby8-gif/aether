@@ -62,25 +62,30 @@ public final class ChatLifecycleProof {
         rawHttpTiming(url, offKey);
 
         List<EngineCore.Msg> history = new ArrayList<>();
+        url = resolve(topic, url);
         Turn plain = run(url, offKey, history,
                 "In two sentences, what is the capital of France?", 300_000, 0);
         history.add(new EngineCore.Msg("user", "In two sentences, what is the capital of France?"));
         history.add(new EngineCore.Msg("assistant", plain.text()));
 
+        url = resolve(topic, url);
         Turn search = run(url, offKey, history,
                 "Use web_search to find today's top news headline about Nigeria, then name the"
                         + " source you used.", 600_000, 0);
         history.add(new EngineCore.Msg("user", "today's top news headline about Nigeria"));
         history.add(new EngineCore.Msg("assistant", search.text()));
 
+        url = resolve(topic, url);
         Turn cmd = run(url, offKey, history,
                 "Use run_command to compute 17 * 23 with python3 and tell me the result.",
                 600_000, 0);
 
+        url = resolve(topic, url);
         Turn stopped = run(url, offKey, history,
                 "Write a very long detailed essay about the history of computing, at least"
                         + " a thousand words.", 600_000, 4_000);
 
+        url = resolve(topic, url);
         Turn longCtx = run(url, offKey, history,
                 "Referring to what we discussed earlier in this conversation, which country's"
                         + " capital did I ask you about? Answer in one sentence.", 300_000, 0);
@@ -96,13 +101,15 @@ public final class ChatLifecycleProof {
         };
         for (int i = 1; i <= turns; i++) {
             String q = String.format(Locale.ROOT, prompts[(i - 1) % prompts.length], i);
+            url = resolve(topic, url);
             Turn t = run(url, offKey, history, q, 600_000, 0);
             stress.add(t);
             history.add(new EngineCore.Msg("user", q));
             history.add(new EngineCore.Msg("assistant", t.text()));
-            System.out.printf("  turn %2d  %-9s %6dms  ttft %5dms  tools %d  %s%n",
+            System.out.printf("  turn %2d  %-9s %6dms  ttft %5dms  tools %d  %s%s%n",
                     i, t.state, t.totalMs, t.firstContentMs, t.activities.steps().size(),
-                    clip(t.text(), 46));
+                    clip(t.text(), 40),
+                    t.err == null ? "" : "   err=" + clip(t.err, 60));
         }
 
         int ok = 0, err = 0, hung = 0;
@@ -160,6 +167,26 @@ public final class ChatLifecycleProof {
 
         System.out.println("\n" + pass + " passed, " + fail + " failed");
         if (fail > 0) System.exit(1);
+    }
+
+    /**
+     * Resolve a live engine right now. The app re-discovers on every send and
+     * fails over between engines; a harness that resolves once and reuses the
+     * URL for twenty turns is more brittle than the thing it is testing, and
+     * the first run proved it -- the tunnel went away part-way through and
+     * every later turn failed in under 2ms for a reason that had nothing to do
+     * with the client.
+     */
+    static String resolve(String topic, String fallback) {
+        try {
+            for (String s : new String[] {"a", "b", "c"}) {
+                for (String u : EngineCore.urlsFor(topic, "", s, 3 * 3600, 12_000, 8)) {
+                    EngineCore.Health h = EngineCore.health(u, 8_000);
+                    if (h.status == 200 && !h.models.isEmpty()) return u;
+                }
+            }
+        } catch (Exception ignored) { }
+        return fallback;
     }
 
     // ------------------------------------------------------------- one turn

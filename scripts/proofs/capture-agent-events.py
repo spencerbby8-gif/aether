@@ -45,7 +45,11 @@ if not live:
     sys.exit(1)
 print("capturing from", live.replace('https://', '').split('.')[0] + '.***')
 
-body = json.dumps({"model": "x", "stream": True,
+# No "model" field, exactly like the Android client. Sending one makes the
+# kernel forward it to Ollama, and a wrong name comes back as HTTP 404
+# "model 'x' not found" -- which is what this harness did for a while, and
+# which looked exactly like a broken engine.
+body = json.dumps({"stream": True,
                    "messages": [{"role": "user", "content": prompt}]}).encode()
 req = urllib.request.Request(live + "/api/chat", data=body, headers={
     "Content-Type": "application/json",
