@@ -1,0 +1,28 @@
+=== waking engine ===
+tunnel seen (not serving yet): sunshine-pioneer-particu
+LIVE after 307s: https://partition-recovery-isolated-build.trycloudflare.com
+=== HistoryTurnProof (the one that looped before) ===
+engine: partition-recovery-isolate...
+sending 9 messages (the old code would send only the last 24, losing the question)
+  t+ 45.7s  🛠️ web_search({"query": "top Nigeria news headline today"})
+  t+ 47.8s  🛠️ web_search({"query": "Nigeria news photo image source"})
+  t+ 49.7s  🛠️ run_command({"command": "date -u"})
+  t+113.1s  🛠️ web_search({"query": "Nigeria news today September 2026"})
+  t+115.2s  🛠️ web_search({"query": "Nigeria flag photo Wikimedia Commons"})
+  t+151.6s  🛠️ fetch_page({"url": "https://www.premiumtimesng.com/"})
+  t+152.1s  🛠️ run_command({"command": "curl -s \"https://en.wikipedia.org/wiki/Sp
+  t+222.7s  🛠️ run_command({"command": "curl -sL \"https://upload.wikimedia.org/wi
+  t+296.9s  🛠️ run_command({"command": "curl -sL \"https://upload.wikimedia.org/wi
+  t+377.7s  🛠️ run_command({"command": "for url in \\\n  \"https://upload.wikimedi
+  t+445.5s  🛠️ run_command({"command": "curl -s \"https://en.wikipedia.org/api/res
+  t+527.8s  🛠️ run_command({"command": "curl -sL \"https://upload.wikimedia.org/wi
+
+elapsed 654.3s | content deltas 447 | first token 23.5s | tool events 12
+reached done:true -> True
+
+RESULT: PASS - multi-tool turn completed
+=== MultiToolTurnProof ===
+NO LIVE ENGINE - cannot verify
+=== PromptShapeProof ===
+NO LIVE ENGINE - cannot verify
+VERIFY2_DONE
