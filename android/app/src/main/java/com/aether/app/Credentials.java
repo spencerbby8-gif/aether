@@ -38,6 +38,8 @@ public final class Credentials {
         public final String offKey;
         public final String beaconTopic;
         public final String beaconSecret;
+        /** Optional ntfy topic the app reports its own readings to. */
+        public final String telemetryTopic;
         public final List<EngineCore.Engine> engines = new ArrayList<>();
 
         Config(JSONObject o) throws Exception {
@@ -45,6 +47,7 @@ public final class Credentials {
             this.offKey       = o.getString("offKey");
             this.beaconTopic  = o.getString("beaconTopic");
             this.beaconSecret = o.optString("beaconSecret", "");
+            this.telemetryTopic = o.optString("telemetryTopic", "");
             for (String slot : new String[] {"a", "b", "c"}) {
                 JSONObject e = o.optJSONObject("engine" + slot.toUpperCase());
                 if (e == null) continue;

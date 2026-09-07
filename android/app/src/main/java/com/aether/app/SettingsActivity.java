@@ -133,8 +133,16 @@ public class SettingsActivity extends AppCompatActivity {
         cfg = Credentials.load(this);
         if (cfg == null || cfg.engines.isEmpty()) {
             note.setText("No engine credentials are baked into this build.");
+            /* Still worth reporting: "the screen says no credentials" is a
+               distinct failure and otherwise invisible from here. */
+            EngineCore.publish(telemetryTopicOrEmpty(),
+                    "build " + BuildConfig.VERSION_NAME + "(" + BuildConfig.VERSION_CODE
+                            + ") NO CREDENTIALS BAKED", 15_000);
             return;
         }
+        /* Confirms which build is actually installed, from the device itself. */
+        telemetry("settings opened on " + android.os.Build.MANUFACTURER + " "
+                + android.os.Build.MODEL + ", Android " + android.os.Build.VERSION.RELEASE);
 
         buildRoutingRows();
         buildEngineRows();
@@ -200,6 +208,10 @@ public class SettingsActivity extends AppCompatActivity {
         actionExec.execute(() -> {
             final String report = diagnostics();
             ui.post(() -> note.setText(report));
+            /* The same report, sent where it can actually be read. */
+            EngineCore.publish(cfg.telemetryTopic,
+                    "build " + BuildConfig.VERSION_NAME + "(" + BuildConfig.VERSION_CODE
+                            + ")\n" + EngineCore.scrubUrls(report), 15_000);
         });
     }
 
@@ -632,6 +644,7 @@ public class SettingsActivity extends AppCompatActivity {
                 EngineCore.Action a = EngineCore.isQuotaRefusal(code, msg)
                         ? EngineCore.Action.quotaHit("wake", msg)
                         : EngineCore.Action.failed("wake", msg);
+                telemetry("wake FAILED: engine " + up + " -- " + msg);
                 states.put(e.slot, EngineCore.classify(e.slot, EngineCore.NO_CHECK, null,
                         null, safeKernelStatus(e), a));
                 final EngineCore.EngineState bad = states.get(e.slot);
@@ -642,6 +655,7 @@ public class SettingsActivity extends AppCompatActivity {
                 });
                 return;
             }
+            telemetry("wake accepted by Kaggle: engine " + up);
             /* Accepted. That earns WAKING and nothing more. */
             states.put(e.slot, new EngineCore.EngineState(e.slot, EngineCore.Phase.WAKING,
                     "waking — Kaggle accepted the kernel; booting takes several minutes",
@@ -691,6 +705,9 @@ public class SettingsActivity extends AppCompatActivity {
                 states.put(slot, st);
                 if (st.isLive()) {
                     liveUrls.put(slot, st.url);
+                    telemetry("engine " + up + " LIVE after "
+                            + ((System.currentTimeMillis() - (deadline - WAKE_WATCH_MS)) / 1000)
+                            + "s");
                     final EngineCore.EngineState live = st;
                     ui.post(() -> {
                         render();
@@ -703,6 +720,8 @@ public class SettingsActivity extends AppCompatActivity {
                 ui.post(this::render);
                 try { Thread.sleep(FAST_POLL_MS); } catch (InterruptedException ie) { return; }
             }
+            telemetry("engine " + up + " did NOT come live inside "
+                    + (WAKE_WATCH_MS / 60_000) + " min");
             ui.post(() -> {
                 render();
                 announce("Engine " + up + " did not answer /api/ps inside "
@@ -742,6 +761,8 @@ public class SettingsActivity extends AppCompatActivity {
         actionExec.execute(() -> {
             final EngineCore.EngineState result = shutOne(slot);
             states.put(slot, result);
+            telemetry("shutdown engine " + slot.toUpperCase(Locale.ROOT) + ": "
+                    + badge(result.phase) + " -- " + result.detail);
             ui.post(() -> {
                 render();
                 announce("Engine " + slot.toUpperCase(Locale.ROOT) + ": "
@@ -796,6 +817,32 @@ public class SettingsActivity extends AppCompatActivity {
                     });
                 })
                 .show();
+    }
+
+
+    /** The telemetry topic even when credentials failed to load. */
+    private String telemetryTopicOrEmpty() {
+        try {
+            Credentials.Config c = Credentials.load(this);
+            return c == null ? "" : c.telemetryTopic;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * Report one line to the telemetry topic.
+     *
+     * This is how an installed build can be observed at all: the build host has
+     * no route to the phone, but both sides can reach ntfy. It runs off the UI
+     * thread, publishes nothing secret (URLs are scrubbed, keys never leave the
+     * device), and can never affect what the user sees.
+     */
+    private void telemetry(final String what) {
+        if (cfg == null || cfg.telemetryTopic == null || cfg.telemetryTopic.isEmpty()) return;
+        final String body = "build " + BuildConfig.VERSION_NAME + "(" + BuildConfig.VERSION_CODE
+                + ") " + EngineCore.scrubUrls(what);
+        actionExec.execute(() -> EngineCore.publish(cfg.telemetryTopic, body, 15_000));
     }
 
     /** Last action's outcome, always visible -- no action fails silently. */

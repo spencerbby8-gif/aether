@@ -282,6 +282,37 @@ public final class EngineCore {
     }
 
     /**
+     * Publish one line to an ntfy topic.
+     *
+     * This is the only way an installed build can be observed at all: the build
+     * host has no route to the phone, but both sides can reach ntfy. Fire and
+     * forget on purpose -- telemetry must never be able to fail an engine
+     * operation, so errors are reported as `false`, not thrown.
+     *
+     * Never publish a key, an account name or a tunnel: callers pass scrubbed text.
+     */
+    public static boolean publish(String topic, String text, int timeoutMs) {
+        if (topic == null || topic.isEmpty() || text == null) return false;
+        HttpURLConnection c = null;
+        try {
+            c = open("POST", NTFY_BASE + enc(topic), timeoutMs);
+            c.setRequestProperty("Content-Type", "text/plain; charset=utf-8");
+            c.setDoOutput(true);
+            byte[] out = text.getBytes(StandardCharsets.UTF_8);
+            c.setFixedLengthStreamingMode(out.length);
+            try (OutputStream os = c.getOutputStream()) { os.write(out); }
+            int code = c.getResponseCode();
+            InputStream is = (code >= 400) ? c.getErrorStream() : c.getInputStream();
+            if (is != null) is.close();
+            return code >= 200 && code < 300;
+        } catch (Exception ex) {
+            return false;
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
+    /**
      * Live links from an ntfy topic, newest first per URL.
      *
      * A topic accumulates a URL from every boot, and a dead Cloudflare tunnel
