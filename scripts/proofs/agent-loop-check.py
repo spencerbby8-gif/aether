@@ -88,6 +88,7 @@ class FakeSubprocess:
 
 
 TOOL_CALLS_SEEN = []
+PAYLOADS = []
 
 
 def make_env(script):
@@ -97,6 +98,7 @@ def make_env(script):
     def ollama_stream(payload, push):
         k = calls['n']
         calls['n'] += 1
+        PAYLOADS.append(json.loads(json.dumps(payload)))
         TOOL_CALLS_SEEN.append([tc['function']['name']
                                 for tc in (script[k].get('message', {}).get('tool_calls') or [])])
         m = dict(script[k].get('message', {}))
@@ -107,6 +109,9 @@ def make_env(script):
     def run_command(command=None, **k):
         return "Mon Sep 7 15:00:00 UTC 2026"
 
+    def big_tool(**k):
+        return "x" * 9000
+
     def web_search(query=None, **k):
         return "result for " + str(query)
 
@@ -114,7 +119,8 @@ def make_env(script):
         'json': json, 'queue': queue, 'threading': threading, 'time': time,
         'SYSMSG': 'You are AETHER.', 'MODEL': 'test-model',
         'NUM_CTX': 16384, 'TOOL_RESULT_MAX': 2500,
-        'EXEC': {'web_search': web_search, 'run_command': run_command},
+        'EXEC': {'web_search': web_search, 'run_command': run_command,
+                 'big_tool': big_tool},
         'TOOLS': [{"type": "function", "function": {"name": "web_search"}},
                   {"type": "function", "function": {"name": "run_command"}}],
         'ollama_stream': ollama_stream,
@@ -181,6 +187,20 @@ h3 = FakeHandler()
 ns3['agent_stream'](h3, {'messages': [{'role': 'user', 'content': 'two states'}]})
 chk("a mixed step is not treated as a loop", calls3['n'] == 3,
     "model calls = %d" % calls3['n'])
+
+print("== the model is always given a declared context window ==")
+PAYLOADS.clear()
+ns4, calls4 = make_env([step_tools(tc('big_tool')), step_text('done')] + [step_text('x')] * 8)
+h4 = FakeHandler()
+ns4['agent_stream'](h4, {'messages': [{'role': 'user', 'content': 'q'}]})
+chk("every model call declares num_ctx",
+    all((p.get('options') or {}).get('num_ctx') == 16384 for p in PAYLOADS) and PAYLOADS,
+    "num_ctx = %s over %d calls" % ([(p.get('options') or {}).get('num_ctx') for p in PAYLOADS],
+                                    len(PAYLOADS)))
+last_tools = [m for p in PAYLOADS for m in p['messages'] if m.get('role') == 'tool']
+chk("an oversized tool result is capped before it is resent",
+    bool(last_tools) and all(len(str(m.get('content'))) <= 2600 for m in last_tools),
+    "tool result lengths = %s" % [len(str(m.get('content'))) for m in last_tools])
 
 print("\n%d passed, %d failed" % (ok, fail))
 raise SystemExit(0 if fail == 0 else 1)
