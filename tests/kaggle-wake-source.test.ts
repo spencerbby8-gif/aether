@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("481a5e95d6efa38d429e8422eb0eb9b4fc8e8b19904a5b8a0c6a597a1ef9cdbd");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("44fe57b29731a34bb5c0b9eec97b33bbb0d4ddabfeb9992c9710fc1bfb15cd20");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -123,11 +123,14 @@ describe("engine source — rendering", () => {
      * 40875 -> 43521: the model path stopped shelling out to curl and now uses
      * http.client, records the HTTP status and body when a call yields nothing
      * instead of hiding it behind a placeholder, and retries once without
-     * streaming before giving up. scripts/verify-engine-source.mjs computes the
-     * same 43521 independently.
+     * streaming before giving up.
+     * 43521 -> 46275: history_window() replaced the naive msgs[-24:] slice that
+     * was dropping the user query and hard-failing the chat template with
+     * "No user query found in messages." on multi-tool turns.
+     * scripts/verify-engine-source.mjs computes the same figure independently.
      */
     const rendered = renderAetherNotebook(DUMMY);
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(43521);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(46275);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
