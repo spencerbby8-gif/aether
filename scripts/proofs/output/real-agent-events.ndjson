@@ -1,4 +1,4 @@
-0.207 {"message": {"thinking": "\u2699\ufe0f agent step 1..."}, "done": false}
-0.207 {"message": {"thinking": "\u23f3"}, "done": false}
-0.216 {"message": {"content": "(model timeout/error)"}, "done": false}
-0.216 {"message": {"content": ""}, "done": true, "done_reason": "stop", "eval_count": 0, "eval_duration": 0, "total_duration": 0, "prompt_eval_count": 0}
+0.271 {"message": {"thinking": "\u2699\ufe0f agent step 1..."}, "done": false}
+0.271 {"message": {"thinking": "\u23f3"}, "done": false}
+0.271 {"message": {"content": "(engine error: the model returned nothing)"}, "done": false}
+0.271 {"message": {"content": ""}, "done": true, "done_reason": "stop", "eval_count": 0, "eval_duration": 0, "total_duration": 0, "prompt_eval_count": 0}

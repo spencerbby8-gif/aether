@@ -298,7 +298,7 @@ public final class AgentActivity {
         return null;
     }
 
-    static String labelFor(String tool) {
+    public static String labelFor(String tool) {
         switch (tool) {
             case "web_search":     return "Searching the web";
             case "fetch_page":     return "Reading a source";
