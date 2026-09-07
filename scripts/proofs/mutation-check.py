@@ -150,5 +150,11 @@ tot += 1
 ok += case("no heartbeat while a tool runs (wait outlives it)", 'agent-loop-check.py',
            lambda s: s.replace("_cf.wait(_pending, timeout=8)", "_cf.wait(_pending, timeout=600)"))
 
+tot += 1
+# The helper source lives inside the template as a string literal, so the
+# anchor carries a literal backslash-n rather than a real newline.
+ok += case("failed browser launch left un-stopped", 'playwright-launch-check.py',
+           lambda s: s.replace("            pw.stop()\\n", "            pass\\n"))
+
 print("\n%d/%d mutation cases behaved correctly" % (ok, tot))
 raise SystemExit(0 if ok == tot else 1)
