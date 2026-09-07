@@ -1,0 +1,59 @@
+
+== engine is really serving
+  PASS  /api/ps returns 200
+  PASS  a model is loaded
+     models: hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+
+== reasoning is actually on
+     http=200 lines=37 first_byte=0.11s first_token=242.19s total=243.1s done=True reason=stop
+     tools: run_command({"command": "python3 -c \"\nfrom fractions import Fraction
+  PASS  turn completed
+  PASS  model produced reasoning text
+  PASS  the answer is the correct change ($5.33, not the pen price)
+  PASS  the answer is not a dump of the reasoning
+
+== real command execution on the engine host
+     http=200 lines=44 first_byte=0.40s first_token=90.46s total=95.4s done=True reason=stop
+     tools: run_command({"command": "echo AETHER_CMD_OK && uname -sr && python3 -c
+  PASS  turn completed
+  PASS  run_command was invoked
+  PASS  the real echo marker came back
+  PASS  python really executed
+  PASS  cwd reported
+
+== fetching a real page
+     http=200 lines=68 first_byte=0.30s first_token=186.95s total=194.5s done=True reason=stop
+     tools: fetch_page({"url": "https://example.com"})
+  PASS  turn completed
+  PASS  fetch_page was invoked
+  PASS  real page content came back
+
+== downloading a real file to engine storage
+     http=200 lines=239 first_byte=0.33s first_token=238.77s total=274.9s done=True reason=stop
+     tools: run_command({"command": "curl -sL -o /kaggle/working/aether-dl.bin \"h | run_command({"command": "sha256sum /kaggle/working/aether-dl.bin && he
+  PASS  turn completed
+  PASS  run_command was invoked
+  PASS  the downloaded file has the expected size
+
+== generating an image, delivered as media
+     http=200 lines=45 first_byte=0.30s first_token=33.60s total=39.5s done=True reason=stop
+     tools: generate_image({"prompt": "A red fox standing in fresh snow, golden-re
+  PASS  turn completed
+  PASS  a media event arrived
+  PASS  media kind is image
+  PASS  media carries a real https url
+  PASS  media names the producing tool
+  PASS  the image is downloadable (49170 bytes)
+  PASS  the bytes are a real image
+
+== generating voice, delivered as media
+     http=200 lines=63 first_byte=0.08s first_token=23.22s total=32.9s done=True reason=stop
+     tools: generate_voice({"text": "Hello from Aether."})
+  PASS  turn completed
+  PASS  a media event arrived
+  PASS  media kind is audio
+  PASS  media names the producing tool
+  PASS  the audio is downloadable (46124 bytes)
+  PASS  the bytes are a real WAV file
+
+CAPABILITY PROOF  30 passed, 0 failed

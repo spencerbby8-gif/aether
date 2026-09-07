@@ -1,0 +1,8 @@
+== chat lifecycle, real engine ==
+engine A found in 1262ms (raises-polo-attorney-namely.***)
+  PASS  discovery resolves a live engine quickly   [1262ms]
+
+-- http
+  PASS  the connection is accepted   [HTTP 200]
+  time to first byte (response headers): 63ms
+  PASS  response headers arrive fast   [63ms]
