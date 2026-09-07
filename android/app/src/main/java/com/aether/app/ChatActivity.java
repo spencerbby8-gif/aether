@@ -612,6 +612,9 @@ public class ChatActivity extends AppCompatActivity {
         /** Compact activity strip, driven only by real engine events. */
         ActivityPanel activity;
         boolean hasContent = false;
+        /** Shape of the request sent, captured where it is in scope so the
+            failure report can include it. Counts and roles only. */
+        String reqShape = "";
         /** Raw text exactly as the engine sent it. */
         final StringBuilder raw = new StringBuilder();
         long lastRender = 0L;
@@ -1298,6 +1301,9 @@ public class ChatActivity extends AppCompatActivity {
                                     final List<EngineCore.Msg> history) {
         final boolean[] cancel = new boolean[] {false};
         cancelFlag = cancel;
+        /* Captured here because history and wire are only in scope in this
+           method, and the failure report is written later from finalizeTurn. */
+        b.reqShape = describeRequest(history, wire);
         final long t0 = System.currentTimeMillis();
         final boolean[] ok = new boolean[] {false};
         final String[] err = new String[] {null};
@@ -1377,7 +1383,7 @@ public class ChatActivity extends AppCompatActivity {
                 forget();     // a failed engine must not be reused next message
                 if (b.model != null) markError(b.model, err);
                 telemetry("chat FAILED on engine " + engineOf(b) + " after " + (ms / 1000)
-                        + "s: " + err);
+                        + "s: " + err + " | sent " + b.reqShape);
                 onError("Engine error: " + err, prompt);
             } else {
                 if (b.model != null) b.model.status = ChatMessage.STATUS_OK;
@@ -1388,7 +1394,8 @@ public class ChatActivity extends AppCompatActivity {
                 if (!reportedFirstStream) {
                     reportedFirstStream = true;
                     telemetry("chat OK on engine " + engineOf(b) + " in " + (ms / 1000)
-                            + "s, " + b.raw.length() + " chars streamed");
+                            + "s, " + b.raw.length() + " chars streamed | sent "
+                            + b.reqShape);
                 }
             }
             persist();
@@ -1399,6 +1406,33 @@ public class ChatActivity extends AppCompatActivity {
     private static String engineOf(AssistantBubble b) {
         return b != null && b.model != null && b.model.engine != null
                 ? b.model.engine.toUpperCase(java.util.Locale.ROOT) : "?";
+    }
+
+    /**
+     * The shape of the request that was actually put on the wire, so a failure
+     * can be diagnosed from the build host without having the device in hand.
+     * Counts and role letters only -- never message text, never URLs.
+     *
+     * This exists because a turn can fail for reasons that are invisible in the
+     * transcript: how much history was attached, and whether the engine
+     * received a plain user message at all.
+     */
+    private static String describeRequest(List<EngineCore.Msg> history, String prompt) {
+        StringBuilder roles = new StringBuilder();
+        int sent = 0;
+        if (history != null) {
+            for (EngineCore.Msg m : history) {
+                if (m == null || m.content == null || m.content.isEmpty()) continue;
+                roles.append("assistant".equals(m.role) ? 'a' : 'u');
+                sent++;
+            }
+        }
+        roles.append('u');            // the prompt itself is always last
+        if (roles.length() > 24) {
+            roles = new StringBuilder(roles.substring(roles.length() - 24));
+        }
+        return sent + " history msgs, roles ...(" + roles + "), prompt "
+                + (prompt == null ? 0 : prompt.length()) + " chars";
     }
 
     /**
