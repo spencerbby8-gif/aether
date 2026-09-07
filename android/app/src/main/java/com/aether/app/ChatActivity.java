@@ -12,8 +12,10 @@ import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.AlphaAnimation;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -27,6 +29,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.drawerlayout.widget.DrawerLayout;
 
+import com.aether.app.core.AgentActivity;
 import com.aether.app.core.Attachment;
 import com.aether.app.core.ChatMessage;
 import com.aether.app.core.ChatSession;
@@ -38,6 +41,7 @@ import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -433,14 +437,16 @@ public class ChatActivity extends AppCompatActivity {
                 attachMessageActions(body, m);
             } else {
                 AssistantBubble b = addAssistantBubble();
-                for (String line : m.toolLines) pushThinking(b, line);
+                /* Stored lines are the engine's real operational events; the
+                   model's reasoning was never saved, so a reloaded transcript
+                   cannot resurrect it. finish() collapses the strip and stops
+                   any animation before the message is even on screen. */
+                for (String line : m.toolLines) b.activity.event(line);
+                b.activity.finish();
                 if (m.content != null && !m.content.isEmpty()) {
                     b.raw.append(m.content);
-                    showNormalized(b, true);
-                } else if (b.waiting != null && b.waiting.getParent() != null) {
-                    /* A finished turn with no answer must not still say "thinking". */
-                    b.wrap.removeView(b.waiting);
-                    b.waiting = null;
+                    renderAnswer(b, true);
+                    addSources(b);
                 }
                 if (ChatMessage.STATUS_ERROR.equals(m.status)) {
                     b.meta.setText("error" + (m.note != null ? " — " + m.note : ""));
@@ -453,7 +459,7 @@ public class ChatActivity extends AppCompatActivity {
                     b.meta.setText((m.engine != null ? "engine " + m.engine.toUpperCase(Locale.ROOT) : "Aether"));
                     b.meta.setVisibility(View.VISIBLE);
                 }
-                if (b.content != null) attachMessageActions(b.content, m);
+                attachMessageActions(b.contentZone, m);
             }
         }
         scrollBottom();
@@ -480,6 +486,18 @@ public class ChatActivity extends AppCompatActivity {
 
     private void scrollBottom() {
         scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    /**
+     * Follow the answer only while the reader is already at the bottom. Yanking
+     * the list down under someone who scrolled up to re-read is the classic
+     * streaming bug, and it gets worse the faster tokens arrive.
+     */
+    private void followIfAtBottom() {
+        final View child = scroll.getChildAt(0);
+        if (child == null) { scrollBottom(); return; }
+        int gap = child.getBottom() - (scroll.getHeight() + scroll.getScrollY());
+        if (gap < Ui.dp(this, 140)) scrollBottom();
     }
 
     private TextView addUserBubble(String text) {
@@ -584,8 +602,14 @@ public class ChatActivity extends AppCompatActivity {
         LinearLayout wrap;
         LinearLayout toolZone;
         TextView content;
-        TextView waiting;
+        TextView notice;
         TextView meta;
+        /** Answer zone: one text view while streaming, styled segments after. */
+        LinearLayout contentZone;
+        /** Real sources this turn used, rendered only when there are any. */
+        LinearLayout sources;
+        /** Compact activity strip, driven only by real engine events. */
+        ActivityPanel activity;
         boolean hasContent = false;
         /** Raw text exactly as the engine sent it. */
         final StringBuilder raw = new StringBuilder();
@@ -604,38 +628,51 @@ public class ChatActivity extends AppCompatActivity {
         lp.topMargin = Ui.dp(this, 10);
         b.wrap.setLayoutParams(lp);
 
-        /* The answer zone. Created empty; filled as content streams. */
+        /* Activity first and compact: one line above the answer, never a log. */
+        b.activity = new ActivityPanel();
+        b.wrap.addView(b.activity.card);
+        b.wrap.addView(b.activity.list);
+
+        /* The answer zone -- the visual focus of the turn. */
+        b.contentZone = new LinearLayout(this);
+        b.contentZone.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams cz = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cz.topMargin = Ui.dp(this, 8);
+        b.contentZone.setVisibility(View.GONE);      // appears with the first real token
+        b.wrap.addView(b.contentZone, cz);
+
         b.content = Ui.tv(this, "", 15, Ui.PRIMARY);
         b.content.setBackgroundResource(R.drawable.bg_bubble_in);
-        b.content.setPadding(Ui.dp(this, 14), Ui.dp(this, 10), Ui.dp(this, 14), Ui.dp(this, 10));
+        b.content.setPadding(Ui.dp(this, 14), Ui.dp(this, 11), Ui.dp(this, 14), Ui.dp(this, 11));
         LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         clp.gravity = Gravity.START;
-        int side = Ui.dp(this, 40);
-        clp.setMargins(0, 0, side, 0);
-        b.content.setVisibility(View.GONE);   // only appears when real content arrives
-        b.wrap.addView(b.content, clp);
+        clp.setMargins(0, 0, Ui.dp(this, 40), 0);
+        b.contentZone.addView(b.content, clp);
 
-        /* Tool activity zone, below the answer. */
-        b.toolZone = new LinearLayout(this);
-        b.toolZone.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams tz = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tz.topMargin = Ui.dp(this, 6);
-        b.wrap.addView(b.toolZone, tz);
-
-        /* Waiting line -- shown until the first real token, then removed. */
-        b.waiting = Ui.tv(this, "Aether is thinking…", 12, Ui.DIM);
-        LinearLayout.LayoutParams wl = new LinearLayout.LayoutParams(
+        /* App-level notices (an engine waking, for example). Not agent activity. */
+        b.notice = Ui.tv(this, "", 12, Ui.DIM);
+        b.notice.setVisibility(View.GONE);
+        LinearLayout.LayoutParams nl = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        wl.topMargin = Ui.dp(this, 6);
-        b.wrap.addView(b.waiting, wl);
+        nl.topMargin = Ui.dp(this, 6);
+        b.wrap.addView(b.notice, nl);
+
+        /* Sources, only when the turn really used any. */
+        b.sources = new LinearLayout(this);
+        b.sources.setOrientation(LinearLayout.VERTICAL);
+        b.sources.setVisibility(View.GONE);
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sl.topMargin = Ui.dp(this, 6);
+        b.wrap.addView(b.sources, sl);
 
         b.meta = Ui.meta(this, "");
         b.meta.setVisibility(View.GONE);
         LinearLayout.LayoutParams ml = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ml.topMargin = Ui.dp(this, 3);
+        ml.topMargin = Ui.dp(this, 4);
         b.wrap.addView(b.meta, ml);
 
         msgList.addView(b.wrap);
@@ -643,65 +680,269 @@ public class ChatActivity extends AppCompatActivity {
         return b;
     }
 
-    /** A stored or streamed thinking line: is it a tool call rather than prose? */
-    private static boolean isToolLine(String text) {
-        if (text == null) return false;
-        return text.startsWith("»")
-                || text.contains("🛠") || text.contains("↳")
-                || text.contains("web_search") || text.contains("run_command")
-                || text.contains("fetch_page") || text.contains("crawl");
-    }
+    /**
+     * The compact activity strip above an answer.
+     *
+     * One line while the turn runs, a summary when it ends, and expandable to
+     * the steps the engine actually reported. Everything here is driven by real
+     * events: {@link AgentActivity} rejects anything it does not recognise --
+     * including the model's own reasoning, which the kernel streams as a
+     * thinking event -- so the strip can only ever describe work that happened.
+     *
+     * The pulse is started when an event arrives and cancelled when the turn
+     * ends, so a finished message never animates and a stuck turn never looks
+     * idle.
+     */
+    private final class ActivityPanel {
+        final LinearLayout card = new LinearLayout(ChatActivity.this);
+        final LinearLayout list = new LinearLayout(ChatActivity.this);
+        final View dot = new View(ChatActivity.this);
+        final TextView label = Ui.tv(ChatActivity.this, "", 12, Ui.DIM);
+        final TextView chevron = Ui.tv(ChatActivity.this, "", 10, Ui.DIM);
+        final AgentActivity model = new AgentActivity();
+        private final AlphaAnimation pulse = new AlphaAnimation(1f, 0.22f);
+        private boolean running;
+        private boolean expanded;
 
-    private void pushThinking(AssistantBubble b, String raw) {
-        /* Any real event ends the waiting line, not just the first content
-           token. During a tool-heavy turn the engine can send thinking and
-           heartbeat lines for minutes before any answer text, and leaving
-           "Aether is thinking…" up through all of it reads as a hang. */
-        if (b.waiting != null && b.waiting.getParent() != null) {
-            b.wrap.removeView(b.waiting);
-            b.waiting = null;
-        }
-        boolean tool = isToolLine(raw);
-        String text = TextNormalizer.normalize(raw);
-        if (text.startsWith("»")) text = text.substring(1).trim();
-        if (text.isEmpty()) return;
-        TextView row;
-        if (tool) {
-            row = Ui.tv(this, text, 12, Ui.ACCENT);
-            row.setTypeface(Ui.mono(this));
-            row.setBackgroundResource(R.drawable.bg_tool);
-            row.setPadding(Ui.dp(this, 10), Ui.dp(this, 6), Ui.dp(this, 10), Ui.dp(this, 6));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.topMargin = Ui.dp(this, 4);
-            b.toolZone.addView(row, lp);
-        } else {
-            row = Ui.tv(this, text, 12, Ui.DIM);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+        ActivityPanel() {
+            card.setOrientation(LinearLayout.HORIZONTAL);
+            card.setGravity(Gravity.CENTER_VERTICAL);
+            card.setBackgroundResource(R.drawable.bg_pill_ghost);
+            int px = Ui.dp(ChatActivity.this, 10), py = Ui.dp(ChatActivity.this, 6);
+            card.setPadding(px, py, px, py);
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.topMargin = Ui.dp(this, 2);
-            b.toolZone.addView(row, lp);
+            clp.gravity = Gravity.START;
+            card.setLayoutParams(clp);
+            card.setVisibility(View.GONE);
+
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    Ui.dp(ChatActivity.this, 7), Ui.dp(ChatActivity.this, 7));
+            dlp.rightMargin = Ui.dp(ChatActivity.this, 7);
+            dot.setBackgroundResource(R.drawable.bg_dot_accent);
+            dot.setLayoutParams(dlp);
+            card.addView(dot);
+            card.addView(label, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            LinearLayout.LayoutParams chlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            chlp.leftMargin = Ui.dp(ChatActivity.this, 6);
+            card.addView(chevron, chlp);
+            card.setOnClickListener(v -> toggle());
+
+            list.setOrientation(LinearLayout.VERTICAL);
+            list.setVisibility(View.GONE);
+            LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            llp.topMargin = Ui.dp(ChatActivity.this, 4);
+            list.setLayoutParams(llp);
+
+            pulse.setDuration(760);
+            pulse.setRepeatCount(AlphaAnimation.INFINITE);
+            pulse.setRepeatMode(AlphaAnimation.REVERSE);
         }
-        scrollBottom();
+
+        /** One raw engine event. Returns false when it must not be shown. */
+        boolean event(String raw) {
+            if (!model.feed(raw)) return false;
+            running = true;
+            card.setVisibility(View.VISIBLE);
+            if (dot.getAnimation() == null) dot.startAnimation(pulse);
+            render();
+            return true;
+        }
+
+        void writing() { model.noteContent(); render(); }
+
+        void finish() {
+            model.finish();
+            running = false;
+            dot.clearAnimation();          // nothing may animate on a finished turn
+            render();
+        }
+
+        void toggle() {
+            if (!model.hasSteps()) return;
+            expanded = !expanded;
+            render();
+        }
+
+        private void render() {
+            String text;
+            if (running) {
+                AgentActivity.Step open = model.open();
+                text = open != null && !open.detail.isEmpty()
+                        ? open.label + " \u00b7 " + open.detail : model.labelNow();
+            } else {
+                text = model.summary();
+            }
+            label.setText(text);
+            label.setTextColor(getColor(running ? Ui.ACCENT : Ui.DIM));
+            boolean steps = model.hasSteps();
+            chevron.setText(steps ? (expanded ? "\u25be" : "\u25b8") : "");
+            chevron.setVisibility(steps ? View.VISIBLE : View.GONE);
+            card.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
+            boolean show = expanded && steps;
+            list.setVisibility(show ? View.VISIBLE : View.GONE);
+            if (show) renderList();
+        }
+
+        private void renderList() {
+            list.removeAllViews();
+            for (AgentActivity.Step st : model.steps()) {
+                StringBuilder line = new StringBuilder(st.done ? "\u2713  " : "\u2022  ");
+                line.append(st.label);
+                if (!st.detail.isEmpty()) line.append(" \u00b7 ").append(st.detail);
+                if (st.done && st.durationMs > 0) {
+                    line.append(" \u00b7 ").append(st.durationMs < 1000
+                            ? st.durationMs + "ms" : (st.durationMs / 1000) + "s");
+                }
+                TextView row = Ui.tv(ChatActivity.this, line.toString(), 11, Ui.DIM);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp.topMargin = Ui.dp(ChatActivity.this, 2);
+                lp.leftMargin = Ui.dp(ChatActivity.this, 12);
+                list.addView(row, lp);
+            }
+        }
     }
 
-    /** Show the normalised answer. Throttled so long replies stay smooth. */
-    private void showNormalized(AssistantBubble b, boolean force) {
+    /** A notice from the app rather than the agent -- an engine waking, say. */
+    private void pushNotice(AssistantBubble b, String text) {
+        if (b.notice == null) return;
+        b.notice.setText(text);
+        b.notice.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * Render the answer. The first real token is drawn immediately -- waiting
+     * for a throttle tick on the first token is what makes a reply feel slow --
+     * and later ones are throttled so a long reply stays smooth.
+     */
+    private void renderAnswer(AssistantBubble b, boolean force) {
         long now = System.currentTimeMillis();
-        if (!force && now - b.lastRender < RENDER_THROTTLE_MS) return;
+        boolean first = !b.hasContent;
+        if (!force && !first && now - b.lastRender < RENDER_THROTTLE_MS) return;
         b.lastRender = now;
         String clean = TextNormalizer.normalize(b.raw.toString());
         if (clean.isEmpty()) return;
-        if (b.waiting != null && b.waiting.getParent() != null) {
-            b.wrap.removeView(b.waiting);
-            b.waiting = null;
-        }
-        if (!b.hasContent) {
-            b.content.setVisibility(View.VISIBLE);
+        if (first) {
             b.hasContent = true;
+            b.contentZone.setVisibility(View.VISIBLE);
+            b.activity.writing();
         }
-        b.content.setText(clean);
-        scrollBottom();
+        /* While tokens arrive, one TextView is the cheapest thing that can be
+           updated fourteen times a second. Fenced code is laid out once, when
+           the turn ends: rebuilding a scroll view per token would stutter. */
+        if (!force) {
+            b.content.setVisibility(View.VISIBLE);
+            b.content.setText(clean);
+            followIfAtBottom();
+            return;
+        }
+        List<String[]> segs = splitCode(clean);
+        if (segs.size() == 1 && "text".equals(segs.get(0)[0])) {
+            b.content.setVisibility(View.VISIBLE);
+            b.content.setText(clean);
+        } else {
+            b.content.setVisibility(View.GONE);
+            b.contentZone.removeAllViews();
+            LinearLayout cardv = new LinearLayout(this);
+            cardv.setOrientation(LinearLayout.VERTICAL);
+            cardv.setBackgroundResource(R.drawable.bg_bubble_in);
+            cardv.setPadding(Ui.dp(this, 14), Ui.dp(this, 11), Ui.dp(this, 14), Ui.dp(this, 11));
+            for (String[] seg : segs) {
+                cardv.addView("code".equals(seg[0]) ? codeBlock(seg[1]) : textBlock(seg[1]));
+            }
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            clp.gravity = Gravity.START;
+            clp.setMargins(0, 0, Ui.dp(this, 40), 0);
+            b.contentZone.addView(cardv, clp);
+        }
+        followIfAtBottom();
+    }
+
+    /** Split normalised text on ``` fences into [type, text] segments. */
+    private static List<String[]> splitCode(String text) {
+        List<String[]> out = new ArrayList<>();
+        String[] parts = text.split("```");
+        for (int i = 0; i < parts.length; i++) {
+            String p = parts[i];
+            if (p.trim().isEmpty()) continue;
+            if (i % 2 == 1) {
+                int nl = p.indexOf('\n');
+                /* A short first line with no spaces is a language tag. */
+                if (nl >= 0 && nl < 24 && !p.substring(0, nl).trim().contains(" ")) {
+                    p = p.substring(nl + 1);
+                }
+                out.add(new String[] {"code", p.replaceAll("\\s+$", "")});
+            } else {
+                out.add(new String[] {"text", p.trim()});
+            }
+        }
+        return out;
+    }
+
+    private View codeBlock(String code) {
+        TextView t = Ui.tv(this, code, 12.5f, Ui.PRIMARY);
+        t.setTypeface(Ui.mono(this));
+        t.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10));
+        t.setHorizontallyScrolling(true);        // code keeps its shape
+        HorizontalScrollView hsv = new HorizontalScrollView(this);
+        hsv.setBackgroundResource(R.drawable.bg_code);
+        hsv.setHorizontalScrollBarEnabled(false);
+        hsv.addView(t);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = Ui.dp(this, 6);
+        hsv.setLayoutParams(lp);
+        return hsv;
+    }
+
+    private View textBlock(String text) {
+        TextView t = Ui.tv(this, text, 15, Ui.PRIMARY);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = Ui.dp(this, 4);
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    private static final java.util.regex.Pattern URL_RE =
+            java.util.regex.Pattern.compile("https?://[^\\s)\\]>]+");
+
+    /**
+     * Compact source cards for the URLs this turn really touched: the ones the
+     * engine fetched, plus any the answer cites. The host is shown, the full
+     * link is kept and opens on tap -- the evidence survives, the plumbing
+     * does not.
+     */
+    private void addSources(AssistantBubble b) {
+        LinkedHashSet<String> urls = new LinkedHashSet<>(b.activity.model.sources());
+        java.util.regex.Matcher m = URL_RE.matcher(b.raw.toString());
+        while (m.find() && urls.size() < 6) urls.add(m.group());
+        if (urls.isEmpty()) return;
+        b.sources.removeAllViews();
+        TextView head = Ui.tv(this, "Sources", 10, Ui.DIM);
+        b.sources.addView(head);
+        int n = 0;
+        for (final String u : urls) {
+            if (n++ >= 4) break;
+            String host = AgentActivity.host(u);
+            TextView row = Ui.tv(this, "\u2197  " + host, 11, Ui.ACCENT);
+            row.setBackgroundResource(R.drawable.bg_source);
+            row.setPadding(Ui.dp(this, 10), Ui.dp(this, 6), Ui.dp(this, 10), Ui.dp(this, 6));
+            row.setOnClickListener(v -> {
+                try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(u))); }
+                catch (Exception ignored) { }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = Ui.dp(this, 4);
+            b.sources.addView(row, lp);
+        }
+        b.sources.setVisibility(View.VISIBLE);
     }
 
     private void onError(String text, String prompt) {
@@ -877,7 +1118,11 @@ public class ChatActivity extends AppCompatActivity {
 
     private void onSend() {
         String text = TextNormalizer.userInput(input.getText().toString());
-        if ((text.isEmpty() && staged.isEmpty()) || cancelFlag != null) return;
+        if (text.isEmpty() && staged.isEmpty()) return;
+        if (cancelFlag != null) {
+            toast("Aether is still answering \u2014 press stop to interrupt.");
+            return;
+        }
         input.setText("");
         hideKeyboard();
         List<Attachment> going = new ArrayList<>(staged);
@@ -920,7 +1165,7 @@ public class ChatActivity extends AppCompatActivity {
         ChatMessage model = new ChatMessage(ChatMessage.ROLE_ASSISTANT);
         b.model = model;
         current.messages.add(model);
-        attachMessageActions(b.content, model);
+        attachMessageActions(b.contentZone, model);
 
         liveBubble = b;
         turnStart = System.currentTimeMillis();
@@ -947,8 +1192,9 @@ public class ChatActivity extends AppCompatActivity {
                         onError("No engines are configured.", prompt); persist(); });
                     return;
                 }
-                ui.post(() -> pushThinking(b, "Engine " + e.slot.toUpperCase()
-                        + " is off -- waking it now. This takes a few minutes; your message will send once it is live."));
+                ui.post(() -> pushNotice(b, "Engine " + e.slot.toUpperCase(Locale.ROOT)
+                        + " is off \u2014 waking it now. This takes a few minutes; your message"
+                        + " will send once it is live."));
                 try {
                     EngineCore.kernelPush(e, Credentials.renderNotebook(
                             Credentials.notebookTemplate(ChatActivity.this), cfg, e.slot),
@@ -1076,17 +1322,18 @@ public class ChatActivity extends AppCompatActivity {
                 new EngineCore.ChatListener() {
                     @Override public void onThinking(String t) {
                         ui.post(() -> {
-                            pushThinking(b, t);
-                            if (b.model != null) {
-                                b.model.toolLines.add(isToolLine(t)
-                                        ? "\u00BB " + TextNormalizer.normalize(t)
-                                        : TextNormalizer.normalize(t));
+                            /* Only real operational events are shown or saved.
+                               The kernel also streams the model's own reasoning
+                               as a thinking event; AgentActivity rejects it and
+                               it is dropped here rather than stored. */
+                            if (b.activity.event(t) && b.model != null) {
+                                b.model.toolLines.add(TextNormalizer.normalize(t));
                             }
                         });
                     }
                     @Override public void onContent(String t) {
                         b.raw.append(t);
-                        ui.post(() -> showNormalized(b, false));
+                        ui.post(() -> renderAnswer(b, false));
                     }
                     @Override public void onDone(boolean good, String e) {
                         if (recorded.compareAndSet(false, true)) { ok[0] = good; err[0] = e; }
@@ -1104,8 +1351,8 @@ public class ChatActivity extends AppCompatActivity {
             final String reason = err[0];
             EngineRouter.Decision next = EngineRouter.failoverFrom(from, pollStates());
             if (next.ok()) {
-                ui.post(() -> pushThinking(b, "Engine " + from.toUpperCase(Locale.ROOT)
-                        + " dropped (" + reason + ") -- failing over to "
+                ui.post(() -> pushNotice(b, "Engine " + from.toUpperCase(Locale.ROOT)
+                        + " dropped (" + reason + ") \u2014 failing over to "
                         + next.slot.toUpperCase(Locale.ROOT)));
                 forget();
                 remember(next.slot, next.url);
@@ -1124,7 +1371,13 @@ public class ChatActivity extends AppCompatActivity {
         ui.post(() -> {
             setStreaming(false);
             cancelFlag = null;
-            showNormalized(b, true);
+            /* Every turn ends here exactly once: the activity strip is closed
+               and its animation cancelled, the answer gets its final layout,
+               and whatever the turn really used is shown as sources. A partial
+               answer from a stopped turn is kept -- b.raw is untouched. */
+            b.activity.finish();
+            renderAnswer(b, true);
+            addSources(b);
             if (b.model != null) {
                 b.model.content = TextNormalizer.normalize(b.raw.toString());
             }
@@ -1188,7 +1441,9 @@ public class ChatActivity extends AppCompatActivity {
     private void setStreaming(boolean streaming) {
         sendBtn.setVisibility(streaming ? View.GONE : View.VISIBLE);
         stopBtn.setVisibility(streaming ? View.VISIBLE : View.GONE);
-        input.setEnabled(!streaming);
+        /* The composer stays usable while a turn runs: typing must never be
+           blocked by generation. Only sending is gated, and that says so. */
+        input.setEnabled(true);
         if (streaming) {
             ui.post(ticker);
         } else {

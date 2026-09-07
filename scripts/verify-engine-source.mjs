@@ -10,7 +10,7 @@
  *   2. the decoded template is a valid Jupyter notebook
  *   3. it carries every placeholder the renderer must resolve
  *   4. it contains NO leaked OFF_KEY / beacon token / ntfy topic
- *   5. rendering with original-length values reproduces the verified 36,301 bytes
+ *   5. rendering with original-length values reproduces the verified 42,292 bytes
  *
  * Exits 0 (PASS) only when all five hold.
  */

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The activity pulse. A plain filled dot: it is animated only while a real
+     engine event says something is happening, and the animation is cancelled
+     the moment the turn ends. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="@color/aether_accent" />
+    <size android:width="7dp" android:height="7dp" />
+</shape>
