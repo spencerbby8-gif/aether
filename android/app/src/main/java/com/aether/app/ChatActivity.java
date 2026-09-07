@@ -30,6 +30,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.drawerlayout.widget.DrawerLayout;
 
 import com.aether.app.core.AgentActivity;
+import com.aether.app.core.AnswerBlocks;
 import com.aether.app.core.Attachment;
 import com.aether.app.core.ChatMessage;
 import com.aether.app.core.ChatSession;
@@ -840,8 +841,13 @@ public class ChatActivity extends AppCompatActivity {
             followIfAtBottom();
             return;
         }
-        List<String[]> segs = splitCode(clean);
-        if (segs.size() == 1 && "text".equals(segs.get(0)[0])) {
+        /* Split the RAW text, not `clean`: TextNormalizer has already deleted
+           the ``` fences by the time we get here, so splitting its output
+           finds no code and every answer renders as flat prose. */
+        List<AnswerBlocks.Block> blocks = AnswerBlocks.split(b.raw.toString());
+        boolean anyCode = false;
+        for (AnswerBlocks.Block bl : blocks) if (bl.code) { anyCode = true; break; }
+        if (!anyCode) {
             b.content.setVisibility(View.VISIBLE);
             b.content.setText(clean);
         } else {
@@ -851,8 +857,8 @@ public class ChatActivity extends AppCompatActivity {
             cardv.setOrientation(LinearLayout.VERTICAL);
             cardv.setBackgroundResource(R.drawable.bg_bubble_in);
             cardv.setPadding(Ui.dp(this, 14), Ui.dp(this, 11), Ui.dp(this, 14), Ui.dp(this, 11));
-            for (String[] seg : segs) {
-                cardv.addView("code".equals(seg[0]) ? codeBlock(seg[1]) : textBlock(seg[1]));
+            for (AnswerBlocks.Block bl : blocks) {
+                cardv.addView(bl.code ? codeBlock(bl.text) : textBlock(bl.text));
             }
             LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -861,27 +867,6 @@ public class ChatActivity extends AppCompatActivity {
             b.contentZone.addView(cardv, clp);
         }
         followIfAtBottom();
-    }
-
-    /** Split normalised text on ``` fences into [type, text] segments. */
-    private static List<String[]> splitCode(String text) {
-        List<String[]> out = new ArrayList<>();
-        String[] parts = text.split("```");
-        for (int i = 0; i < parts.length; i++) {
-            String p = parts[i];
-            if (p.trim().isEmpty()) continue;
-            if (i % 2 == 1) {
-                int nl = p.indexOf('\n');
-                /* A short first line with no spaces is a language tag. */
-                if (nl >= 0 && nl < 24 && !p.substring(0, nl).trim().contains(" ")) {
-                    p = p.substring(nl + 1);
-                }
-                out.add(new String[] {"code", p.replaceAll("\\s+$", "")});
-            } else {
-                out.add(new String[] {"text", p.trim()});
-            }
-        }
-        return out;
     }
 
     private View codeBlock(String code) {

@@ -178,3 +178,93 @@ any runtime.
   unchanged and unmeasured.
 - **Image/audio generation, Netlify deploy**, and a real Kaggle quota refusal
   remain unproven, as before.
+
+---
+
+## 9. Re-audit — two real defects found and fixed
+
+I re-checked my own work instead of trusting it. Both findings below are things
+I had reported as done.
+
+### 9.1 The web gate was never re-run after the kernel change — and it was failing
+
+Rewriting the engine template invalidated two pinned assertions. I had not run
+the suite after that change.
+
+```
+× exposes the pinned SHA-256 of the stored template
+× renders to a stable size and stays valid JSON
+   AssertionError: expected 43521 to be 40875
+```
+
+Both pins were stale, not broken: the template genuinely grew because the model
+path stopped shelling out to curl. Updated to the real values —
+SHA `481a5e95d6efa38d…`, rendered size **43521**, which
+`scripts/verify-engine-source.mjs` computes independently.
+
+```
+Test Files  31 passed | 1 skipped (32)
+     Tests  249 passed | 5 skipped (254)
+tsc --noEmit exit 0        eslint exit 0 (warnings only, all pre-existing)
+```
+
+### 9.2 The code-block renderer was dead code
+
+Directive step 8 asked for excellent code blocks. I built them — and they could
+never run.
+
+`renderAnswer` split `TextNormalizer.normalize(raw)` on ``` fences. The
+normaliser deletes fence markers on purpose. Proof, printed by
+`AnswerBlocksCheck`:
+
+```
+TextNormalizer really does delete the fence -> contains ``` = false
+...so splitting NORMALISED text yields no code block
+   -> TEXT[Here you go:\n\nprint('hi')\n\nDone.]
+splitting the RAW text does yield one
+   -> TEXT[Here you go:] | CODE[print('hi')] | TEXT[Done.]
+```
+
+So every code answer was rendering as flattened prose — worse than useless,
+because it silently contradicted what I claimed was working.
+
+Fix: splitting moved into `core/AnswerBlocks.java` and now runs on the raw text
+before normalising. Prose blocks are normalised; code blocks keep their content
+and only lose ANSI escapes and invisible characters. While I was there I fixed
+two more things the old splitter got wrong:
+
+- **Unbalanced fences.** A single stray ``` made the rest of the answer a code
+  block (`"a```b".split("```")` → 2 parts, index 1 treated as code). Now a fence
+  count below 2 stays prose, and with an odd count the unclosed tail is prose.
+- **Adjacent prose merging.** Text either side of an empty fence used to become
+  two TextViews. It is one paragraph now.
+
+`AnswerBlocksCheck`: **21 passed, 0 failed**, covering the dead-path proof,
+language-tag stripping, verbatim preservation of `*`, `#` and backticks inside
+code, indentation, unbalanced and odd fences, empty/null input, and that prose
+is still normalised and emoji-stripped.
+
+### 9.3 Suite after the fixes
+
+```
+AnswerBlocksCheck   21 passed, 0 failed     (new)
+AgentActivityCheck  41 passed, 0 failed
+ChatCoreCheck       70 passed, 0 failed
+RouterCheck         19 passed, 0 failed
+StreamProof         32 passed, 0 failed
+ExecutorProof       13 passed, 0 failed
+StreamTimeoutProof  13 passed, 0 failed
+                    ---------------------
+                    209 passed, 0 failed
+```
+
+`:app:compileDebugJavaWithJavac` BUILD SUCCESSFUL.
+`verify-engine-source.mjs` PASS.
+
+**APK rebuilt: `apk/aether-release.apk`, 1.9.1 (20), 733,108 bytes.** Verified
+in the shipped artifact: `bg_code` present in resources.arsc, **0** plaintext
+`KGAT_` strings, **0** beacon/telemetry tokens.
+
+Still unverified, unchanged: this APK has never been installed. There is no
+emulator possible in this sandbox, so the code blocks, activity strip and source
+cards have still never been seen rendering on a device.

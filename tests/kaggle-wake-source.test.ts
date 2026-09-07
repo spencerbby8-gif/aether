@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("ef0c7fe7c42345b3f626bd03de6e2ca28f9890a2c50379570c0a18c2b0c29919");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("481a5e95d6efa38d429e8422eb0eb9b4fc8e8b19904a5b8a0c6a597a1ef9cdbd");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -118,10 +118,16 @@ describe("engine source — rendering", () => {
      * Templating alone was verified byte-lossless against the original notebook
      * (rendering with the originals' values reproduced sha256 3dc068d15a4c745d...
      * exactly). The size then grew deliberately with the audit C5 hardening, so
-     * this now pins the current rendered size rather than the original one.
+     * this pins the current rendered size rather than the original one.
+     *
+     * 40875 -> 43521: the model path stopped shelling out to curl and now uses
+     * http.client, records the HTTP status and body when a call yields nothing
+     * instead of hiding it behind a placeholder, and retries once without
+     * streaming before giving up. scripts/verify-engine-source.mjs computes the
+     * same 43521 independently.
      */
     const rendered = renderAetherNotebook(DUMMY);
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(40875);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(43521);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
