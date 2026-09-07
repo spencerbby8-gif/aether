@@ -1,0 +1,23 @@
+== live failover, real discovery and router ==
+
+  A  arrivals-significance-leeds-mixture.***  /api/ps 200  models=1
+  A  ->  LIVE  live ? hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  PASS  A is reported LIVE with a model   [LIVE models=1]
+  B  star-cashiers-pine-realty.***  /api/ps 200  models=1
+  B  ->  LIVE  live ? hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  PASS  B is reported LIVE with a model   [LIVE models=1]
+  C  photography-caught-segments-rocks.***  /api/ps -1  models=0
+  C  ->  OFF  off ? nothing answering and Kaggle has no kernel state
+  PASS  C (dead tunnel) is not reported LIVE   [OFF off ? nothing answering and Kaggle has no kernel state]
+
+  AUTO chose a  (auto: first healthy in A?B?C)
+  PASS  AUTO picks an engine   [auto: first healthy in A?B?C]
+  PASS  AUTO picked a slot that is actually live   [a live=[a, b]]
+  PASS  AUTO never picked a dead tunnel   [dead=[c] picked=a]
+  PASS  AUTO prefers A when A is healthy   [live=[a, b] picked=a]
+  PASS  failover from A finds another live engine   [picked=b failover from A]
+  PASS  that switch is reported as a failover   [failedOver=true]
+  PASS  failover from the dead slot C lands on a live one   [picked=a]
+  PASS  pinning the dead slot C refuses instead of lying   [decision=null reason=engine C is not live (health -1)]
+
+  chatting through the routed engine a...

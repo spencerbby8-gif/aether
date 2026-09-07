@@ -5,10 +5,15 @@
 # that cannot be observed on a device from here.
 #
 # Live-network proofs (ChatLifecycleProof, ContextProof, EngineAudit,
-# LiveStreamProof, MultiEngineProof, MultiInstanceProof, ShutdownProof) are
-# deliberately
-# excluded: they need a running Kaggle engine and would report failure on a
-# quiet morning. Run them against a live tunnel when one is up.
+# FailoverProof, LiveStreamProof, MultiEngineProof, MultiInstanceProof,
+# ShutdownProof) are deliberately excluded: they need a running Kaggle engine
+# and would report failure on a quiet morning. Run them when one is up.
+#
+# FailoverProof is the one to run after any routing change. It exercises
+# discovery, classify and route against real tunnels, and is most informative
+# when one of them is genuinely dead -- which is the failure users actually
+# hit, since quick tunnels die under a running kernel while Kaggle still
+# reports the kernel as running.
 #
 # Usage: bash scripts/proofs/jvm-suite.sh
 set -u
