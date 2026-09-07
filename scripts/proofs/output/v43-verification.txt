@@ -1,0 +1,7 @@
+
+== engine is really serving
+  PASS  /api/ps returns 200
+  PASS  a model is loaded
+     models: hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+
+== reasoning is actually on
