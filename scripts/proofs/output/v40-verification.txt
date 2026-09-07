@@ -1,0 +1,38 @@
+tunnel seen (not serving yet): partition-recovery-isola
+tunnel seen (not serving yet): distinguished-execute-vi
+LIVE after 310s: https://happened-entry-hear-saving.trycloudflare.com
+=== PromptShapeProof (closing the v39 gap) ===
+engine: happened-entry-hear-saving.t...
+
+legacy {prompt} only                21.6s done=True  err=False deltas=4
+   Hello there! 👋
+
+messages array (current app)         1.2s done=True  err=False deltas=2
+   Hello!
+
+empty request (guard path)           0.1s done=True  err=False deltas=1
+   (the engine got this request with no user message in it, so there was nothing to answer - please send it again)
+
+legacy prompt shape answers      -> True
+messages array answers           -> True
+empty request gives a clear line -> True
+
+RESULT: PASS
+=== PromptShapeProof again (DNS flake guard) ===
+engine: happened-entry-hear-saving.t...
+
+legacy {prompt} only                 2.8s done=True  err=False deltas=11
+   Hello! I'm AETHER, ready to help.
+
+messages array (current app)         1.7s done=True  err=False deltas=4
+   Hello there! 👋
+
+empty request (guard path)           0.2s done=True  err=False deltas=1
+   (the engine got this request with no user message in it, so there was nothing to answer - please send it again)
+
+legacy prompt shape answers      -> True
+messages array answers           -> True
+empty request gives a clear line -> True
+
+RESULT: PASS
+VERIFY4_DONE

@@ -1,0 +1,41 @@
+=== waking engine ===
+tunnel seen (not serving yet): sunshine-pioneer-particu
+tunnel seen (not serving yet): partition-recovery-isola
+tunnel seen (not serving yet): distinguished-execute-vi
+LIVE after 287s: https://distinguished-execute-visitors-spirits.trycloudflare.com
+=== PromptShapeProof (not re-run since v37) ===
+engine: distinguished-execute-visito...
+
+legacy {prompt} only                 0.0s done=False err=True  deltas=0
+   EXC <urlopen error [Errno -2] Name or service not known>
+
+messages array (current app)        27.7s done=True  err=False deltas=23
+   Hello! I'm AETHER, your autonomous AI agent — what can I help you find or figure out today?
+
+empty request (guard path)           0.2s done=True  err=False deltas=1
+   (the engine got this request with no user message in it, so there was nothing to answer - please send it again)
+
+legacy prompt shape answers      -> False
+messages array answers           -> True
+empty request gives a clear line -> True
+
+RESULT: FAIL
+=== MultiToolTurnProof (not re-run since v37) ===
+engine: distinguished-execute-visi...
+sending 1 message designed to trigger >= 12 tool calls
+  t+ 16.4s  tool #1  🛠️ web_search({"query": "Lagos State Nigeria top news today 
+  t+ 18.4s  tool #2  🛠️ run_command({"command": "date -u"})
+  t+ 66.2s  tool #3  🛠️ web_search({"query": "Kano State Nigeria top news today 2
+  t+ 87.1s  tool #4  🛠️ web_search({"query": "Rivers State Nigeria top news today
+  t+150.9s  tool #5  🛠️ web_search({"query": "Anambra State Nigeria top news toda
+  t+172.0s  tool #6  🛠️ web_search({"query": "Enugu State Nigeria top news today 
+  t+238.8s  tool #7  🛠️ web_search({"query": "Oyo State Nigeria top news today 20
+
+tool calls: 7  ->  messages appended: 14  ->  conversation at the final iteration: 16
+under the OLD slice msgs[-24:] the question would NOT have been dropped
+elapsed 368.1s | content deltas 324 | done:true True
+
+RESULT: FAIL / not enough tool calls to prove it
+=== HistoryTurnProof (repeat, to check the 654s turn) ===
+NO LIVE ENGINE - cannot verify
+VERIFY3_DONE
