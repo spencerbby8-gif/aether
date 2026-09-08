@@ -43,6 +43,15 @@ BROWSER_DIR = os.environ.get('AETHER_BROWSER_DIR', '/kaggle/working/browser')
 url = None            # the engine's tunnel URL, sent with every request
 
 
+def _readable(h):
+    """Strip a page down to readable text. Same rules the kernel uses for
+    fetch_page, so a page reads the same whichever way it was obtained."""
+    h = re.sub(r'<(script|style|noscript)[^>]*>.*?</\1>', '', h, flags=re.S | re.I)
+    t = re.sub(r'<[^>]+>', ' ', h)
+    t = htmlmod.unescape(re.sub(r'\s+', ' ', t))
+    return t.strip()
+
+
 def _safe_name(fn, ext):
     fn = re.sub(r'[^A-Za-z0-9_.-]', '_', str(fn or ''))[:60] or (ext + '_' + str(int(time.time())))
     if not fn.lower().endswith('.' + ext):
@@ -168,6 +177,7 @@ def _b_helper_path():
 
 
 def _b_spawn():
+    import sys
     p = subprocess.Popen([sys.executable, '-u', _b_helper_path()],
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, text=True, bufsize=1)
