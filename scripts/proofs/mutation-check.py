@@ -168,5 +168,19 @@ ok += case("session state directory never created", 'browser-helper-check.py',
            lambda s: s.replace("os.makedirs(BROWSER_DIR, exist_ok=True)",
                                "pass"))
 
+tot += 1
+# Back to substring matching: a prompt that starts with a hint stops matching.
+ok += case("reasoning hints matched by substring again", 'reasoning-gate-check.py',
+           lambda s: s.replace(
+               "if _re.search(r'\\b(?:' + '|'.join(_re.escape(w) for w in THINK_WORDS) + r')\\b', t):",
+               "if any(w in t for w in (' plan',)):"))
+
+tot += 1
+# Stop catching the worker's exception and the queue stays empty, so q.get()
+# blocks forever and the request never terminates.
+ok += case("model worker exception no longer caught", 'agent-loop-check.py',
+           lambda s: s.replace("            except Exception as _e:",
+                               "            except KeyboardInterrupt as _e:"))
+
 print("\n%d/%d mutation cases behaved correctly" % (ok, tot))
 raise SystemExit(0 if ok == tot else 1)

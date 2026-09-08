@@ -86,7 +86,7 @@ def run_agent(payload):
     """Run the REAL agent_stream. Returns (payloads the model saw, client text)."""
     seen = []
 
-    def ollama_stream(p, push):
+    def ollama_stream(p, push, timeout=1200, on_think=None):
         seen.append(json.loads(json.dumps(p)))
         m = {'content': 'ok'}
         push(m['content'])

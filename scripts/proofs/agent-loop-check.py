@@ -95,7 +95,7 @@ def make_env(script):
     """script: list of model responses, one per iteration."""
     calls = {'n': 0}
 
-    def ollama_stream(payload, push):
+    def ollama_stream(payload, push, timeout=1200, on_think=None):
         k = calls['n']
         calls['n'] += 1
         PAYLOADS.append(json.loads(json.dumps(payload)))
@@ -501,6 +501,31 @@ chk("all four pages are in the result",
 chk("pages come back in breadth-first order, not completion order",
     _crawl.index('/alpha') < _crawl.index('/beta') < _crawl.index('/gamma'),
     "order preserved")
+
+print("== a model call that raises still ends the request ==")
+# Found by accident and worth keeping: the worker thread put the response on a
+# queue and nothing caught an exception, so a raise left the queue empty and
+# `q.get()` blocked forever. The request never reached completed, error or
+# aborted -- it just stopped answering, which is the exact failure the client
+# experiences as a permanent "Thinking".
+def _boom(payload, push, timeout=1200, on_think=None):
+    raise RuntimeError('stub exploded')
+
+
+ns_x, _ = make_env([step_text('never reached')] + [step_text('x')] * 8)
+ns_x['ollama_stream'] = _boom
+h_x = FakeHandler()
+_tx = threading.Thread(target=lambda: ns_x['agent_stream'](
+    h_x, {'messages': [{'role': 'user', 'content': 'hi'}]}))
+_tx.daemon = True
+_tx.start()
+_tx.join(20)
+chk("a raising model call does not hang the request", not _tx.is_alive(),
+    "still running=%s" % _tx.is_alive())
+_rx = h_x.wfile.buf.getvalue().decode('utf-8', 'replace')
+chk("it reports the failure instead of going silent",
+    'engine error' in _rx and 'stub exploded' in _rx, _rx.strip()[-110:])
+chk("and the response still terminates", '"done": true' in _rx, 'scanned')
 
 print("\n%d passed, %d failed" % (ok, fail))
 raise SystemExit(0 if fail == 0 else 1)

@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("48234ed94685f863dbf8a93fed1d1f220d060d04dd8dc6144575498e0ad217e0");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("6a7686fe5162ae29d42569e4c1bb6b1fa5acc7fd11e7f56d3114639e228a769a");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -130,7 +130,7 @@ describe("engine source — rendering", () => {
      * scripts/verify-engine-source.mjs computes the same figure independently.
      */
     const rendered = renderAetherNotebook(DUMMY);
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(77444);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(80366);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
@@ -261,7 +261,7 @@ describe("engine source — real streaming, not a replay (audit §4 item 9)", ()
 
   it("has a streaming reader that forwards deltas as they arrive", () => {
     const py = enginePython();
-    expect(py).toContain("def ollama_stream(payload, push, timeout=1200):");
+    expect(py).toContain("def ollama_stream(payload, push, timeout=1200, on_think=None):");
     /* curl -N is what makes ollama flush each NDJSON chunk immediately. */
     expect(py).toMatch(/curl','-s','-N'/);
     /* Tool calls must still be detected, or the agent loop breaks. */

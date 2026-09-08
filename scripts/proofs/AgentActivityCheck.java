@@ -38,6 +38,7 @@ public final class AgentActivityCheck {
         truncatedArgumentsStillYieldADetail();
         persistenceRoundTrip();
         browserActionsReadAsCleanStates();
+        reasoningIsReportedButNeverShown();
 
         System.out.println("\n" + pass + " passed, " + fail + " failed");
         if (fail > 0) System.exit(1);
@@ -222,6 +223,54 @@ public final class AgentActivityCheck {
         check("the past wording survives a save and reload",
                 !back.isEmpty() && "Opened site".equals(back.get(0).past),
                 back.isEmpty() ? "no steps" : back.get(0).past);
+    }
+
+    /**
+     * Reasoning has to be visible as a state, and invisible as content. The
+     * engine sends a marker when the model starts thinking; the text never
+     * arrives. A turn that did not think must not claim it did -- that is the
+     * difference between a truthful state and decoration.
+     */
+    static void reasoningIsReportedButNeverShown() {
+        System.out.println();
+        System.out.println("== reasoning is reported, never shown ==");
+
+        AgentActivity a = new AgentActivity();
+        a.feed("\u2699\ufe0f agent step 1...");
+        check("before any reasoning it says Thinking, not Reasoning",
+                "Thinking".equals(a.labelNow()), a.labelNow());
+        a.feed("\ud83e\udde0");
+        check("the marker turns the state to Reasoning",
+                "Reasoning".equals(a.labelNow()), a.labelNow());
+        check("the marker is consumed, not shown as text",
+                !a.labelNow().contains("\ud83e\udde0"), a.labelNow());
+        a.feed("Some private reasoning about the answer.");
+        check("stray reasoning text is still dropped",
+                "Reasoning".equals(a.labelNow()) && a.steps().isEmpty(), a.labelNow());
+        a.noteContent();
+        check("once the answer starts it says Writing",
+                "Writing".equals(a.labelNow()), a.labelNow());
+
+        /* The truthfulness half: no marker, no claim. */
+        AgentActivity b = new AgentActivity();
+        b.feed("\u2699\ufe0f agent step 1...");
+        b.feed("\u23f3");
+        check("a turn that never reasoned never says Reasoning",
+                !"Reasoning".equals(b.labelNow()), b.labelNow());
+
+        /* A tool in flight outranks the reasoning label. */
+        AgentActivity c = new AgentActivity();
+        c.feed("\ud83e\udde0");
+        c.feed("\ud83d\udee0\ufe0f web_search({\"query\": \"x\"})");
+        check("an open tool outranks the reasoning label",
+                "Searching the web".equals(c.labelNow()), c.labelNow());
+
+        /* browser is part of the kernel's tool table now, so it is recognised
+           even without the marker. */
+        AgentActivity d = new AgentActivity();
+        check("browser is a known tool", d.feed("browser({\"action\": \"navigate\"})"), "accepted");
+        check("and its verb comes from the action argument",
+                "Opening site".equals(d.labelNow()), d.labelNow());
     }
 
     static void check(String what, boolean ok, String seen) {

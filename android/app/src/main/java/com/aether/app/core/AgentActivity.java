@@ -93,7 +93,7 @@ public final class AgentActivity {
        never be mistaken for a tool call. */
     private static final String[] KNOWN = {
             "web_search", "fetch_page", "crawl_site", "run_command",
-            "generate_image", "generate_voice",
+            "generate_image", "generate_voice", "browser",
     };
 
     private final List<Step> steps = new ArrayList<>();
@@ -102,6 +102,8 @@ public final class AgentActivity {
 
     private int iteration;
     private long lastBeatAt;
+    /** True while the engine reports the model is actually reasoning. */
+    private boolean reasoning;
     private boolean writing;
     private boolean finished;
 
@@ -110,6 +112,10 @@ public final class AgentActivity {
         Step open = open();
         if (open != null) return open.label;
         if (writing) return "Writing";
+        // "Reasoning" only while reasoning is really running and the answer has
+        // not started. It is licensed by the engine's marker, not by the
+        // iteration count, so a turn that did not think never claims it did.
+        if (reasoning) return "Reasoning";
         if (iteration > 0 || lastBeatAt > 0) return "Thinking";
         return "Working";
     }
@@ -149,6 +155,10 @@ public final class AgentActivity {
            before any tool runs, and it is never shown as text. */
         if (line.contains("agent step")) { iteration++; return true; }
 
+        /* The engine's reasoning marker. It proves the model is thinking; the
+           reasoning text never arrives, so there is nothing here to leak. */
+        if (line.contains("\ud83e\udde0")) { reasoning = true; return true; }
+
         /* Tool finished: "↳ name returned N chars". */
         if (line.startsWith("\u21b3") || line.contains(" returned ")) {
             int at = line.indexOf(" returned ");
@@ -186,6 +196,7 @@ public final class AgentActivity {
     /** The answer started arriving; the activity becomes "Writing". */
     public void noteContent() {
         writing = true;
+        reasoning = false;
         Step open = open();
         if (open != null) {          // a tool that never reported back
             open.done = true;
