@@ -1,0 +1,4 @@
+
+== dont-licence-pounds-law ==
+  models: ['hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS']
+  ok   hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS capabilities=['tools', 'thinking', 'completion', 'vision']

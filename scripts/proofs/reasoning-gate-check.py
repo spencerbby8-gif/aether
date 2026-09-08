@@ -19,23 +19,30 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TPL = os.path.join(HERE, '..', '..', 'android', 'app', 'src', 'main',
                    'assets', 'aether-notebook-template.json')
 
-# Must NOT spend reasoning: short, no marker. This is where the speed lives.
+# Must NOT spend reasoning. Measured on a live engine a reasoning turn costs
+# ~82s to its first token and minutes overall, against ~7-25s for one that does
+# not, so this list is the speed and it is guarded on purpose. It includes
+# ordinary requests that a wider gate would have swept in -- "write a function",
+# "my app crashes" -- because paying minutes for them is the wrong trade.
 FAST = ['hi', 'thanks bro', 'what time is it?', 'What is the capital of France?',
         'hello there', 'ok', 'good morning', 'tell me about planet Earth',
-        'how much is a budget hotel']
+        'how much is a budget hotel',
+        'Write a python function that parses a csv and groups rows by date',
+        'my app crashes with NullPointerException on launch',
+        'Reply with one short sentence: what is the capital of France?']
 
-# Must spend reasoning: genuine work.
-THINKS = ['How do I fix a memory leak in my Android app?',
-          'Write a python function that parses a csv and groups rows by date',
-          'my app crashes with NullPointerException on launch',
-          'plan my week',
-          'Wetin be the best way to save money for Nigeria?',
+# Must spend reasoning: the vocabulary the gate has always had, now matched on
+# word boundaries instead of by substring.
+THINKS = ['plan my week',                       # the bug: started with the hint
+          'Why is my gradle build so slow',
           'Explain the difference between TCP and UDP',
-          'why is my gradle build so slow',
           'what is 17 * 23',
           'should i buy or rent',
-          'I have a bug in my code',
-          'this needs an estimate']
+          'analyse this data',
+          'refactor this class',
+          'help me troubleshoot my deploy',
+          'x ' * 250,
+          'which is better, postgres or sqlite? and why?']
 
 passed = failed = 0
 

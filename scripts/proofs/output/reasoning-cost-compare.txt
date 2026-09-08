@@ -1,0 +1,5 @@
+### A: reasoning ON (gate fires) ###
+[   0.4s] think-line  (counts so far: {'think-line': 1})
+[   0.4s] beat  (counts so far: {'think-line': 1, 'beat': 1})
+[  82.1s] brain  (counts so far: {'think-line': 1, 'beat': 9, 'brain': 1})
+[  90.4s] beat  (counts so far: {'think-line': 1, 'beat': 10, 'brain': 1})
