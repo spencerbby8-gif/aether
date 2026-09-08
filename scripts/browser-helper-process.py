@@ -40,7 +40,7 @@ import time
 # defaults are the real ones.
 GEN_DIR = os.environ.get('AETHER_GEN_DIR', '/kaggle/working/generated')
 BROWSER_DIR = os.environ.get('AETHER_BROWSER_DIR', '/kaggle/working/browser')
-url = None            # the engine's tunnel URL, sent with every request
+TUNNEL = None         # the engine's tunnel URL, sent with every request
 
 
 def _readable(h):
@@ -119,9 +119,9 @@ def _main():
             sys.stdout.write(json.dumps({'ok': False, 'err': 'bad request: %s' % e}) + '\\n')
             sys.stdout.flush()
             continue
-        global url
+        global TUNNEL
         if d.get('tunnel'):
-            url = d['tunnel']
+            TUNNEL = d['tunnel']
         d.pop('tunnel', None)
         try:
             out = _b_do(**d)
