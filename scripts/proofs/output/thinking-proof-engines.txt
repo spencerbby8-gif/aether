@@ -1,0 +1,14 @@
+
+== angels-legend-matches-scsi ==
+  models: ['hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS']
+  ok   hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS capabilities=['tools', 'thinking', 'completion', 'vision']
+  ok   a question that should think -> marker at 24.5s, first token 52.5s, total 60.1s
+  ok   a trivial prompt stays cheap -> marker absent, first token 24.8s, total 25.0s
+
+== powerful-value-jury-womens ==
+  models: ['hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS']
+  ok   hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS capabilities=['tools', 'thinking', 'completion', 'vision']
+  ok   a question that should think -> marker at 24.2s, first token 54.3s, total 63.2s
+  ok   a trivial prompt stays cheap -> marker absent, first token 24.1s, total 24.3s
+
+PASS: thinking is present and engaged on every engine checked
