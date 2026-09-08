@@ -93,6 +93,8 @@ public class SettingsActivity extends AppCompatActivity {
      * make shutdown look like it failed. Refuse the second push instead.
      */
     private final Set<String> waking = ConcurrentHashMap.newKeySet();
+    /** Slots with a shutdown in flight, so the button can say so at once. */
+    private final Set<String> shutting = ConcurrentHashMap.newKeySet();
 
     /**
      * THE BUG THIS SEPARATION FIXES: this used to be one single-thread executor
@@ -597,6 +599,18 @@ public class SettingsActivity extends AppCompatActivity {
             /* Disabled only while a wake is genuinely in progress, so a second
                tap cannot queue another GPU run by accident. */
             wake.setEnabled(st == null || st.phase != EngineCore.Phase.WAKING);
+
+            Button off = card.findViewById(R.id.off);
+            boolean busy = shutting.contains(slot);
+            off.setEnabled(!busy);
+            off.setText(busy ? "Shutting down…" : getString(R.string.shut_down));
+            if (busy) {
+                line.setText("Shutting down — waiting for the engine to stop");
+                line.setTextColor(getColor(R.color.aether_warn));
+                if (dot != null && dot.getBackground() != null) {
+                    dot.getBackground().mutate().setTint(getColor(R.color.aether_warn));
+                }
+            }
             /* Shut down stays clickable in every state. A disabled button is
                indistinguishable from a broken one, and the honest answer to
                "shut down an engine that is not reachable" is a sentence, not
@@ -785,16 +799,27 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void shutDown(final String slot) {
         announce("Shutting down engine " + slot.toUpperCase(Locale.ROOT) + "…");
+        /* Change the row at once. Confirming a shutdown means watching the
+           engine stop answering, which takes several seconds; a button that
+           looks inert for that long reads as broken, so it gets pressed again
+           -- and each press queued another shutdown of the same engine. */
+        shutting.add(slot);
+        render();
         actionExec.execute(() -> {
-            final EngineCore.EngineState result = shutOne(slot);
-            states.put(slot, result);
-            telemetry("shutdown engine " + slot.toUpperCase(Locale.ROOT) + ": "
-                    + badge(result.phase) + " -- " + result.detail);
-            ui.post(() -> {
-                render();
-                announce("Engine " + slot.toUpperCase(Locale.ROOT) + ": "
-                        + badge(result.phase) + " — " + result.detail);
-            });
+            try {
+                final EngineCore.EngineState result = shutOne(slot);
+                states.put(slot, result);
+                telemetry("shutdown engine " + slot.toUpperCase(Locale.ROOT) + ": "
+                        + badge(result.phase) + " -- " + result.detail);
+                ui.post(() -> {
+                    render();
+                    announce("Engine " + slot.toUpperCase(Locale.ROOT) + ": "
+                            + badge(result.phase) + " — " + result.detail);
+                });
+            } finally {
+                shutting.remove(slot);
+                ui.post(this::render);
+            }
         });
     }
 
