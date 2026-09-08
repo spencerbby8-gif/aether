@@ -452,5 +452,55 @@ chk("the slow tool still returned its result",
                                for m in PAYLOADS[1]['messages'] if m.get('role') == 'tool'),
     "payloads=%d" % len(PAYLOADS))
 
+print("== crawl_site fetches a level concurrently ==")
+# The crawl was a sequential BFS: up to ten 30s curls back to back, with the
+# model idle the whole time. Pages within a level are independent. This lifts
+# the real function and times it against a fake curl that sleeps, so a
+# sequential crawl cannot hide.
+import html as _html2
+import re as _re2
+import time as _time2
+
+_ROOT = ('<html><body><p>Root page about Lagos.</p>'
+         '<a href="/alpha">A</a><a href="/beta">B</a><a href="/gamma">C</a></body></html>')
+_CHILD = '<html><body><p>Child page text.</p></body></html>'
+
+
+class _SlowSub:
+    """Every fetch costs a full second, as a slow origin would."""
+
+    def __init__(self):
+        self.n = 0
+
+    def run(self, *a, **k):
+        self.n += 1
+        _time2.sleep(1.0)
+        u = a[0][-1] if a and a[0] else ''
+        out = _ROOT if u.rstrip('/').endswith('example.com') else _CHILD
+        return type('P', (), {'stdout': out, 'returncode': 0, 'stderr': ''})()
+
+
+_cs = src.index('def t_crawl_site')
+# Just this function: slicing to the next named tool would drag in everything
+# defined between them.
+_ce = src.index('\ndef ', _cs + 10)
+_cr_src = src[src.index('def _readable'):src.index('def t_fetch_page')] + src[_cs:_ce]
+_slow = _SlowSub()
+_cr_ns = {'re': _re2, 'subprocess': _slow, 'htmlmod': _html2}
+exec(_cr_src, _cr_ns)
+_t0 = _time2.time()
+_crawl = _cr_ns['t_crawl_site']('https://example.com', max_pages=4)
+_elapsed = _time2.time() - _t0
+chk("a four page crawl is fetched concurrently, not one by one",
+    _elapsed < 3.0, "%.2fs for %d fetches (sequential would be ~%.0fs)"
+    % (_elapsed, _slow.n, _slow.n))
+chk("every page was fetched", _slow.n == 4, "fetches=%d" % _slow.n)
+chk("all four pages are in the result",
+    all(k in _crawl for k in ('example.com', '/alpha', '/beta', '/gamma')),
+    "%d chars" % len(_crawl))
+chk("pages come back in breadth-first order, not completion order",
+    _crawl.index('/alpha') < _crawl.index('/beta') < _crawl.index('/gamma'),
+    "order preserved")
+
 print("\n%d passed, %d failed" % (ok, fail))
 raise SystemExit(0 if fail == 0 else 1)

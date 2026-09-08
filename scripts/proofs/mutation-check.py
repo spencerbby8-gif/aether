@@ -156,5 +156,10 @@ tot += 1
 ok += case("failed browser launch left un-stopped", 'playwright-launch-check.py',
            lambda s: s.replace("            pw.stop()\\n", "            pass\\n"))
 
+tot += 1
+ok += case("crawl_site back to one page at a time", 'agent-loop-check.py',
+           lambda s: s.replace("_cf.ThreadPoolExecutor(max_workers=4)",
+                               "_cf.ThreadPoolExecutor(max_workers=1)"))
+
 print("\n%d/%d mutation cases behaved correctly" % (ok, tot))
 raise SystemExit(0 if ok == tot else 1)
