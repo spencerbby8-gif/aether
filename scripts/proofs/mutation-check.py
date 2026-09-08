@@ -182,5 +182,11 @@ ok += case("model worker exception no longer caught", 'agent-loop-check.py',
            lambda s: s.replace("            except Exception as _e:",
                                "            except KeyboardInterrupt as _e:"))
 
+tot += 1
+# Without the truncate the restart re-announces the dead tunnel's address.
+ok += case("tunnel restart no longer truncates the log", 'tunnel-url-check.py',
+           lambda s: s.replace("    open(TUNNEL_LOG, 'w').close()\n    return subprocess.Popen(",
+                               "    return subprocess.Popen("))
+
 print("\n%d/%d mutation cases behaved correctly" % (ok, tot))
 raise SystemExit(0 if ok == tot else 1)
