@@ -66,17 +66,22 @@ def main():
     row('short prompt', post('/api/generate', {
         'model': model, 'prompt': 'Say hello.', 'stream': False,
         'options': opts, 'keep_alive': -1}))
-    row('14k-char system-ish prompt', post('/api/generate', {
+    cold = row('14k-char system-ish prompt', post('/api/generate', {
         'model': model, 'system': big, 'prompt': 'Say hello.',
         'stream': False, 'options': opts, 'keep_alive': -1}))
-    c = row('same 14k prompt again (cache)', post('/api/generate', {
+    # Run, but not the baseline: this row reloaded the model, which is the
+    # very thing being measured, so its prefill is cold again.
+    row('same 14k prompt again (cache)', post('/api/generate', {
         'model': model, 'system': big, 'prompt': 'Say hello.',
         'stream': False, 'options': opts, 'keep_alive': -1}))
     b = row('same 14k prompt, new question', post('/api/generate', {
         'model': model, 'system': big, 'prompt': 'What is 2+2?',
         'stream': False, 'options': opts, 'keep_alive': -1}))
-    print('  -> repeated identical prompt saved %.2fs of prefill'
-          % (b['ptime'] - c['ptime']))
+    # Warm (row 4) against cold (row 2). The row in between reloaded the model,
+    # so it is not the right baseline -- and subtracting the other way round
+    # prints a negative "saving", which is what this used to do.
+    print('  -> a warm prefix prefills %.2fs against %.2fs cold: %.2fs saved'
+          % (b['ptime'], cold['ptime'], cold['ptime'] - b['ptime']))
 
     print('\n== 2. num_ctx: the window we declare ==')
     for n in (4096, 16384):
