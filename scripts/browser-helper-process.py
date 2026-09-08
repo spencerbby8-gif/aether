@@ -106,6 +106,10 @@ def _b_ensure():
 
 '''
 
+# NOTE: the fill/type gate calls _b_is_secret(selector) or
+# _b_secret_element(page, selector); that lives in _b_do, lifted verbatim from
+# the template, not in this preamble.
+
 HELPER_FOOTER = '''
 
 def _main():
@@ -155,6 +159,27 @@ _BPROC = {'p': None}
 _BPROC_LOCK = threading.Lock()
 _B_HELPER_BUDGET = 1200      # a page action, not an install
 _B_RPC_TIMEOUT = 240
+
+
+def _b_secret_element(page, selector):
+    """Ask the page whether the target really is a credential field.
+
+    Matching the selector string alone is not enough and was demonstrably
+    bypassed: a field declared `<input id="pw" type="password">` has a selector
+    of "#pw", which contains none of the keywords, and an unapproved fill went
+    straight through. The element's own type, name, id, autocomplete and
+    placeholder are the real signal.
+    """
+    try:
+        return bool(page.eval_on_selector(selector, """el => {
+            const t = (el.type || '').toLowerCase();
+            if (t === 'password') return true;
+            const n = ((el.name || '') + ' ' + (el.id || '') + ' ' +
+                       (el.autocomplete || '') + ' ' + (el.placeholder || '')).toLowerCase();
+            return /(pass|pwd|secret|token|otp|cvv|card)/.test(n);
+        }"""))
+    except Exception:
+        return False
 
 
 def _b_redact(text):
