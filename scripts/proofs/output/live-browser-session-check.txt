@@ -1,0 +1,19 @@
+== named sessions, cookies, state on disk ==
+  STEP1: BROWSER READY session=work
+  STEP2: NAVIGATED https://example.com/ | title=Example Domain
+  STEP3: COOKIES session=work count=0 names= (values withheld)
+  STEP4: BROWSER SESSIONS: work
+  STEP5: NAVIGATED data:text/html,<form><input id='pw' type='password'></form> | title=
+  STEP6: NEEDS APPROVAL: #pw targets a credential field. Ask the user to confirm this exact step first; the value is never shown.
+  STEP7: BROWSER CLOSED session=work (session saved)
+  STAT: SESSION_STATE_MODE_600
+  ok   a second named session opens   [BROWSER READY session=work]
+  ok   that session navigates on its own   [NAVIGATED https://example.com/ | title=Example Domain]
+  ok   cookies are named with values withheld   [COOKIES session=work count=0 names= (values withheld)]
+  ok   the named session is listed   [BROWSER SESSIONS: work]
+  ok   the credential fill is refused without approval   [NEEDS APPROVAL: #pw targets a credential field. Ask the user to confir]
+  ok   the secret never appears anywhere in the reply   [scanned]
+  ok   closing saves and closes the session   [BROWSER CLOSED session=work (session saved)]
+  ok   session state is on disk at 0600   [SESSION_STATE_MODE_600]
+
+8 passed, 0 failed

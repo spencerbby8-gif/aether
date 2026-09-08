@@ -1,0 +1,10 @@
+== crawl_site against the live web ==
+  target: https://quotes.toscrape.com
+  elapsed 116.9s, 21 activity events
+  ok   the crawl tool was really dispatched   [⚙️ agent step 1... ⏳ ⏳ 🛠️ crawl_site({"url": "https://quotes.toscrape.com", "max_pages": 4}) ↳ c]
+  ok   the crawl returned content   [crawl_site returned 9948 chars]
+  ok   more than a single page came back   [9948 chars]
+  ok   the answer is a real answer, not empty   [1430 chars]
+  ok   the answer describes what the site actually is   [## What the site is about  **[Quotes to Scrape](https://quotes.toscrape.com)** is a practi]
+
+5 passed, 0 failed
