@@ -240,7 +240,48 @@ public final class EngineCore {
         if (r.status < 200 || r.status >= 300) {
             throw new EngineException("Kaggle push HTTP " + r.status + ": " + trim(r.body), r.status);
         }
+        // Kaggle also refuses a push with HTTP 200 and the reason in the body:
+        // an error string, a blank ref and versionNumber 0. Reading that as a
+        // successful wake is an optimistic claim about an engine that was never
+        // created -- which is what happens when an account runs out of weekly
+        // GPU quota, and the UI then sits on "waking" for a kernel that cannot
+        // exist. Status has to be truth, so this is a failure.
+        String refusal = pushRefusal(r.body);
+        if (!refusal.isEmpty()) {
+            // Status -1: there was no failing HTTP status, Kaggle answered 200.
+            // The word "quota" in the message is what lets the caller classify
+            // this as Phase.QUOTA rather than a generic failure.
+            boolean quota = refusal.toLowerCase(java.util.Locale.ROOT).contains("quota");
+            throw new EngineException("Kaggle refused to start engine "
+                    + e.slot.toUpperCase() + ": " + refusal
+                    + (quota ? " (weekly GPU quota exhausted)" : ""), -1);
+        }
         return trim(r.body);
+    }
+
+    /**
+     * Kaggle's own refusal, read out of an HTTP 200 body. Empty when the push
+     * was accepted.
+     *
+     * Kaggle reports a rejected push with status 200 and the reason in the
+     * body, alongside a blank ref and versionNumber 0. Anyone checking only the
+     * status code reads that as success and then waits for a kernel that was
+     * never created -- observed live when an account hit its 30 hour weekly GPU
+     * quota, where the wake sat on "waking" indefinitely.
+     */
+    public static String pushRefusal(String body) {
+        if (body == null) return "";
+        try {
+            JSONObject j = new JSONObject(body);
+            String err = j.optString("errorNullable", "");
+            if (err.isEmpty()) err = j.optString("error", "");
+            if (!err.isEmpty()) return err;
+            if (j.optString("ref", "").isEmpty()) return "no kernel reference returned";
+        } catch (Exception ignore) {
+            // Not JSON we recognise; the status check already passed, so leave
+            // the caller to find out from the health check.
+        }
+        return "";
     }
 
     // ---------------------------------------------------------------- Beacon

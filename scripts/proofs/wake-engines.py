@@ -63,11 +63,21 @@ def main(slots):
                      "Content-Type": "application/json"})
         try:
             r = json.loads(urllib.request.urlopen(req, timeout=180).read().decode())
-            print("  engine %s pushed -> ref %s v%s  (slot tag verified, %d bytes)"
-                  % (slot.upper(), r.get("ref"), r.get("versionNumber"), len(nb)))
         except Exception as e:
             print("  engine %s PUSH FAILED: %s" % (slot.upper(), e))
             return 1
+        # Kaggle rejects a push with HTTP 200 and an error in the body -- a
+        # blank ref and versionNumber 0. Read as success, that costs twenty
+        # five minutes waiting for a kernel that was never created, which is
+        # exactly what happened when an account hit its weekly GPU quota.
+        err = r.get("error") or r.get("errorNullable")
+        if err or not r.get("ref"):
+            print("  engine %s PUSH REJECTED: %s"
+                  % (slot.upper(), err or "no ref returned (ref=%r v%s)"
+                     % (r.get("ref"), r.get("versionNumber"))))
+            return 1
+        print("  engine %s pushed -> ref %s v%s  (slot tag verified, %d bytes)"
+              % (slot.upper(), r.get("ref"), r.get("versionNumber"), len(nb)))
     return 0
 
 
