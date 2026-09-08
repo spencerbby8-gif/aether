@@ -12,6 +12,8 @@ import android.widget.TextView;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.aether.app.core.EngineLabels;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -382,6 +384,16 @@ public class SettingsActivity extends AppCompatActivity {
             LinearLayout head = new LinearLayout(this);
             head.setOrientation(LinearLayout.HORIZONTAL);
             head.setGravity(Gravity.CENTER_VERTICAL);
+            /* A state indicator rather than a word to read. It is tinted from
+               the measured phase in render(), so the colour can never disagree
+               with the badge beside it -- there is one source of truth. */
+            View dot = new View(this);
+            dot.setId(R.id.engine_dot);
+            dot.setBackground(getDrawable(R.drawable.bg_engine_dot));
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    Ui.dp(this, 9), Ui.dp(this, 9));
+            dlp.rightMargin = Ui.dp(this, 9);
+            head.addView(dot, dlp);
             TextView name = new TextView(this);
             name.setText("Engine " + e.slot.toUpperCase());
             name.setTextSize(15);
@@ -392,11 +404,31 @@ public class SettingsActivity extends AppCompatActivity {
             head.addView(name, nlp);
             TextView status = new TextView(this);
             status.setId(R.id.status);
-            status.setTextSize(12);
+            status.setTextSize(10);
+            status.setAllCaps(true);
+            status.setLetterSpacing(0.06f);
+            status.setPadding(Ui.dp(this, 8), Ui.dp(this, 3),
+                    Ui.dp(this, 8), Ui.dp(this, 3));
+            status.setBackground(getDrawable(R.drawable.bg_status_chip));
             status.setTextColor(getColor(R.color.aether_muted));
-            status.setText("checking…");
+            status.setText("…");
             head.addView(status);
             card.addView(head);
+
+            /* One plain sentence about what was measured. The raw evidence --
+               HTTP codes, tunnel counts, kernel slugs -- stays behind Check
+               now, where someone debugging can ask for it. On the row it read
+               as noise and hid the actual state. */
+            TextView line = new TextView(this);
+            line.setId(R.id.engine_line);
+            line.setTextSize(12);
+            line.setTextColor(getColor(R.color.aether_muted));
+            line.setText(EngineLabels.humanLine(null, 0L));
+            LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            llp.topMargin = Ui.dp(this, 5);
+            card.addView(line, llp);
 
             TextView acct = Ui.meta(this, e.user + " · " + e.kernelSlug);
             LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
@@ -546,18 +578,19 @@ public class SettingsActivity extends AppCompatActivity {
             EngineCore.EngineState st = states.get(slot);
 
             TextView status = card.findViewById(R.id.status);
-            if (st == null) {
-                status.setText("not checked yet");
-                status.setTextColor(getColor(R.color.aether_muted));
-            } else {
-                /* The badge is the phase, the second line is the evidence, and
-                   the age says when that evidence was measured. None of it can
-                   contain a tunnel: EngineState scrubs URLs on the way in. */
-                String age = st.verifiedAtMs == 0
-                        ? "no /api/ps answer"
-                        : "checked " + ago(System.currentTimeMillis() - st.verifiedAtMs);
-                status.setText(badge(st.phase) + "  ·  " + age + "\n" + st.detail);
-                status.setTextColor(getColor(colorFor(st.phase)));
+            TextView line = card.findViewById(R.id.engine_line);
+            View dot = card.findViewById(R.id.engine_dot);
+            /* Badge, sentence and dot all come from the same measured phase, so
+               they cannot contradict each other. EngineState scrubs tunnel URLs
+               on the way in, so none of this can leak a raw address. */
+            EngineCore.Phase ph = st == null ? EngineCore.Phase.UNKNOWN : st.phase;
+            status.setText(badge(ph));
+            status.setTextColor(getColor(colorFor(ph)));
+            line.setText(EngineLabels.humanLine(st, System.currentTimeMillis()));
+            line.setTextColor(getColor(st == null
+                    ? R.color.aether_muted : colorFor(st.phase)));
+            if (dot != null && dot.getBackground() != null) {
+                dot.getBackground().mutate().setTint(getColor(colorFor(ph)));
             }
 
             Button wake = card.findViewById(R.id.wake);
@@ -572,15 +605,9 @@ public class SettingsActivity extends AppCompatActivity {
         renderRouting();      // the pinned engine's phase, refreshed with the rest
     }
 
+    /** One implementation, in the pure-Java layer, so EngineLabelsProof covers it. */
     private static String badge(EngineCore.Phase p) {
-        switch (p) {
-            case LIVE:    return "LIVE";
-            case WAKING:  return "WAKING";
-            case OFF:     return "OFF";
-            case QUOTA:   return "QUOTA";
-            case ERROR:   return "ERROR";
-            default:      return "UNKNOWN";
-        }
+        return EngineLabels.badge(p);
     }
 
     private int colorFor(EngineCore.Phase p) {

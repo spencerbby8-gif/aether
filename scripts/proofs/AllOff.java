@@ -9,7 +9,8 @@ public final class AllOff {
         try (FileInputStream in = new FileInputStream(a[0])) { p.load(in); }
         String topic = p.getProperty("beaconTopic"), secret = p.getProperty("beaconSecret");
         String offKey = p.getProperty("offKey"), slug = p.getProperty("kernelSlug");
-        int live = 0;
+        int live = 0;          // tunnels answering right now
+        int sessions = 0;      // Kaggle sessions still held, tunnel or not
         for (String slot : new String[] {"a", "b", "c"}) {
             EngineCore.Engine e = new EngineCore.Engine(slot,
                     p.getProperty("engine" + slot.toUpperCase() + ".user"),
@@ -31,8 +32,21 @@ public final class AllOff {
             }
             String ks;
             try { ks = EngineCore.kernelStatus(e, 20_000); } catch (Exception ex) { ks = "status failed"; }
+            if (ks != null && ks.contains("running")) sessions++;
             System.out.println("  engine " + slot.toUpperCase() + ": " + reach + "  |  Kaggle says: " + ks);
         }
-        System.out.println(live == 0 ? "ALL OFF - no engine is serving" : live + " engine(s) were still live");
+        /* A dead tunnel is not a stopped engine. Kaggle keeps the SESSION, and
+           the GPU, after the process is gone -- measured, kernels/status still
+           said "running" 50 minutes after /off returned 200, and the next push
+           was refused with "Maximum batch GPU session count of 2 reached". So a
+           verdict built from tunnel reachability alone reports "all off" while
+           the account is still holding every session it has. */
+        if (live == 0 && sessions == 0) {
+            System.out.println("ALL OFF - nothing serving and no Kaggle session held");
+        } else {
+            System.out.println((live > 0 ? live + " engine(s) still serving"
+                    : "nothing serving") + "; " + sessions
+                    + " Kaggle session(s) still held - NOT off");
+        }
     }
 }

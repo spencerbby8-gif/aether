@@ -56,6 +56,7 @@ PROOFS=(
   "AgentActivityCheck|$FIXTURE"
   "StatusProof|$REPO/android/credentials.properties $REPO/android/app/src/main/assets/aether-notebook-template.json"
   "PushRefusalProof|"
+  "EngineLabelsProof|"
 )
 
 fails=0

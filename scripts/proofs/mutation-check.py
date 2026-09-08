@@ -23,14 +23,14 @@ def setup(proof):
     return MUT + '/' + TPL_REL
 
 
-def mutate(path, fn, name=''):
+def mutate(path, fn, name='', cell=4):
     nb = json.load(open(path))
-    src = nb['cells'][4]['source']
+    src = nb['cells'][cell]['source']
     new = fn(src)
     # Name the case: a stale anchor otherwise aborts the whole run with a
     # traceback that does not say which mutation no longer matches.
     assert new != src, "mutation '%s' did not change anything -- stale anchor" % name
-    nb['cells'][4]['source'] = new
+    nb['cells'][cell]['source'] = new
     open(path, 'w').write(json.dumps(nb, ensure_ascii=True, separators=(',', ':')))
 
 
@@ -41,9 +41,9 @@ def run(proof):
     return p.returncode, (tail[-1] if tail else p.stdout.strip()[-90:] or p.stderr[-90:])
 
 
-def case(name, proof, fn):
+def case(name, proof, fn, cell=4):
     path = setup(proof)
-    mutate(path, fn, name)
+    mutate(path, fn, name, cell)
     rc, out = run(proof)
     caught = rc != 0
     print("  %-52s %s  %s" % (name, "caught" if caught else "*** NOT CAUGHT ***", out))
@@ -187,6 +187,34 @@ tot += 1
 ok += case("tunnel restart no longer truncates the log", 'tunnel-url-check.py',
            lambda s: s.replace("    open(TUNNEL_LOG, 'w').close()\n    return subprocess.Popen(",
                                "    return subprocess.Popen("))
+
+print("== keepalive-ctx-check.py (cell 5) ==")
+tot += 1
+ok += baseline('keepalive-ctx-check.py')
+tot += 1
+# Without it the 60s ping asks for a different context, Ollama reloads the
+# model and drops the KV cache before every real turn (~11s + 18s measured).
+ok += case("keep-alive ping stops pinning num_ctx", 'keepalive-ctx-check.py',
+           lambda s: s.replace(", 'num_ctx': globals().get('NUM_CTX', 16384)", ""),
+           cell=5)
+
+print("== session-release-check.py ==")
+tot += 1
+ok += baseline('session-release-check.py')
+tot += 1
+# Killing the process leaves the Kaggle session running (measured: still
+# "running" 50 minutes later, and the next push was refused).
+ok += case("_halt kills the process instead of ending the run",
+           'session-release-check.py',
+           lambda s: s.replace("    _HALT['on'] = True\n    time.sleep(0.5)",
+                               "    _HALT['on'] = True\n    os._exit(0)\n    time.sleep(0.5)"))
+tot += 1
+# The last cell owns the run; if it never returns the GPU is never handed back.
+ok += case("the idle watchdog kills the process instead of returning",
+           'session-release-check.py',
+           lambda s: s.replace("        _reason = 'idle for 60 minutes'\n        break",
+                               "        os._exit(0)"),
+           cell=5)
 
 print("\n%d/%d mutation cases behaved correctly" % (ok, tot))
 raise SystemExit(0 if ok == tot else 1)

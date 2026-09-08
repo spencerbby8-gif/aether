@@ -1,0 +1,18 @@
+model: hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+
+== 1. raw generate: prompt size vs prefill ==
+  short prompt                       load  11.43s | prefill    55 tok    1.64s ( 33.5 tok/s) | decode   31 tok   5.28s (  5.9 tok/s) | wall   18.5s
+  14k-char system-ish prompt         load   0.00s | prefill  2953 tok   23.09s (127.9 tok/s) | decode   29 tok   5.02s (  5.8 tok/s) | wall   28.5s
+  same 14k prompt again (cache)      load  11.65s | prefill  2953 tok   23.11s (127.8 tok/s) | decode   26 tok   4.47s (  5.8 tok/s) | wall   39.4s
+  same 14k prompt, new question      load   0.00s | prefill  2957 tok    5.09s (580.6 tok/s) | decode   14 tok   2.31s (  6.1 tok/s) | wall    7.5s
+  -> repeated identical prompt saved -18.02s of prefill
+
+== 2. num_ctx: the window we declare ==
+  num_ctx=4096, 14k prompt           load  10.56s | prefill  2953 tok   21.71s (136.0 tok/s) | decode   23 tok   2.31s (  9.9 tok/s) | wall   34.7s
+  num_ctx=16384, 14k prompt          load  11.26s | prefill  2953 tok   23.12s (127.7 tok/s) | decode   32 tok   5.52s (  5.8 tok/s) | wall   40.0s
+
+== 3. the chat path the app really uses ==
+  chat, think OFF                    load   0.00s | prefill    19 tok    2.42s (  7.9 tok/s) | decode    3 tok   0.35s (  8.7 tok/s) | wall    3.4s
+  chat, think ON                     load   0.00s | prefill    59 tok    3.39s ( 17.4 tok/s) | decode   28 tok   4.67s (  6.0 tok/s) | wall    8.4s
+
+Done. Compare prefill against decode: whichever dominates is the bottleneck.
