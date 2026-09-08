@@ -1,0 +1,42 @@
+== 22 consecutive real requests ==
+
+#    kind     1stbyte  1sttok   1sttool  total    dlt   beat  state
+-------------------------------------------------------------------
+1    text     0.5s     26.7s    -        26.9s    1     3     completed
+2    text     0.2s     2.8s     -        3.0s     1     1     completed
+3    command  0.2s     13.8s    10.6s    17.0s    17    3     completed
+4    text     0.2s     6.7s     -        6.9s     1     1     completed
+5    text     0.2s     2.8s     -        3.0s     1     1     completed
+6    command  0.2s     10.2s    8.3s     16.1s    33    2     completed
+7    text     0.2s     6.7s     -        6.9s     1     1     completed
+8    search   0.2s     17.7s    9.8s     27.9s    56    3     completed
+9    text     0.2s     8.4s     -        8.6s     1     1     completed
+10   command  0.2s     14.3s    11.0s    17.4s    17    3     completed
+11   text     0.2s     6.7s     -        7.0s     2     1     completed
+12   fetch    0.2s     10.8s    8.8s     18.5s    42    2     completed
+13   text     0.3s     6.8s     -        7.2s     2     1     completed
+14   text     0.2s     2.7s     -        3.1s     2     1     completed
+15   command  0.2s     15.1s    11.9s    19.3s    23    3     completed
+16   text     0.2s     6.7s     -        7.1s     2     1     completed
+17   browser  0.2s     21.8s    9.3s     30.6s    47    4     completed
+18   text     0.4s     6.9s     -        7.3s     2     1     completed
+19   search   0.2s     47.7s    10.8s    75.9s    150   10    completed
+20   text     0.7s     8.4s     -        8.6s     1     1     completed
+21   browser  0.2s     22.0s    11.4s    34.3s    67    5     completed
+22   text     0.2s     6.9s     -        7.3s     2     1     completed
+
+== summary ==
+  completed: 22 of 22
+  timed out / hung: 0
+  median first byte   0.2s
+  median first token  8.4s
+  median total        8.6s
+  worst first token   47.7s
+  tool calls made     13   media events 1   heartbeats 50
+
+  first half median first token  8.4s
+  second half median first token 8.4s
+  first half median total        8.6s
+  second half median total       8.6s
+
+PASS: every request terminated and none hung
