@@ -161,5 +161,12 @@ ok += case("crawl_site back to one page at a time", 'agent-loop-check.py',
            lambda s: s.replace("_cf.ThreadPoolExecutor(max_workers=4)",
                                "_cf.ThreadPoolExecutor(max_workers=1)"))
 
+tot += 1
+# Without makedirs the save throws on a missing directory; the old code swallowed
+# it and still reported "session saved".
+ok += case("session state directory never created", 'browser-helper-check.py',
+           lambda s: s.replace("os.makedirs(BROWSER_DIR, exist_ok=True)",
+                               "pass"))
+
 print("\n%d/%d mutation cases behaved correctly" % (ok, tot))
 raise SystemExit(0 if ok == tot else 1)

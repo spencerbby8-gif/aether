@@ -81,7 +81,44 @@ class Helper:
             pass
 
 
+def session_state_is_really_written():
+    """Session persistence, without needing Chromium.
+
+    _b_save only needs a context with a storage_state method, so the directory
+    handling can be exercised here even where no browser can start. It matters:
+    the close message claimed "session saved" while every save silently failed,
+    because nothing created BROWSER_DIR and the exception was swallowed.
+    """
+    src = helper_source()
+    a = src.index('def _b_state_path')
+    b = src.index('_SECRET_SEL')      # _b_save comes after _b_page
+    body = src[a:b]
+    compile(body, 'save', 'exec')
+
+    d = tempfile.mkdtemp(prefix='aether-save-')
+    bdir = os.path.join(d, 'browser')          # deliberately does not exist
+
+    class Ctx:
+        def storage_state(self, path=None):
+            open(path, 'w').write('{"cookies": [], "origins": []}')
+
+    ns = {'os': os, 're': __import__('re'), 'BROWSER_DIR': bdir,
+          '_BROWSER': {'ctx': {'main': Ctx()}}}
+    exec(body, ns)
+
+    print('== session state is really written ==')
+    ok = ns['_b_save']('main')
+    path = os.path.join(bdir, 'main.json')
+    chk('the save reports success honestly', ok is True, repr(ok))
+    chk('the state file exists on disk', os.path.exists(path), path)
+    if os.path.exists(path):
+        chk('it is 0600', stat.S_IMODE(os.stat(path).st_mode) == 0o600,
+            oct(stat.S_IMODE(os.stat(path).st_mode)))
+    print()
+
+
 def main():
+    session_state_is_really_written()
     src = helper_source()
     compile(src, 'helper', 'exec')
     d = tempfile.mkdtemp(prefix='aether-browser-')
@@ -105,7 +142,10 @@ def main():
             # prewarm runs `playwright install-deps` at boot.
             print('  SKIP  Chromium cannot launch in this environment')
             print('        %s' % r[:110])
-            print('\n0 passed, 0 failed  (nothing proven here -- run on an engine)')
+            print('\n%d passed, %d failed  (browser steps need an engine)'
+                  % (passed, failed))
+            if failed:
+                sys.exit(1)
             return
         chk('navigate reaches a real site', r.startswith('NAVIGATED')
             and 'example.com' in r, r[:90])
