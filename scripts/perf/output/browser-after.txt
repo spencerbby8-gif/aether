@@ -1,0 +1,69 @@
+helper under test: 42103 bytes (/tmp/candidate-helper.py)
+
+==============================================================================
+POLICY: INSPECT
+==============================================================================
+
+== dynamic form: fields render 1.2s after load ==
+      -> NAVIGATED http://127.0.0.1:44379/dynamic | title=Dynamic | target ready
+      -> INSPECTED http://127.0.0.1:44379/dynamic | title=Dynamic | 2 fields, 1 buttons, 1 frames | {"frames":[{"name":"main","url":"http://127.0.0.1:44379/dynamic","title":"Dynamic
+      -> FILL into #fullname (12 chars, value withheld)
+      -> FILL into #newpw (21 chars, value withheld)
+      -> SUBMITTED css=button[name="create"] | now http://127.0.0.1:44379/dashboard
+  dynamic form     PASS  8 calls     2.2s helper     2.2s wall
+
+== iframe: the login form lives inside a frame ==
+      -> INSPECTED http://127.0.0.1:44379/iframe | title=Framed | 3 fields, 1 buttons, 2 frames | frames: partner | {"frames":[{"name":"main","url":"http://127.0.0.1:44379/iframe","
+  ok   inspect reports the frame
+      -> FILL into frame=partner >> #email-1 (15 chars, value withheld)
+  iframe form      PASS  4 calls     0.2s helper     0.2s wall
+
+== overlay: a consent banner and veil cover the submit button ==
+      -> INSPECTED http://127.0.0.1:44379/overlay | title=Overlay | 1 fields, 2 buttons, 1 frames | BLOCKED by overlay #veil (100%) | {"frames":[{"name":"main","url":"http://127.0.0.1:44379/overlay","title":"Ove
+  ok   inspect reports the overlay instead of letting the click time out
+      -> CLICKED #accept | now http://127.0.0.1:44379/overlay
+      -> SUBMITTED #subscribe | now http://127.0.0.1:44379/dashboard
+  overlay          PASS  6 calls     0.3s helper     0.3s wall
+
+== unstable ids: only labels, names and roles survive a reload ==
+      -> INSPECTED http://127.0.0.1:44379/renamed | title=Renamed | 3 fields, 1 buttons, 1 frames | {"frames":[{"name":"main","url":"http://127.0.0.1:44379/renamed","title":"Renamed","readyState":"complete","fie
+      -> FILL into #email-401ebc (15 chars, value withheld)
+  unstable ids     PASS  4 calls     0.1s helper     0.1s wall
+
+== file upload ==
+      -> UPLOADED /tmp/browser-reliability/gen/hello.txt (22 bytes) into #doc
+  file upload      PASS  6 calls     0.2s helper     0.2s wall
+
+== session persistence across pages ==
+  session          PASS  3 calls     0.1s helper     0.1s wall
+
+== redirect: the page moves before the agent acts ==
+      -> WAITED for url /login | now http://127.0.0.1:44379/login?via=redirect
+  ok   a deterministic URL wait replaces a sleep
+  redirect         PASS  3 calls     0.5s helper     0.5s wall
+
+== full authorized sign-in ==
+  ok   inspect found the fields by label
+  ok   credential fill is still refused without a grant
+      -> SUBMITTED #go-1 | now http://127.0.0.1:44379/dashboard
+  full sign-in     PASS  9 calls     0.2s helper     0.2s wall
+
+== a control that cannot be used says why ==
+      -> BLOCKED by overlay: #veil is covering #subscribe. Dismiss it first -- inspect the page to find its close or accept control.
+  ok   the blocker is named instead of a bare timeout
+  blocked control  PASS  2 calls     0.1s helper     0.1s wall
+
+== CAPTCHA is refused, never solved ==
+      -> BLOCKED: this page presents a CAPTCHA. I will not attempt to solve or bypass it. Tell the user this step needs them.
+  ok   refused the CAPTCHA
+  captcha          PASS  2 calls     0.1s helper     0.1s wall
+
+== batch: several independent reads in one call ==
+      -> BATCH 3 steps | 1. PAGE http://127.0.0.1:44379/login | title=Sign in | Sign in Sign in Email address Password Account type Personal Team Sign in | 2. COOKIE
+  ok   one call returned three results
+  batch            PASS  2 calls     0.1s helper     0.1s wall
+
+  INSPECT total: 11/11 workflows, 49 tool calls, 4.0s wall
+
+assertions        : 8 passed, 0 failed
+workflows completed: 11 / 11

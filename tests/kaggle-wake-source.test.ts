@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("833ebe05acef0281b56a3ff8673f994f5f1d27207abed6a950851d7098d5c00d");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("1d663b18a949dcd380ae287a551b24674c781bec0544d2b0daa76a4a7518b15a");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -153,8 +153,15 @@ describe("engine source — rendering", () => {
        it will actually serve (NUM_CTX, declared above the warmup) and bounds
        its own generation to 16 tokens. Ollama reloads the 15 GB model whenever
        num_ctx changes between requests -- measured 10.8-11.8 s per switch -- so
-       warming at the default window made the user's first message pay a reload. */
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(91250);
+       warming at the default window made the user's first message pay a reload.
+       91250 -> 121128: the browser helper now establishes page state before it
+       touches anything. It gained `inspect` (one call returns url, title,
+       frames, labelled fields, buttons, covering overlays and load state), a
+       resolve-before-act path that searches frames and names the real blocker,
+       `batch` for independent reads, and separate action (8 s) and page-load
+       (30 s) budgets. Measured on a real Chromium: 6/11 workflows -> 11/11,
+       100.5 s -> 4.0 s wall. No selector was added and no limit raised. */
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(121128);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 

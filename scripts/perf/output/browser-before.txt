@@ -1,0 +1,77 @@
+helper under test: 15924 bytes (extracted from the shipped notebook asset)
+
+==============================================================================
+POLICY: GUESS
+==============================================================================
+
+== dynamic form: fields render 1.2s after load ==
+      -> FILL into #fullname (12 chars, value withheld)
+      -> FILL into #newpw (21 chars, value withheld)
+      -> CLICKED button[name=create] | now http://127.0.0.1:37421/dashboard
+  dynamic form     PASS  6 calls     2.1s helper     2.1s wall
+
+== iframe: the login form lives inside a frame ==
+      -> TimeoutError: Page.fill: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator("input[name=email]")
+
+  iframe form      FAIL  3 calls    30.1s helper    30.1s wall
+                 expected 'FILL', got 'TimeoutError: Page.fill: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator("input[name=email]")\n'
+
+== overlay: a consent banner and veil cover the submit button ==
+      -> TimeoutError: Page.click: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator("#subscribe")
+    - loca
+  overlay          FAIL  3 calls    30.1s helper    30.1s wall
+                 expected 'SUBMITTED', got 'TimeoutError: Page.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator("#subscribe")\n    - locator resolved to <button type="submit" id'
+
+== unstable ids: only labels, names and roles survive a reload ==
+      -> TimeoutError: Page.fill: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator("#email-1")
+
+  unstable ids     FAIL  3 calls    30.1s helper    30.1s wall
+                 expected 'FILL', got 'TimeoutError: Page.fill: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator("#email-1")\n'
+
+== file upload ==
+      -> UPLOADED /tmp/browser-reliability/gen/hello.txt (22 bytes) into #doc
+  file upload      PASS  4 calls     0.2s helper     0.2s wall
+
+== session persistence across pages ==
+  session          PASS  3 calls     0.1s helper     0.1s wall
+
+== redirect: the page moves before the agent acts ==
+  redirect         PASS  3 calls     1.6s helper     1.6s wall
+
+== full authorized sign-in ==
+      -> SUBMITTED button[name=signin] | now http://127.0.0.1:37421/dashboard
+  full sign-in     PASS  7 calls     0.2s helper     0.2s wall
+
+== a control that cannot be used says why ==
+      -> TimeoutError: Page.click: Timeout 6000ms exceeded.
+Call log:
+  - waiting for locator("#subscribe")
+    - locator resolved to <butt
+  FAIL the blocker is named instead of a bare timeout   [TimeoutError: Page.click: Timeout 6000ms exceeded.
+Call log:
+  - waiting for locator("#subscribe")
+    - locator resolved to <butt]
+  blocked control  FAIL  2 calls     6.1s helper     6.1s wall
+                 expected 'BLOCKED', got 'TimeoutError: Page.click: Timeout 6000ms exceeded.\nCall log:\n  - waiting for locator("#subscribe")\n    - locator resolved to <button type="submit" id='
+
+== CAPTCHA is refused, never solved ==
+      -> BLOCKED: this page presents a CAPTCHA. I will not attempt to solve or bypass it. Tell the user this step needs them.
+  ok   refused the CAPTCHA
+  captcha          PASS  2 calls     0.1s helper     0.1s wall
+
+== batch: several independent reads in one call ==
+      -> browser: unknown action 'batch'
+  FAIL one call returned three results   [browser: unknown action 'batch']
+  batch            FAIL  2 calls     0.1s helper     0.1s wall
+                 expected 'BATCH', got "browser: unknown action 'batch'"
+
+  GUESS total: 6/11 workflows, 38 tool calls, 100.5s wall
+
+assertions        : 1 passed, 2 failed
+workflows completed: 6 / 11
