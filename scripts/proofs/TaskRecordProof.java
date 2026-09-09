@@ -205,6 +205,58 @@ public class TaskRecordProof {
         chk("the handoff carries the failure so it is not repeated",
                 ho.contains("connection reset"), "connection reset");
 
+        System.out.println("\n== handing a task to another engine ==");
+        TaskRecord handoffTask = new TaskRecord("h1", "research Nigeria fuel prices and write a file");
+        handoffTask.engine = "a";
+        handoffTask.moveTo(TaskRecord.Phase.EXECUTING);
+        handoffTask.plan("search the web");
+        handoffTask.startStep("search the web");
+        handoffTask.finishStep("search the web", true, "1840 chars");
+        handoffTask.plan("write the summary");
+        handoffTask.startStep("write the summary");
+        handoffTask.finishStep("write the summary", false, "engine dropped");
+        handoffTask.recordCommand("pip install requests", 0, "Successfully installed");
+
+        String handoff = handoffTask.handoff();
+        chk("the handoff says continue, do not restart",
+                handoff.contains("CONTINUE THIS TASK, do not restart it"), firstLine(handoff, "CONTINUE"));
+        chk("the goal travels with it", handoff.contains("research Nigeria fuel prices"), "");
+        chk("only a step that really finished is listed as done",
+                handoff.contains("  - search the web (1840 chars)"), "");
+        chk("the unfinished step is listed as unfinished, never as done",
+                handoff.contains("- write the summary [failed]"), firstLine(handoff, "write the summary"));
+        chk("commands that ran are part of the state",
+                handoff.contains("pip install requests"), "");
+        chk("it names where the work came from", handoff.contains("a"), "");
+
+        System.out.println("\n== the string the next engine is sent ==");
+        TaskRecord carryTask = new TaskRecord("c1", "write the report");
+        carryTask.plan("draft");
+        carryTask.startStep("draft");
+        carryTask.finishStep("draft", true, "ok");
+        String cold = carryTask.continuationPrompt("write the report", null, "b");
+        chk("with nothing streamed it is a plain handoff",
+                cold.contains("CONTINUE THIS TASK") && cold.contains("write the report")
+                        && !cold.contains("mid-answer"), cold.length() + " chars");
+        chk("a cold handoff records no partial result", carryTask.results.isEmpty(),
+                String.valueOf(carryTask.results));
+
+        String warm = carryTask.continuationPrompt("write the report",
+                "Fuel prices rose by 12% last ", "c");
+        chk("a partial answer is included verbatim",
+                warm.contains("Fuel prices rose by 12% last"), "");
+        chk("the engine is told to continue, not repeat",
+                warm.contains("Continue from exactly where it stopped")
+                        && warm.contains("Do not"), "");
+        chk("the partial length it quotes is the real length",
+                warm.contains("after " + "Fuel prices rose by 12% last ".trim().length()
+                        + " characters"), firstLine(warm, "mid-answer"));
+        chk("the takeover is recorded on the task",
+                !carryTask.results.isEmpty() && carryTask.results.toString().contains("continuing on engine C"),
+                String.valueOf(carryTask.results));
+        chk("whitespace-only partial counts as nothing",
+                !carryTask.continuationPrompt("x", "   \n  ", "b").contains("mid-answer"), "");
+
         System.out.println("\n" + passed + " passed, " + failed + " failed");
         if (failed > 0) System.exit(1);
     }

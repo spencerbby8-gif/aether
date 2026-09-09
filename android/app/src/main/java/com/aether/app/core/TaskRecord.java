@@ -445,15 +445,63 @@ public final class TaskRecord {
             }
             if (!left) sb.append("  (all steps completed)\n");
         }
+        /* Files and commands belong to the PREVIOUS engine's sandbox. The new
+           engine has a fresh environment, so telling it "already done, skip it"
+           would leave it referencing files that do not exist. State where they
+           are and let it re-create what it still needs. */
         if (!artifacts.isEmpty()) {
-            sb.append("Files already on the engine:\n");
-            for (Artifact a : artifacts) sb.append("  - ").append(a.path).append('\n');
+            sb.append("Files created on the previous engine (not in your sandbox;")
+              .append(" re-create any you need):\n");
+            for (Artifact a : artifacts) {
+                sb.append("  - ").append(a.path);
+                if (!a.change.isEmpty()) sb.append(" (").append(a.change).append(')');
+                sb.append('\n');
+            }
+        }
+        if (!commands.isEmpty()) {
+            sb.append("Commands the previous engine ran (its environment, not yours):\n");
+            for (Command c : commands) {
+                sb.append("  - $ ").append(c.command)
+                  .append("  [exit ").append(c.exitCode).append("]\n");
+            }
+        }
+        if (!results.isEmpty()) {
+            sb.append("Decisions and results so far:\n");
+            for (String r : results) sb.append("  - ").append(r).append('\n');
         }
         if (!errors.isEmpty()) {
             sb.append("Failures so far:\n");
             for (String e : errors) sb.append("  - ").append(e).append('\n');
         }
         sb.append("Pick up from the first unfinished step and finish the task.");
+        return sb.toString();
+    }
+
+    /**
+     * What the next engine is actually sent when this task is handed over.
+     *
+     * Lives here rather than inline in ChatActivity so it can be tested: this is
+     * the string that decides whether engine B continues the job or answers the
+     * same question a second time, and getting it wrong is invisible until a
+     * user complains that the agent restarted.
+     *
+     * @param prompt  what the user originally asked
+     * @param partial text the previous engine had already streamed, if any
+     * @param to      the engine taking over, for the record
+     */
+    public synchronized String continuationPrompt(String prompt, String partial, String to) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(handoff());
+        sb.append("\n\n").append(prompt == null ? "" : prompt);
+        int n = partial == null ? 0 : partial.trim().length();
+        if (n > 0) {
+            sb.append("\n\n[The previous engine stopped mid-answer after ").append(n)
+              .append(" characters. Continue from exactly where it stopped. Do not ")
+              .append("repeat or restate what is already written below.]\n\n")
+              .append(partial.trim());
+            recordResult(n + " chars already streamed; continuing on engine "
+                    + (to == null ? "?" : to.toUpperCase(java.util.Locale.ROOT)));
+        }
         return sb.toString();
     }
 

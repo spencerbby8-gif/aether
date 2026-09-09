@@ -1592,26 +1592,38 @@ public class ChatActivity extends AppCompatActivity {
         boolean userStopped = cancel[0];
         boolean cancelled = "cancelled".equals(err[0]);
 
-        /* Nothing at all arrived and the engine let go on its own: the tunnel
-           died or the kernel went away. Try the next engine in A -> B -> C
-           rather than making the user press send again. */
-        if (!ok[0] && !cancelled && !userStopped && allowFailover && b.raw.length() == 0) {
+        /* The engine let go on its own -- the tunnel died or the kernel went
+           away. Try the next engine in A -> B -> C rather than making the user
+           press send again.
+
+           This used to require b.raw.length() == 0, so failover only happened
+           when NOTHING had arrived. An engine that dropped halfway through an
+           answer left the task truncated with no continuation at all -- the
+           "silently stops after partial work" failure. A partial answer is now
+           continued by the next engine rather than abandoned. */
+        final int partial = b.raw.length();
+        if (!ok[0] && !cancelled && !userStopped && allowFailover) {
             final String from = cachedSlot == null ? "?" : cachedSlot;
             final String reason = err[0];
             EngineRouter.Decision next = EngineRouter.failoverFrom(from, pollStates());
             if (next.ok()) {
                 ui.post(() -> pushNotice(b, "Engine " + from.toUpperCase(Locale.ROOT)
-                        + " dropped (" + reason + ") \u2014 failing over to "
-                        + next.slot.toUpperCase(Locale.ROOT)));
+                        + " dropped (" + reason + ") after " + partial + " chars \u2014 "
+                        + next.slot.toUpperCase(Locale.ROOT) + " is continuing the same task"));
                 forget();
                 remember(next.slot, next.url);
                 if (b.model != null) b.model.engine = next.slot;
                 /* The new engine has never seen this task. Hand it the goal and
                    what already succeeded, or it treats the same words as a fresh
                    question and repeats work that had already worked. */
+                /* Built by TaskRecord.continuationPrompt so the exact string is
+                   under test: the new engine is told to continue, and shown what
+                   already landed so it picks up mid-sentence instead of
+                   answering the same question a second time. */
                 String carry = wire;
                 if (current != null && current.task != null && !current.task.isTerminal()) {
-                    carry = current.task.handoff() + "\n\n" + wire;
+                    carry = current.task.continuationPrompt(
+                            wire, b.raw.toString(), next.slot);
                 }
                 streamWithFailover(next.url, carry, prompt, b, false, history);
                 return;
