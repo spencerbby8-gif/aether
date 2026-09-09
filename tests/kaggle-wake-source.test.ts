@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("fdc2f3fb43f23050cf700e602022b931191976630ca0ff5b1af59eedf64d13a8");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("144f4fd03fea8eb65e43f9fa12e1f09d036036c3e61c709eee39e9c262c82761");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -145,7 +145,11 @@ describe("engine source — rendering", () => {
        end the cell, so a failed boot releases the GPU instead of holding it for
        hours while Kaggle kept reporting the kernel as "running" -- which is what
        made the app's power switch sit on "turning on" for ever. */
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(86518);
+    /* 86518 -> 90843: the browser credential gate now requires a scoped grant
+       recorded by `authorize` for the page's host, instead of a `user_approved`
+       boolean the model could set for itself. `submit` is its own gated action,
+       and a completed sign-in drops the grant. */
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(90843);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
