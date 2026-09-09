@@ -90,6 +90,47 @@ public final class ChatCoreCheck {
         check("null input returns empty string",
                 TextNormalizer.normalize(null).isEmpty(), "null -> \"" + TextNormalizer.normalize(null) + "\"");
 
+        section("TextNormalizer -- the model's reasoning delimiters never reach the chat");
+
+        /* The exact shape measured live on engine C: a stray closing marker
+           inside an otherwise ordinary one-line answer. */
+        check("stray closing marker removed, answer kept",
+                TextNormalizer.normalize("Paris is the capital of France. </think>")
+                        .equals("Paris is the capital of France."),
+                "[" + TextNormalizer.normalize("Paris is the capital of France. </think>") + "]");
+
+        check("reasoning between a matched pair is dropped, answer kept",
+                TextNormalizer.normalize("The answer is 42.\n<think>let me count 40 + 2</think>\nDone.")
+                        .equals("The answer is 42.\n\nDone."),
+                "[" + TextNormalizer.normalize("The answer is 42.\n<think>let me count 40 + 2</think>\nDone.") + "]");
+
+        check("an unterminated opening marker still cannot leak",
+                TextNormalizer.normalize("Answer <think>reasoning that never ended")
+                        .equals("Answer reasoning that never ended"),
+                "[" + TextNormalizer.normalize("Answer <think>reasoning that never ended") + "]");
+
+        check("back-to-back reasoning blocks are both removed",
+                TextNormalizer.normalize("A<think>r1</think>B<think>r2</think>C").equals("ABC"),
+                "[" + TextNormalizer.normalize("A<think>r1</think>B<think>r2</think>C") + "]");
+
+        check("reasoning words do not survive into the answer",
+                !TextNormalizer.normalize("ok <think>withdraw the bold plan</think> done").contains("withdraw"),
+                "[" + TextNormalizer.normalize("ok <think>withdraw the bold plan</think> done") + "]");
+
+        check("the word think in ordinary prose is untouched",
+                TextNormalizer.normalize("I think this is right, don't you think?")
+                        .equals("I think this is right, don't you think?"),
+                "[" + TextNormalizer.normalize("I think this is right, don't you think?") + "]");
+
+        check("a less-than sign in real content survives",
+                TextNormalizer.normalize("if x < 10 then stop").equals("if x < 10 then stop"),
+                "[" + TextNormalizer.normalize("if x < 10 then stop") + "]");
+
+        check("stripping is idempotent",
+                TextNormalizer.stripThinkMarkers(TextNormalizer.stripThinkMarkers("A<think>r</think>B"))
+                        .equals(TextNormalizer.stripThinkMarkers("AB")),
+                "idempotence");
+
         section("TextNormalizer -- markdown flattened for a plain TextView");
 
         check("**bold** shown as words, not asterisks",

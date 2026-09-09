@@ -1,0 +1,25 @@
+AGENT CHAIN against https://martin-chairman-karma-linda.trycloudflare.com
+============================================================================================================
+
+A. PLAIN TEXT (no tools) x3
+  #        byte     actv   1st-tok    total  deltas  beats answer
+  1        0.2s     0.2s      1.4s     2.9s       8      1 'Paris is the capital of France. '
+  2        0.2s     0.2s      0.9s     4.0s      17      1 'Paris is the capital of France. </think>  Pa'
+  3        0.2s     0.2s      0.9s     2.2s       7      1 'The capital of France is Paris.'
+  -> median first-token 0.9s | median total 2.9s | decode 5.5 tok/s
+
+B. WEB SEARCH
+  #        byte     actv  1st-tool   1st-tok    total deltas per-tool
+  1        0.5s     0.5s     13.2s     21.1s    36.8s     86 web_search=1.0s
+       answer: 'Lagos, Nigeria had an estimated population of about 17.16 million in 2024 (metro area), per Macrotrends, which'
+  2        0.4s     0.4s     14.6s     22.6s    44.4s    119 web_search=1.0s
+       answer: "Lagos, Nigeria's 2024 metro area population was approximately 16.5 million (estimated, as 2025 was ~17.16 mill"
+
+C. RUN COMMAND
+  #        byte     actv  1st-tool   1st-tok    total deltas per-tool
+  1        0.2s     0.2s     14.7s     18.8s    21.1s     13 run_command=0.0s
+       answer: 'Output: START 6.12.90+ END'
+  2        0.4s     0.4s     16.4s     20.5s    22.6s     12 run_command=0.0s
+       answer: 'START, 6.12.90+, END'
+
+============================================================================================================

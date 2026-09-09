@@ -1,0 +1,96 @@
+{"gapMs": 501, "line": "{\"message\": {\"thinking\": \"\\u2699\\ufe0f agent step 1...\"}, \"done\": false}"}
+{"gapMs": 0, "line": "{\"message\": {\"thinking\": \"\\u23f3\"}, \"done\": false}"}
+{"gapMs": 9998, "line": "{\"message\": {\"thinking\": \"\\u23f3\"}, \"done\": false}"}
+{"gapMs": 2710, "line": "{\"message\": {\"thinking\": \"\\ud83d\\udee0\\ufe0f web_search({\\\"query\\\": \\\"population of Lagos Nigeria 2024\\\"})\"}, \"done\": false}"}
+{"gapMs": 996, "line": "{\"message\": {\"thinking\": \"\\u21b3 web_search returned 2669 chars\"}, \"done\": false}"}
+{"gapMs": 0, "line": "{\"message\": {\"thinking\": \"\\u2699\\ufe0f agent step 2...\"}, \"done\": false}"}
+{"gapMs": 1, "line": "{\"message\": {\"thinking\": \"\\u23f3\"}, \"done\": false}"}
+{"gapMs": 6893, "line": "{\"message\": {\"content\": \"L\"}, \"done\": false}"}
+{"gapMs": 189, "line": "{\"message\": {\"content\": \"agos\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \",\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \" Nigeria\"}, \"done\": false}"}
+{"gapMs": 183, "line": "{\"message\": {\"content\": \" had\"}, \"done\": false}"}
+{"gapMs": 179, "line": "{\"message\": {\"content\": \" an\"}, \"done\": false}"}
+{"gapMs": 186, "line": "{\"message\": {\"content\": \" estimated\"}, \"done\": false}"}
+{"gapMs": 187, "line": "{\"message\": {\"content\": \" population\"}, \"done\": false}"}
+{"gapMs": 190, "line": "{\"message\": {\"content\": \" of\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \" about\"}, \"done\": false}"}
+{"gapMs": 184, "line": "{\"message\": {\"content\": \" \"}, \"done\": false}"}
+{"gapMs": 179, "line": "{\"message\": {\"content\": \"1\"}, \"done\": false}"}
+{"gapMs": 185, "line": "{\"message\": {\"content\": \"7\"}, \"done\": false}"}
+{"gapMs": 185, "line": "{\"message\": {\"content\": \".\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \"1\"}, \"done\": false}"}
+{"gapMs": 184, "line": "{\"message\": {\"content\": \"6\"}, \"done\": false}"}
+{"gapMs": 183, "line": "{\"message\": {\"content\": \" million\"}, \"done\": false}"}
+{"gapMs": 168, "line": "{\"message\": {\"thinking\": \"\\u23f3\"}, \"done\": false}"}
+{"gapMs": 13, "line": "{\"message\": {\"content\": \" in\"}, \"done\": false}"}
+{"gapMs": 187, "line": "{\"message\": {\"content\": \" \"}, \"done\": false}"}
+{"gapMs": 183, "line": "{\"message\": {\"content\": \"2\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \"0\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \"2\"}, \"done\": false}"}
+{"gapMs": 184, "line": "{\"message\": {\"content\": \"4\"}, \"done\": false}"}
+{"gapMs": 185, "line": "{\"message\": {\"content\": \" (\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \"metro\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \" area\"}, \"done\": false}"}
+{"gapMs": 180, "line": "{\"message\": {\"content\": \"),\"}, \"done\": false}"}
+{"gapMs": 180, "line": "{\"message\": {\"content\": \" per\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \" Mac\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \"rot\"}, \"done\": false}"}
+{"gapMs": 178, "line": "{\"message\": {\"content\": \"rends\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \",\"}, \"done\": false}"}
+{"gapMs": 180, "line": "{\"message\": {\"content\": \" which\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \" notes\"}, \"done\": false}"}
+{"gapMs": 186, "line": "{\"message\": {\"content\": \" a\"}, \"done\": false}"}
+{"gapMs": 187, "line": "{\"message\": {\"content\": \" \"}, \"done\": false}"}
+{"gapMs": 183, "line": "{\"message\": {\"content\": \"3\"}, \"done\": false}"}
+{"gapMs": 180, "line": "{\"message\": {\"content\": \".\"}, \"done\": false}"}
+{"gapMs": 187, "line": "{\"message\": {\"content\": \"7\"}, \"done\": false}"}
+{"gapMs": 183, "line": "{\"message\": {\"content\": \"5\"}, \"done\": false}"}
+{"gapMs": 185, "line": "{\"message\": {\"content\": \"%\"}, \"done\": false}"}
+{"gapMs": 183, "line": "{\"message\": {\"content\": \" increase\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \" to\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \" \"}, \"done\": false}"}
+{"gapMs": 179, "line": "{\"message\": {\"content\": \"1\"}, \"done\": false}"}
+{"gapMs": 184, "line": "{\"message\": {\"content\": \"7\"}, \"done\": false}"}
+{"gapMs": 185, "line": "{\"message\": {\"content\": \",\"}, \"done\": false}"}
+{"gapMs": 186, "line": "{\"message\": {\"content\": \"1\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \"5\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \"6\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \",\"}, \"done\": false}"}
+{"gapMs": 184, "line": "{\"message\": {\"content\": \"0\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \"0\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \"0\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \" in\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \" \"}, \"done\": false}"}
+{"gapMs": 187, "line": "{\"message\": {\"content\": \"2\"}, \"done\": false}"}
+{"gapMs": 179, "line": "{\"message\": {\"content\": \"0\"}, \"done\": false}"}
+{"gapMs": 183, "line": "{\"message\": {\"content\": \"2\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \"5\"}, \"done\": false}"}
+{"gapMs": 180, "line": "{\"message\": {\"content\": \".\"}, \"done\": false}"}
+{"gapMs": 201, "line": "{\"message\": {\"content\": \"\\n\\n\"}, \"done\": false}"}
+{"gapMs": 213, "line": "{\"message\": {\"content\": \"Source\"}, \"done\": false}"}
+{"gapMs": 180, "line": "{\"message\": {\"content\": \":\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \" https\"}, \"done\": false}"}
+{"gapMs": 180, "line": "{\"message\": {\"content\": \"://\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \"www\"}, \"done\": false}"}
+{"gapMs": 183, "line": "{\"message\": {\"content\": \".mac\"}, \"done\": false}"}
+{"gapMs": 179, "line": "{\"message\": {\"content\": \"rot\"}, \"done\": false}"}
+{"gapMs": 179, "line": "{\"message\": {\"content\": \"rends\"}, \"done\": false}"}
+{"gapMs": 178, "line": "{\"message\": {\"content\": \".net\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \"/global\"}, \"done\": false}"}
+{"gapMs": 104, "line": "{\"message\": {\"thinking\": \"\\u23f3\"}, \"done\": false}"}
+{"gapMs": 78, "line": "{\"message\": {\"content\": \"-m\"}, \"done\": false}"}
+{"gapMs": 185, "line": "{\"message\": {\"content\": \"etrics\"}, \"done\": false}"}
+{"gapMs": 180, "line": "{\"message\": {\"content\": \"/c\"}, \"done\": false}"}
+{"gapMs": 179, "line": "{\"message\": {\"content\": \"ities\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \"/\"}, \"done\": false}"}
+{"gapMs": 180, "line": "{\"message\": {\"content\": \"2\"}, \"done\": false}"}
+{"gapMs": 183, "line": "{\"message\": {\"content\": \"2\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \"0\"}, \"done\": false}"}
+{"gapMs": 180, "line": "{\"message\": {\"content\": \"0\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \"7\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \"/l\"}, \"done\": false}"}
+{"gapMs": 181, "line": "{\"message\": {\"content\": \"agos\"}, \"done\": false}"}
+{"gapMs": 183, "line": "{\"message\": {\"content\": \"/pop\"}, \"done\": false}"}
+{"gapMs": 178, "line": "{\"message\": {\"content\": \"ulation\"}, \"done\": false}"}
+{"gapMs": 182, "line": "{\"message\": {\"content\": \"\"}, \"done\": true, \"done_reason\": \"stop\", \"eval_count\": 87, \"eval_duration\": 15723273000, \"total_duration\": 22614747530, \"prompt_eval_count\": 2093}"}

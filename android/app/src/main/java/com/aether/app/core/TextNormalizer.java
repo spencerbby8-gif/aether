@@ -52,6 +52,7 @@ public final class TextNormalizer {
         s = s.replace('\u00A0', ' ');
         s = CONTROL.matcher(s).replaceAll("");
         s = stripInvisible(s);
+        s = stripThinkMarkers(s);
         s = stripEmoji(s);
         s = markdownToPlain(s);
         s = collapseBlankLines(s);
@@ -106,6 +107,54 @@ public final class TextNormalizer {
             i += Character.charCount(cp);
         }
         return out.toString();
+    }
+
+    /** The model's own reasoning delimiters. Built in pieces only because a
+     *  literal marker in this source would be confusing to read; the strings
+     *  themselves are exactly the tags Qwen emits. */
+    private static final String THINK_OPEN = "<think>";
+    private static final String THINK_CLOSE = "</think>";
+
+    /**
+     * Remove the reasoning delimiters and the reasoning between a matched
+     * pair.
+     *
+     * WHY. The engines are Qwen reasoning builds and they emit these markers
+     * INSIDE the content stream, not in a separate channel. Measured live on
+     * engine C: a plain "what is the capital of France" reply arrived as
+     * 'Paris is the capital of France. </th''ink>  Pa...'. Nothing downstream
+     * handled it, so the marker was rendered verbatim in the user's chat.
+     *
+     * The reasoning between a pair is dropped here rather than displayed: on
+     * the native side the answer bubble is the product, and this normaliser's
+     * contract is to never show markup the model emitted about itself. An
+     * unterminated marker is removed as well, so a turn that ended
+     * mid-reasoning still cannot leak a tag.
+     *
+     * Applied to the whole accumulated buffer, never to a single delta, so a
+     * marker split across two chunks cannot survive: normalize() is called on
+     * the full buffer at every render.
+     */
+    public static String stripThinkMarkers(String s) {
+        if (s == null || s.isEmpty()) return "";
+        String out = s;
+        /* Matched pairs first, repeatedly: nested or back-to-back blocks. */
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            int open = out.indexOf(THINK_OPEN);
+            while (open >= 0) {
+                int close = out.indexOf(THINK_CLOSE, open + THINK_OPEN.length());
+                if (close < 0) break;
+                out = out.substring(0, open) + out.substring(close + THINK_CLOSE.length());
+                changed = true;
+                open = out.indexOf(THINK_OPEN);
+            }
+        }
+        /* Whatever is left is a stray marker with no pair: drop the tag only,
+         * never the text around it. */
+        out = out.replace(THINK_OPEN, "").replace(THINK_CLOSE, "");
+        return out;
     }
 
     private static boolean isDecorative(int cp) {

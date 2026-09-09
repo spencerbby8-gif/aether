@@ -1,0 +1,25 @@
+AGENT CHAIN against https://bug-actors-fax-background.trycloudflare.com
+============================================================================================================
+
+A. PLAIN TEXT (no tools) x3
+  #        byte     actv   1st-tok    total  deltas  beats answer
+  1        0.1s     0.1s     14.0s    15.3s       7      2 'The capital of France is Paris.'
+  2        0.1s     0.1s      0.9s     4.0s      17      1 'The capital of France is Paris. </think>  Th'
+  3        0.1s     0.1s      0.8s     2.2s       7      1 'Paris is the capital of France.'
+  -> median first-token 0.9s | median total 4.0s | decode 5.4 tok/s
+
+B. WEB SEARCH
+  #        byte     actv  1st-tool   1st-tok    total deltas per-tool
+  1        0.1s     0.1s     14.3s     24.3s    46.1s    119 web_search=0.8s
+       answer: "Lagos's 2024 metro area population was about 16.5 million (MetroTrends shows 17,156,000 in 2025, up 3.75% from"
+  2        0.3s     0.3s     14.6s     22.2s    47.5s    140 web_search=0.7s
+       answer: "Lagos, Nigeria's population was approximately 15.4 million in 2022 and estimated around 16–17 million by 2024,"
+
+C. RUN COMMAND
+  #        byte     actv  1st-tool   1st-tok    total deltas per-tool
+  1        0.1s     0.1s     15.3s     19.3s    22.9s     20 run_command=0.0s
+       answer: 'Output: START, kernel 6.12.90+, END (exit 0).'
+  2        0.4s     0.4s     13.5s     17.5s    19.5s     11 run_command=0.0s
+       answer: 'START 6.12.90+ END'
+
+============================================================================================================

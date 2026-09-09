@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("144f4fd03fea8eb65e43f9fa12e1f09d036036c3e61c709eee39e9c262c82761");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("833ebe05acef0281b56a3ff8673f994f5f1d27207abed6a950851d7098d5c00d");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -148,8 +148,13 @@ describe("engine source — rendering", () => {
     /* 86518 -> 90843: the browser credential gate now requires a scoped grant
        recorded by `authorize` for the page's host, instead of a `user_approved`
        boolean the model could set for itself. `submit` is its own gated action,
-       and a completed sign-in drops the grant. */
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(90843);
+       and a completed sign-in drops the grant.
+       90843 -> 91250: the boot warmup now pins the model at the context window
+       it will actually serve (NUM_CTX, declared above the warmup) and bounds
+       its own generation to 16 tokens. Ollama reloads the 15 GB model whenever
+       num_ctx changes between requests -- measured 10.8-11.8 s per switch -- so
+       warming at the default window made the user's first message pay a reload. */
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(91250);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
