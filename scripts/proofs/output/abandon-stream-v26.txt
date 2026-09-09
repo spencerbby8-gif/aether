@@ -1,0 +1,9 @@
+  round  abandoned-after   then a normal request
+      1    126 chars yes       TTFT=   7.8s
+      2    124 chars yes       TTFT=   2.8s
+      3    120 chars yes       TTFT=   2.8s
+      4    123 chars yes       TTFT=   3.3s
+      5    121 chars yes       TTFT=   2.8s
+
+  first=7.8s  worst=7.8s  last=2.8s
+  PASS  worst TTFT after 5 abandoned requests is under 30s

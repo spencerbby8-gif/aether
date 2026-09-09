@@ -10,9 +10,8 @@
 [ 362s] announced=[] serving=[]
 [ 402s] announced=[] serving=[]
 [ 442s] announced=[] serving=[]
-  C announced but not serving yet: /api/ps -1 models=0
-[ 483s] announced=['C'] serving=[]
-  B SERVING  https://contests-previously-alloy-close.trycloudflare.com  (/api/ps 200, 1 model(s))
-  C announced but not serving yet: /api/ps -1 models=0
-[ 523s] announced=['B', 'C'] serving=['B']
-SERVING: {"B": "https://contests-previously-alloy-close.trycloudflare.com"}
+[ 483s] announced=[] serving=[]
+[ 523s] announced=[] serving=[]
+[ 563s] announced=[] serving=[]
+[ 604s] announced=[] serving=[]
+[ 644s] announced=[] serving=[]
