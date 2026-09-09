@@ -671,6 +671,18 @@ public class SettingsActivity extends AppCompatActivity {
         transitions.incrementAndGet();
         render();
         actionExec.execute(() -> {
+            /* Any instance still serving for this engine is stood down first.
+               Without this, each wake added another GPU session Kaggle cannot be
+               told to stop, until the account hit its session cap and every
+               later push was refused. */
+            int stood = EngineCore.releasePrevious(e, cfg.offKey, cfg.beaconTopic,
+                    cfg.beaconSecret, 3600, 20_000);
+            if (stood > 0) {
+                telemetry("released " + stood + " previous instance(s) of engine " + up
+                        + " before pushing");
+                ui.post(() -> announce("Engine " + up + ": stood down " + stood
+                        + " previous instance" + (stood == 1 ? "" : "s") + " first"));
+            }
             try {
                 EngineCore.kernelPush(e, Credentials.renderNotebook(
                         Credentials.notebookTemplate(this), cfg, e.slot),

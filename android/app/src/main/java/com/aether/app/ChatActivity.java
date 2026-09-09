@@ -1431,6 +1431,11 @@ public class ChatActivity extends AppCompatActivity {
                 ui.post(() -> pushNotice(b, "Engine " + e.slot.toUpperCase(Locale.ROOT)
                         + " is off \u2014 waking it now. This takes a few minutes; your message"
                         + " will send once it is live."));
+                /* Release whatever is still running for this engine first.
+                   Kaggle leaves the previous version alive, and a second live
+                   session is what makes the next push come back refused. */
+                EngineCore.releasePrevious(e, cfg.offKey, cfg.beaconTopic,
+                        cfg.beaconSecret, 3600, 20_000);
                 try {
                     EngineCore.kernelPush(e, Credentials.renderNotebook(
                             Credentials.notebookTemplate(ChatActivity.this), cfg, e.slot),

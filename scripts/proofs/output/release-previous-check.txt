@@ -1,0 +1,13 @@
+== what is serving for engine C right now ==
+  live: c -> https://revenue-waterproof-projector-chevy.trycloudflare.com (68s old)
+  ok  1 instance(s) of engine C answering /api/ps   [1 live]
+
+== the real call the wake path now makes first ==
+  releasePrevious -> 1 in 366ms
+  ok  it stood down every instance it found   [1 of 1]
+
+== verified independently, not from the return value ==
+  dead       https://revenue-waterproof-projector-chevy.trycloudflare.com
+  ok  no instance still answers /api/ps   [0 still up]
+
+3 passed, 0 failed

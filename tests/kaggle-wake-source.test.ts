@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("640a57245bfbe0fd560ad753de3995a0604c52918c04b281ad73ac19d540fe92");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("70a1410e7f9a7180267600b8162254feba0c35455af332a35b284af696997e44");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -127,10 +127,15 @@ describe("engine source — rendering", () => {
      * 43521 -> 46275: history_window() replaced the naive msgs[-24:] slice that
      * was dropping the user query and hard-failing the chat template with
      * "No user query found in messages." on multi-tool turns.
+     * 83923 -> 84222: the agent's requests to Ollama now carry num_predict.
+     * They set num_ctx but no output bound, so a degenerate prompt could
+     * generate until the 16384-token context was exhausted -- measured holding
+     * Ollama's single slot long enough that a 25-character prompt waited
+     * 87-103s for its first token.
      * scripts/verify-engine-source.mjs computes the same figure independently.
      */
     const rendered = renderAetherNotebook(DUMMY);
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(83923);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(84222);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
@@ -383,5 +388,46 @@ describe("engine source — slot tagging on the beacon", () => {
     expect(() =>
       renderAetherNotebook({ ...DUMMY, slot: "" }),
     ).toThrow(/slot/);
+  });
+});
+
+describe("engine source — the APK and the server push the same notebook", () => {
+  /**
+   * The notebook lives in two places: this module's Base64 blob (what the web
+   * app and scripts/proofs/wake-engines.py push) and the Android asset (what the
+   * APK ships). Every patch script in scripts/ edits the asset, so the two drift
+   * apart the moment anyone forgets to re-run scripts/sync-engine-source.mjs.
+   *
+   * That is not hypothetical. A num_predict cap was applied to the asset and
+   * never to the blob, so no engine ever ran it while the APK appeared patched.
+   */
+  it("the shipped Android asset is byte-identical to the embedded template", () => {
+    const asset = readFileSync(
+      "android/app/src/main/assets/aether-notebook-template.json",
+      "utf8",
+    );
+    // Compare the parsed notebooks, not the raw bytes: the asset may be
+    // formatted differently on disk without changing what the engine runs.
+    expect(JSON.parse(asset)).toEqual(JSON.parse(aetherNotebookTemplate()));
+  });
+
+  it("the Python every engine runs matches, cell for cell", () => {
+    const cells = (raw: string) =>
+      (JSON.parse(raw).cells as Array<{ source?: string | string[] }>).map((c) =>
+        Array.isArray(c.source) ? c.source.join("") : (c.source ?? ""),
+      );
+    const asset = cells(
+      readFileSync(
+        "android/app/src/main/assets/aether-notebook-template.json",
+        "utf8",
+      ),
+    );
+    const embedded = cells(aetherNotebookTemplate());
+    expect(asset.length).toBe(embedded.length);
+    for (let i = 0; i < embedded.length; i++) {
+      expect(asset[i], `cell ${i} differs -- run node scripts/sync-engine-source.mjs`).toBe(
+        embedded[i],
+      );
+    }
   });
 });

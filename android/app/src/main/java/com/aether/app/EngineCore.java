@@ -520,6 +520,46 @@ public final class EngineCore {
      * terminated. That was a live bug in confirmedDown() and in the Settings
      * shutdown path, which both tested !isLive().
      */
+    /**
+     * Stand down every instance of this engine that is still serving, BEFORE a
+     * new one is pushed.
+     *
+     * WHY THIS EXISTS. Kaggle does not stop the previous kernel version when a
+     * new one is pushed, and there is no API to list or stop the old ones
+     * (kaggle-api issue 388). So every wake left another GPU session alive on
+     * the same account. Observed for real: engine B and engine C each had TWO
+     * instances answering /api/ps 200 on different tunnel URLs at the same time,
+     * and the next push was refused with "Maximum batch GPU session count of 2
+     * reached" -- which reads exactly like a permanently stuck engine.
+     *
+     * Pressing "off" in the UI only ever reached the one URL the app happened to
+     * know, so the account kept paying for the others. The old instances still
+     * answer /off on the tunnel they announced, so look those URLs up in the
+     * beacon and ask each of them to stand down first.
+     *
+     * Best effort by design: a wake must not fail because an old tunnel is
+     * already gone. Returns how many instances accepted the shutdown.
+     */
+    public static int releasePrevious(Engine e, String offKey, String topic, String secret,
+                                      int sinceSeconds, int timeoutMs) {
+        if (e == null || topic == null || topic.isEmpty()) return 0;
+        int released = 0;
+        try {
+            for (LiveLink l : liveLinks(topic, secret, sinceSeconds, timeoutMs)) {
+                if (l.slot != null && !l.slot.equals(e.slot)) continue;  // another engine
+                if (!health(l.url, timeoutMs).isLive()) continue;        // already gone
+                try {
+                    if (off(l.url, offKey, timeoutMs) == 200) released++;
+                } catch (Exception ignored) {
+                    /* One unreachable instance must not block the wake. */
+                }
+            }
+        } catch (Exception ignored) {
+            /* No beacon answer at all: nothing we can do, push anyway. */
+        }
+        return released;
+    }
+
     public static Shutdown shutDownVerified(String url, String offKey, int timeoutMs,
                                             int maxChecks, int gapMs) throws EngineException {
         int code = off(url, offKey, timeoutMs);

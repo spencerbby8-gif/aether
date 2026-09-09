@@ -1,0 +1,4 @@
+  1 short                    TTFT=  13.2s  out=19 chars  elapsed=  14.0s
+  2 short                    TTFT=   0.9s  out=18 chars  elapsed=   1.5s
+  3 short                    TTFT=  20.6s  out=3 chars  elapsed=  21.2s
+  4 short                    TTFT=   3.5s  out=19 chars  elapsed=   4.3s
