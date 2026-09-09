@@ -218,6 +218,27 @@ public final class TaskRecord {
      */
     public int maxStepAttempts = 3;
 
+    /**
+     * The plan's dependency graph, when the task was decomposed into steps that
+     * depend on each other.
+     *
+     * Null for a simple turn: a question with no sub-steps does not need a
+     * schedule, and inventing one would only add a way to be wrong.
+     */
+    public TaskGraph graph;
+
+    /** Decompose the goal into steps with explicit dependencies. */
+    public synchronized boolean planGraph(java.util.List<TaskGraph.Spec> specs) {
+        TaskGraph g = TaskGraph.build(specs);
+        if (!g.isValid()) {
+            recordError("the plan cannot run: " + g.buildError());
+            return false;
+        }
+        graph = g;
+        touch();
+        return true;
+    }
+
     public synchronized int startStep(String name) {
         int i = indexOf(name);
         if (i < 0) { plan(name); i = steps.size() - 1; }
@@ -313,6 +334,18 @@ public final class TaskRecord {
         if (checks.isEmpty()) return false;
         if (!allStepsSettled()) return false;
         for (Step s : steps) if (Step.FAILED.equals(s.status)) return false;
+        /* When the goal was decomposed, the decomposition has to have actually
+           finished. A tool returning successfully is not the objective being
+           met, and a graph with work still pending is the clearest possible
+           signal that it was not. */
+        if (graph != null) {
+            if (graph.isDeadlocked()) {
+                recordError("the plan deadlocked: nothing left to run but work remains");
+                return false;
+            }
+            if (!graph.allSettled()) return false;
+            if (!"completed".equals(graph.outcome())) return false;
+        }
         phase = Phase.COMPLETED;
         touch();
         return true;
@@ -418,6 +451,22 @@ public final class TaskRecord {
      * settled facts go in it -- a new engine must not be told a step succeeded
      * when it did not.
      */
+    /** How the decomposed plan went, for the final report. Empty if there was no plan. */
+    public synchronized String scheduleSummary() {
+        if (graph == null) return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("plan: ").append(graph.size()).append(" steps in ")
+          .append(graph.waves().size()).append(" wave(s)");
+        int parallel = 0;
+        for (java.util.List<String> w : graph.waves()) if (w.size() > 1) parallel += w.size();
+        if (parallel > 0) sb.append(", ").append(parallel).append(" ran in parallel");
+        String out = graph.outcome();
+        if (out != null) sb.append(" -> ").append(out);
+        java.util.List<String> left = graph.unfinished();
+        if (!left.isEmpty()) sb.append("; unfinished: ").append(String.join(", ", left));
+        return sb.toString();
+    }
+
     public synchronized String handoff() {
         StringBuilder sb = new StringBuilder();
         sb.append("CONTINUE THIS TASK, do not restart it.\n");
@@ -516,6 +565,7 @@ public final class TaskRecord {
         o.put("updatedAt", updatedAt);
         o.put("closeReason", closeReason);
         o.put("maxStepAttempts", maxStepAttempts);
+        if (graph != null) o.put("graph", graph.toJson());
         if (engine != null) o.put("engine", engine);
         JSONArray a = new JSONArray();
         for (Step s : steps) a.put(s.toJson());
@@ -543,6 +593,8 @@ public final class TaskRecord {
         }
         t.closeReason = o.optString("closeReason", "");
         t.maxStepAttempts = o.optInt("maxStepAttempts", 3);
+        JSONObject go = o.optJSONObject("graph");
+        if (go != null) t.graph = TaskGraph.fromJson(go);
         t.engine = o.has("engine") && !o.isNull("engine") ? o.optString("engine") : null;
         JSONArray a = o.optJSONArray("steps");
         if (a != null) for (int i = 0; i < a.length(); i++) t.steps.add(Step.fromJson(a.getJSONObject(i)));

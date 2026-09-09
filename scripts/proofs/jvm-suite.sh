@@ -65,6 +65,7 @@ PROOFS=(
   "EngineLabelsProof|"
   "TaskRecordProof|"
   "TaskTrackerProof|"
+  "TaskGraphProof|"
   "WebImagesProof|"
 )
 

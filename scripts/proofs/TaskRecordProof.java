@@ -257,6 +257,69 @@ public class TaskRecordProof {
         chk("whitespace-only partial counts as nothing",
                 !carryTask.continuationPrompt("x", "   \n  ", "b").contains("mid-answer"), "");
 
+        System.out.println("\n== a decomposed goal must actually finish ==");
+        TaskRecord gt = new TaskRecord("g1", "research, compare and report");
+        gt.moveTo(TaskRecord.Phase.EXECUTING);
+        java.util.List<com.aether.app.core.TaskGraph.Spec> plan = new java.util.ArrayList<>();
+        plan.add(new com.aether.app.core.TaskGraph.Spec("s1", "search source one"));
+        plan.add(new com.aether.app.core.TaskGraph.Spec("s2", "search source two"));
+        plan.add(new com.aether.app.core.TaskGraph.Spec("s3", "compare", "s1", "s2"));
+        chk("the plan is accepted", gt.planGraph(plan), String.valueOf(gt.graph));
+        chk("two steps can start at once", gt.graph.runnable().size() == 2,
+                gt.graph.runnable().size() + " runnable");
+        gt.recordCheck("read the report back");
+        chk("completion is REFUSED while the plan is unfinished", !gt.complete(),
+                gt.phase.name());
+        chk("the task is not left in a terminal state by that refusal",
+                !gt.isTerminal(), gt.phase.name());
+
+        gt.graph.markRunning("s1"); gt.graph.markDone("s1", "4 results");
+        gt.graph.markRunning("s2"); gt.graph.markDone("s2", "6 results");
+        gt.graph.markRunning("s3"); gt.graph.markDone("s3", "agreed");
+        chk("completion is allowed once every step is done", gt.complete(), gt.phase.name());
+        chk("the report says what the schedule did",
+                gt.scheduleSummary().contains("3 steps in 2 wave(s)")
+                        && gt.scheduleSummary().contains("2 ran in parallel"),
+                gt.scheduleSummary());
+
+        System.out.println("\n== a plan that fails blocks completion ==");
+        TaskRecord gf = new TaskRecord("g2", "build and ship");
+        java.util.List<com.aether.app.core.TaskGraph.Spec> p2 = new java.util.ArrayList<>();
+        p2.add(new com.aether.app.core.TaskGraph.Spec("build", "build it"));
+        p2.add(new com.aether.app.core.TaskGraph.Spec("ship", "ship it", "build"));
+        gf.planGraph(p2);
+        gf.recordCheck("looked at the output");
+        gf.graph.markRunning("build");
+        gf.graph.markFailed("build", "compile error");
+        gf.graph.propagateFailure("build");
+        chk("a failed step blocks completion", !gf.complete(), gf.phase.name());
+        chk("the summary names the unfinished work",
+                gf.scheduleSummary().contains("unfinished"), gf.scheduleSummary());
+
+        System.out.println("\n== a plan that cannot run is refused at the door ==");
+        TaskRecord gb = new TaskRecord("g3", "impossible plan");
+        java.util.List<com.aether.app.core.TaskGraph.Spec> bad = new java.util.ArrayList<>();
+        bad.add(new com.aether.app.core.TaskGraph.Spec("a", "A", "ghost"));
+        chk("planGraph refuses it", !gb.planGraph(bad), String.valueOf(gb.graph));
+        chk("no graph is attached", gb.graph == null, String.valueOf(gb.graph));
+        chk("the reason is recorded as an error",
+                gb.errors.toString().contains("cannot run"), gb.errors.toString());
+
+        System.out.println("\n== the plan survives with the task ==");
+        TaskRecord gp = new TaskRecord("g4", "persisted plan");
+        gp.planGraph(plan);
+        gp.graph.markRunning("s1");
+        gp.graph.markDone("s1", "done");
+        TaskRecord gpBack = TaskRecord.fromJson(gp.toJson());
+        chk("the graph comes back", gpBack.graph != null, "present");
+        chk("its dependencies come back", gpBack.graph.get("s3").deps.contains("s1"),
+                String.valueOf(gpBack.graph.get("s3").deps));
+        chk("its states come back", "done".equals(gpBack.graph.get("s1").state),
+                gpBack.graph.toString());
+        chk("a task with no graph still round-trips",
+                TaskRecord.fromJson(new TaskRecord("g5", "plain").toJson()).graph == null,
+                "null");
+
         System.out.println("\n" + passed + " passed, " + failed + " failed");
         if (failed > 0) System.exit(1);
     }
