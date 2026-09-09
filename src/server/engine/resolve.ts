@@ -245,6 +245,13 @@ export interface DiscoverResult {
   checked: number;
   /** True when a kernel is booting/queued (only knowable with credentials). */
   waking: boolean;
+  /**
+   * Why the engine is not live, in words the UI can show.
+   *
+   * "Waking" with no reason behind it is indistinguishable from a hang, which
+   * is exactly what the user sees as a switch stuck on "turning on".
+   */
+  wakeDetail?: string;
   /** How long the live determination took (ms) — performance telemetry. */
   latencyMs: number;
   /** Slot of the live engine when it was attributed. */
@@ -269,6 +276,66 @@ export function markWakeDispatched(slot?: EngineId): void {
   else for (const id of ENGINE_IDS) wakePushAt.set(id, Date.now());
 }
 
+/**
+ * How recent a boot stage has to be to count as a boot still in progress.
+ *
+ * A full boot measures 4-15 minutes, so anything older than this is a kernel
+ * that either finished, died, or is one of the old builds that hung on failure
+ * while Kaggle kept reporting it as running.
+ */
+const BOOT_STAGE_MAX_MIN = 25;
+
+interface BootStage {
+  slot: EngineId | null;
+  stage: string;
+  ageMinutes: number;
+  failed: boolean;
+}
+
+let bootStageCache: { at: number; value: BootStage | null } | null = null;
+
+/**
+ * The newest `stage:` line the engine published, or null.
+ *
+ * The engine announces its progress ("downloading", "pulling", "warming up")
+ * and, when a boot fails, "FAILED: <reason>". Reading that is what lets the
+ * status endpoint tell a real boot apart from a kernel that is running but
+ * never going to serve anything -- which Kaggle reports identically.
+ */
+async function latestBootStage(timeoutMs = 12_000): Promise<BootStage | null> {
+  if (bootStageCache && Date.now() - bootStageCache.at < 30_000) return bootStageCache.value;
+  const primary = beaconUrl();
+  let value: BootStage | null = null;
+  if (primary) {
+    try {
+      const res = await fetchJson(
+        `${primary.replace(/\/+$/, "")}/requests?sorting=newest`, {}, timeoutMs);
+      const items =
+        (res?.json as { data?: Array<{ query?: { m?: string }; created_at?: string }> })?.data ?? [];
+      for (const it of items) {
+        const m = it.query?.m ?? "";
+        const at = m.indexOf("stage:");
+        if (at < 0) continue;
+        const stage = m.slice(at + 6).trim().split("\n")[0].slice(0, 160);
+        const ageMinutes = Math.round(
+          (Date.now() - new Date(it.created_at ?? 0).getTime()) / 60_000);
+        // Sorted newest-first, so the first stage line wins.
+        value = {
+          slot: slotFromText(m),
+          stage,
+          ageMinutes,
+          failed: stage.toUpperCase().startsWith("FAILED"),
+        };
+        break;
+      }
+    } catch {
+      /* An unreadable beacon must not invent a boot state. */
+    }
+  }
+  bootStageCache = { at: Date.now(), value };
+  return value;
+}
+
 function isWakeInFlight(slot?: EngineId): boolean {
   const now = Date.now();
   if (slot) {
@@ -281,6 +348,7 @@ function isWakeInFlight(slot?: EngineId): boolean {
 /** Test hook: clear caches between scenarios. */
 export function resetDiscoveryCache(): void {
   discoveryCache = null;
+  bootStageCache = null;
   wakePushAt.clear();
   healthCache = null;
 }
@@ -345,21 +413,41 @@ export async function discoverAlive(): Promise<DiscoverResult> {
 
   /* No live engine. Is a boot in progress? */
   let waking = isWakeInFlight();
+  let wakeDetail = "";
   if (!waking) {
-    try {
-      for (const acc of accounts()) {
-        const st = await kernelStatus(acc, 4_000);
-        if (st === "queued" || st === "starting" || st === "running") {
-          waking = true;
-          break;
-        }
-      }
-    } catch {
+    /* A kernel Kaggle calls "running" is NOT necessarily booting. A failed
+       boot used to hang in a keep-alive loop and keep reporting "running" for
+       hours, and reading that as a boot in progress is what left the switch
+       stuck on "turning on". So "running" now has to be corroborated by a
+       recent stage announcement from the engine itself. */
+    const stage = await latestBootStage();
+    if (stage?.failed) {
       waking = false;
+      wakeDetail = stage.stage;
+    } else if (stage && stage.ageMinutes <= BOOT_STAGE_MAX_MIN) {
+      waking = true;
+      wakeDetail = stage.stage;
+    } else {
+      try {
+        for (const acc of accounts()) {
+          const st = await kernelStatus(acc, 4_000);
+          /* Only "queued" and "starting" are unambiguously a boot that has not
+             begun serving yet. */
+          if (st === "queued" || st === "starting") {
+            waking = true;
+            wakeDetail = `kernel ${st} on ${acc.user}`;
+            break;
+          }
+        }
+      } catch {
+        waking = false;
+      }
+      if (!waking && stage) wakeDetail = stage.stage;
     }
   }
   const result: DiscoverResult = {
     alive: false,
+    wakeDetail,
     url: null,
     model: null,
     checked: links.length,

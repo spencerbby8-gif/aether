@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("7cbcc865eede4fb81de15e5ee983fd009b0114b64ea1d32185c4a49a0db27f86");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("fdc2f3fb43f23050cf700e602022b931191976630ca0ff5b1af59eedf64d13a8");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -140,7 +140,12 @@ describe("engine source — rendering", () => {
      * scripts/verify-engine-source.mjs computes the same figure independently.
      */
     const rendered = renderAetherNotebook(DUMMY);
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(84651);
+    /* 84651 -> 86518: the four "FAILED: ... - alive for beacon" branches no
+       longer hang in `while True: time.sleep(300)`. They announce the reason and
+       end the cell, so a failed boot releases the GPU instead of holding it for
+       hours while Kaggle kept reporting the kernel as "running" -- which is what
+       made the app's power switch sit on "turning on" for ever. */
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(86518);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
