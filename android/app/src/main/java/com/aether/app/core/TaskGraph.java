@@ -334,6 +334,25 @@ public final class TaskGraph {
      * outstanding and no verdict, which is the failure the user actually sees as
      * an agent that quietly stopped.
      */
+    /**
+     * Set when the objective was met before every step had to run.
+     *
+     * Early stopping is success, not cancellation: if the answer is already in
+     * hand, the steps left over were unnecessary rather than broken. Without
+     * this, {@link #outcome()} reads any skipped step as a cancellation and a
+     * task that finished correctly is reported as one that did not.
+     */
+    public boolean goalSatisfied;
+
+    /** Record that the goal is met; skipped work is then unnecessary, not lost. */
+    public void markGoalSatisfied(String why) {
+        goalSatisfied = true;
+        satisfiedReason = why == null ? "" : why.trim();
+    }
+
+    /** Why the task was allowed to stop early. */
+    public String satisfiedReason = "";
+
     public String outcome() {
         if (buildError != null) return "invalid";
         if (!allSettled()) return null;
@@ -343,7 +362,10 @@ public final class TaskGraph {
             else if (SKIPPED.equals(n.state)) anySkipped = true;
             else anyDone = true;
         }
-        if (anyFailed) return anyDone ? "failed" : "failed";
+        /* goalSatisfied defaults false, so every plan that never stopped early
+           behaves exactly as it did before this flag existed. */
+        if (goalSatisfied && !anyFailed) return "completed";
+        if (anyFailed) return "failed";
         if (anySkipped) return "cancelled";
         return "completed";
     }
@@ -373,6 +395,8 @@ public final class TaskGraph {
     public JSONObject toJson() throws JSONException {
         JSONObject o = new JSONObject();
         if (buildError != null) o.put("buildError", buildError);
+        if (goalSatisfied) o.put("goalSatisfied", true);
+        if (!satisfiedReason.isEmpty()) o.put("satisfiedReason", satisfiedReason);
         JSONArray a = new JSONArray();
         for (Node n : nodes.values()) {
             JSONObject no = new JSONObject();
@@ -422,6 +446,11 @@ public final class TaskGraph {
         }
         if (o.has("buildError") && !o.isNull("buildError")) {
             g.buildError = o.optString("buildError");
+        }
+        /* The early stop has to survive a checkpoint, or a resumed task would
+           re-do the work the previous engine had already satisfied. */
+        if (o.optBoolean("goalSatisfied", false)) {
+            g.markGoalSatisfied(o.optString("satisfiedReason", ""));
         }
         return g;
     }

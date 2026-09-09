@@ -279,6 +279,25 @@ public final class TaskRecord {
         return true;
     }
 
+    /**
+     * Close a step as SKIPPED rather than failed.
+     *
+     * Needed because a step that never had to run is not a step that broke.
+     * Recording it as failed would make {@link #complete()} refuse a task that
+     * finished correctly, which is how a correct early stop ends up reported as
+     * an error. Unknown names are ignored rather than invented.
+     */
+    public synchronized void skipStep(String name, String why) {
+        int i = indexOf(name);
+        if (i < 0) return;
+        Step s = steps.get(i);
+        if (s.settled()) return;
+        s.status = Step.SKIPPED;
+        s.detail = why == null ? "" : why.trim();
+        s.endedAt = System.currentTimeMillis();
+        touch();
+    }
+
     public synchronized void recordArtifact(String path, String change, long bytes) {
         if (path == null || path.trim().isEmpty()) return;
         artifacts.add(new Artifact(path, change, bytes));

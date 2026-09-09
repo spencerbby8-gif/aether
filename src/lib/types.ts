@@ -254,6 +254,21 @@ export interface PlanStepSpec {
   /** Tool the planner intends to use, if any (validated against the registry). */
   tool?: string;
   intent?: string;
+  /**
+   * Steps that must finish before this one can start.
+   *
+   * Without this a plan is a flat list and the only available order is the one
+   * it was written in, which means no independent work can ever overlap.
+   */
+  dependsOn?: string[];
+  /**
+   * Whether this step may run at the same time as others.
+   *
+   * Reads, searches and fetches are safe. Anything that writes a file, spawns a
+   * process or mutates shared state is not. Omitting it means serial, so
+   * forgetting to mark a step leaves it safe rather than racy.
+   */
+  parallelSafe?: boolean;
 }
 
 export interface TaskStep {
@@ -263,6 +278,12 @@ export interface TaskStep {
   attempts: number;
   tool?: string;
   intent?: string;
+  /** Prerequisites that must be done before this step may start. */
+  dependsOn?: string[];
+  /** Whether this step was allowed to overlap with others. */
+  parallelSafe?: boolean;
+  /** Which dependency wave the step belongs to, for progress display. */
+  wave?: number;
   result?: string;
   error?: string;
   startedAt?: number;

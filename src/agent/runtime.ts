@@ -8,6 +8,7 @@ import type {
 } from "@/lib/types";
 import { anySignal, sleep, truncate, uid } from "@/lib/utils";
 import type { AgentModel, StepDecision } from "./model";
+import { findCycle, partitionBySafety, planWaves, runnableSteps, skipUnrunnable } from "./task-graph";
 import type { ToolRegistry } from "./tools";
 
 /**
@@ -39,6 +40,14 @@ export interface RuntimeOptions {
   maxStepAttempts?: number;
   /** How many invalid-tool-call corrections the model may try per step. */
   maxCorrections?: number;
+  /**
+   * How many independent steps may run at once.
+   *
+   * A real limit rather than an unbounded fan-out: each concurrent step costs a
+   * model call and a tool invocation, and on a single-engine backend they queue
+   * anyway, so a large number buys latency and nothing else.
+   */
+  maxParallelSteps?: number;
   modelTimeoutMs?: number;
   toolTimeoutMs?: number;
   onEvent: (event: AgentEvent) => void;
@@ -168,31 +177,142 @@ export class AgentRuntime {
         model.plan({ goal: this.task.goal, context: this.opts.context, tools: this.opts.tools.schemas() }, signal),
       "planning",
     );
-    this.task.steps = plan.steps.map((spec) => ({
-      id: spec.id || uid(),
-      title: truncate(spec.title, 120) || "Step",
-      state: "pending" as const,
-      attempts: 0,
-      tool: spec.tool,
-      intent: spec.intent,
-    }));
+    const known = new Set(plan.steps.map((spec) => spec.id || ""));
+    this.task.steps = plan.steps.map((spec) => {
+      const id = spec.id || uid();
+      /* Trust nothing the planner asserts about the graph. A dependency on a
+         step that does not exist, or on itself, would make the step permanently
+         unrunnable -- so drop those rather than let a bad plan wedge the task. */
+      const deps = (spec.dependsOn ?? []).filter((d) => known.has(d) && d !== id);
+      return {
+        id,
+        title: truncate(spec.title, 120) || "Step",
+        state: "pending" as const,
+        attempts: 0,
+        tool: spec.tool,
+        intent: spec.intent,
+        dependsOn: deps,
+        parallelSafe: spec.parallelSafe === true,
+      };
+    });
+
+    /* A cyclic plan has no runnable step at all, so it would deadlock before it
+       started. Falling back to no dependencies keeps the task moving in written
+       order, which is slower but correct, and says so out loud. */
+    const cycle = findCycle(this.task.steps);
+    if (cycle) {
+      this.note(`the plan contained a dependency loop (${cycle.join(" -> ")}); running steps in order`);
+      for (const s of this.task.steps) s.dependsOn = [];
+    }
+    const waves = planWaves(this.task.steps);
+    waves.forEach((wave, i) => {
+      for (const id of wave) {
+        const step = this.task.steps.find((s) => s.id === id);
+        if (step) step.wave = i;
+      }
+    });
+
     this.emit({
       type: "plan",
       taskId: this.task.id,
       steps: this.task.steps.map((s) => ({ id: s.id, title: s.title, tool: s.tool })),
     });
-    this.log(`Plan ready — ${this.task.steps.length} step(s).`);
+    const parallelWaves = waves.filter((w) => w.length > 1).length;
+    this.log(
+      `Plan ready — ${this.task.steps.length} step(s) in ${waves.length} wave(s)`
+        + (parallelWaves > 0 ? `, ${parallelWaves} of them parallel` : "") + ".",
+    );
     this.snapshot();
   }
 
+  /**
+   * Run the plan wave by wave.
+   *
+   * Steps whose prerequisites are done and which are marked parallel-safe run
+   * concurrently; everything else runs one at a time. A step that fails skips
+   * the work downstream of it rather than leaving it pending, so the loop always
+   * reaches an end instead of waiting on something that can never start.
+   */
   private async executeLoop(): Promise<void> {
+    /* A step failure must still fail the task. Swallowing it here would let a
+       run report "completed" after its own steps broke, which is the one thing
+       the task layer exists to prevent. */
+    let firstError: unknown = null;
     for (;;) {
       await this.gate();
       this.checkAbort();
-      const step = this.task.steps.find((s) => s.state === "pending");
-      if (!step) break;
-      await this.runStep(step.id);
-      this.snapshot();
+
+      const ready = runnableSteps(this.task.steps);
+      if (ready.length === 0) {
+        /* Nothing can start. Either the plan is finished or it is blocked behind
+           a failure -- skip what can never run so the task can reach a truthful
+           end state instead of reporting unfinished work for ever. */
+        const skipped = skipUnrunnable(this.task.steps, "skipped: a prerequisite did not complete");
+        if (skipped.length > 0) {
+          this.note(`${skipped.length} step(s) skipped because a prerequisite failed`);
+          this.snapshot();
+        }
+        break;
+      }
+
+      const { parallel, serial } = partitionBySafety(ready);
+      const limit = this.opts.maxParallelSteps ?? 3;
+
+      /* Independent, read-only work goes first and overlaps, capped. */
+      for (let i = 0; i < parallel.length; i += limit) {
+        this.checkAbort();
+        const batch = parallel.slice(i, i + limit);
+        if (batch.length > 1) {
+          this.note(`running ${batch.length} steps in parallel`);
+          /* allSettled, not all: one failure must not cancel the siblings that
+             are already in flight, and each step records its own outcome. */
+          const settled = await Promise.allSettled(batch.map((s) => this.runStep(s.id)));
+          const broke = settled.filter(
+            (r): r is PromiseRejectedResult => r.status === "rejected",
+          );
+          if (broke.length > 0) {
+            this.note(`${broke.length} parallel step(s) failed`);
+            firstError ??= broke[0].reason;
+          }
+        } else {
+          firstError ??= await this.runStepCatching(batch[0].id);
+        }
+        this.snapshot();
+      }
+
+      /* Stateful steps never overlap, with each other or with anything else. */
+      for (const step of serial) {
+        this.checkAbort();
+        firstError ??= await this.runStepCatching(step.id);
+        this.snapshot();
+      }
+
+      /* Finish the work already in flight, then stop: starting a new wave on top
+         of a known failure just spends budget on a task that cannot succeed.
+         The blocked work is marked skipped on the way out -- leaving it pending
+         would make the task look unfinished for ever. */
+      if (firstError !== null) {
+        const blocked = skipUnrunnable(this.task.steps, "skipped: a prerequisite did not complete");
+        if (blocked.length > 0) {
+          this.note(`${blocked.length} step(s) skipped because a prerequisite failed`);
+        }
+        this.snapshot();
+        break;
+      }
+    }
+    if (firstError !== null) throw firstError;
+  }
+
+  /** Run one step, returning its error instead of throwing it. */
+  private async runStepCatching(stepId: string): Promise<unknown> {
+    try {
+      await this.runStep(stepId);
+      return null;
+    } catch (error) {
+      /* The step has already been recorded as failed by runStep. The error is
+         returned rather than thrown so the current wave can finish, and the
+         caller re-throws it once nothing useful is left to do. */
+      return error;
     }
   }
 
