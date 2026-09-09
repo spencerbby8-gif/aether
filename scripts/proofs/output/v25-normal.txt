@@ -1,0 +1,4 @@
+=== normal operation on v25 (num_predict capped) ===
+  1 short                  TTFT=  31.5s  out=   21 chars  events=  5  elapsed=  32.7s
+  2 short                  TTFT=   1.2s  out=   18 chars  events=  2  elapsed=   1.8s
+  3 short                  TTFT=   7.9s  out=   73 chars  events=  3  elapsed=  11.3s

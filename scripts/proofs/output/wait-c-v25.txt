@@ -1,1 +1,10 @@
 [   0s] announced=[] serving=[]
+[  40s] announced=[] serving=[]
+[  80s] announced=[] serving=[]
+[ 121s] announced=[] serving=[]
+[ 161s] announced=[] serving=[]
+[ 201s] announced=[] serving=[]
+[ 241s] announced=[] serving=[]
+  C SERVING  https://sodium-generous-steal-ram.trycloudflare.com  (/api/ps 200, 1 model(s))
+[ 282s] announced=['C'] serving=['C']
+SERVING: {"C": "https://sodium-generous-steal-ram.trycloudflare.com"}

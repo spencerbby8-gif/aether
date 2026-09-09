@@ -1,0 +1,3 @@
+DEGENERATE REQUEST TERMINATED: out=2 chars, TTFT=56.2s, total=56.4s
+  -> 2 chars is ~0 tokens; the cap is 4096 tokens (~16000 chars)
+  -> bounded: YES

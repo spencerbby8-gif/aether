@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("70a1410e7f9a7180267600b8162254feba0c35455af332a35b284af696997e44");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("7cbcc865eede4fb81de15e5ee983fd009b0114b64ea1d32185c4a49a0db27f86");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -132,10 +132,15 @@ describe("engine source — rendering", () => {
      * generate until the 16384-token context was exhausted -- measured holding
      * Ollama's single slot long enough that a 25-character prompt waited
      * 87-103s for its first token.
+     * 84222 -> 84651: the final-answer stream now kills its upstream curl in a
+     * finally block. A disconnecting client made emit() raise, the exception
+     * left the loop, the kill was skipped, and the orphaned generation held
+     * Ollama's single slot for up to 1200s -- measured as a one-token request
+     * waiting 65s for a free slot.
      * scripts/verify-engine-source.mjs computes the same figure independently.
      */
     const rendered = renderAetherNotebook(DUMMY);
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(84222);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(84651);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 

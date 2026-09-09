@@ -1,0 +1,3 @@
+=== engine health AFTER the degenerate request ===
+  post-degenerate 1            TTFT=   3.7s out=19 chars elapsed=  4.5s
+  post-degenerate 2            TTFT=  68.6s out=2 chars elapsed= 68.9s
