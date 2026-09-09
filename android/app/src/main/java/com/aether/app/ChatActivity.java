@@ -44,6 +44,7 @@ import com.aether.app.core.ChatSession;
 import com.aether.app.core.ChatStore;
 import com.aether.app.core.MediaItem;
 import com.aether.app.core.TaskRecord;
+import com.aether.app.core.WebImages;
 import com.aether.app.core.TaskTracker;
 import com.aether.app.core.TextNormalizer;
 
@@ -1021,8 +1022,14 @@ public class ChatActivity extends AppCompatActivity {
             loadImage(item.url, iv, status);
         }
 
+        /* An image the agent FOUND is not one it MADE, and the reader is
+           entitled to know which. The host is the attribution; "Open" still
+           goes to the original page, so the source stays reachable. */
+        String label = "web".equals(item.source)
+                ? "found on the web \u00b7 " + AgentActivity.host(item.url)
+                : item.suggestedName();
         TextView title = Ui.tv(this,
-                (item.isAudio() ? "\u266a  Voice clip  " : "\u25a2  Image  ") + item.suggestedName(),
+                (item.isAudio() ? "\u266a  Voice clip  " : "\u25a2  Image  ") + label,
                 12, Ui.PRIMARY);
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1644,6 +1651,38 @@ public class ChatActivity extends AppCompatActivity {
                and whatever the turn really used is shown as sources. A partial
                answer from a stopped turn is kept -- b.raw is untouched. */
             b.activity.finish();
+
+            /* Images the agent FOUND on the web become real pictures here, and
+               the raw links come out of the prose. Done once when the turn ends
+               rather than while streaming, so a half-received URL is never
+               turned into a card that can never load. Anything WebImages
+               refuses stays in the text as an ordinary link. */
+            String answerText = TextNormalizer.normalize(b.raw.toString());
+            List<MediaItem> foundOnWeb = WebImages.find(answerText);
+            if (!foundOnWeb.isEmpty()) {
+                if (b.model != null && b.model.media == null) {
+                    b.model.media = new ArrayList<>();
+                }
+                int added = 0;
+                for (MediaItem mi : foundOnWeb) {
+                    boolean already = false;
+                    if (b.model != null && b.model.media != null) {
+                        for (MediaItem ex : b.model.media) {
+                            if (mi.url.equals(ex.url)) already = true;
+                        }
+                    }
+                    if (already) continue;
+                    if (b.model != null) b.model.media.add(mi);
+                    b.media.add(mi);
+                    added++;
+                }
+                if (added > 0) {
+                    b.raw.setLength(0);
+                    b.raw.append(WebImages.strip(answerText));
+                    renderMedia(b);
+                }
+            }
+
             renderAnswer(b, true);
             addSources(b);
             if (b.model != null) {

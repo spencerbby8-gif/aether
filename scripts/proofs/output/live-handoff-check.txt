@@ -1,0 +1,17 @@
+== the string the next engine is sent ==
+  ok  it tells the new engine not to restart   []
+  ok  it names the failed step as failed, not done   []
+  ok  it carries the partial verbatim   []
+
+== sending it through the real request path ==
+  engine returned 4733 chars in 376s (first token 156s)
+  answer opens: "During **charging**, the process reverses: an external power source pushes lithium ions out of the cathode, back through the electrolyte, and into the anode, where they park inside..."
+
+== did it continue, or start over? ==
+  ok  the engine reached done:true   [null]
+  ok  it produced a real answer   [4733 chars]
+  ok  the first token arrived   [156s]
+  ok  it does not rewrite the opening that already landed   [partial head "A lithium-ion cell stores energy by moving lithium ions betw..." vs answer head "During **charging**, the process reverses: an external power..."]
+  ok  it carries on into the part that was never reached   [degradation terms found: degrad cycle dendrite sei]
+
+8 passed, 0 failed

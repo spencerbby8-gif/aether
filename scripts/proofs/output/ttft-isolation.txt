@@ -1,0 +1,2 @@
+  short prompt (baseline)            prompt=   25 chars  TTFT=   62.8s  total=  63.5s  out=18 chars
+  medium prompt                      prompt=  138 chars  TTFT=  392.8s  total= 874.3s  out=9088 chars

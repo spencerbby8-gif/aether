@@ -1,0 +1,8 @@
+[   0s] announced=[] serving=[]
+[  40s] announced=[] serving=[]
+[  80s] announced=[] serving=[]
+[ 120s] announced=[] serving=[]
+[ 161s] announced=[] serving=[]
+  C SERVING  https://document-quiz-franchise-summaries.trycloudflare.com  (/api/ps 200, 1 model(s))
+[ 201s] announced=['C'] serving=['C']
+SERVING: {"C": "https://document-quiz-franchise-summaries.trycloudflare.com"}
