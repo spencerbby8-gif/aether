@@ -65,9 +65,16 @@ const currentB64 = [...(source.match(b64Re)[0].matchAll(/"([^"]+)"/g))]
   .filter((p) => /^[A-Za-z0-9+/=]+$/.test(p))
   .join("");
 
-if (currentPin === sha && currentB64 === b64) {
+// Also treat the old concatenated layout as drift: it is what made the file
+// unlintable, so an in-sync file in the old shape still needs rewriting.
+const flat = /const B64 = \[/.test(source);
+
+if (currentPin === sha && currentB64 === b64 && flat) {
   console.log(`in sync  sha256=${sha.slice(0, 16)}…  ${chunks.length} chunks`);
   process.exit(0);
+}
+if (currentPin === sha && currentB64 === b64 && !flat) {
+  console.log("content in sync, rewriting the payload into the flat array form");
 }
 
 console.log(`drift    blob sha256=${currentPin.slice(0, 16)}…  asset sha256=${sha.slice(0, 16)}…`);
@@ -77,10 +84,14 @@ if (CHECK) {
   process.exit(1);
 }
 
+// An array joined at runtime, NOT "a" + "b" + "c" ... . Concatenating 1400+
+// literals builds a left-nested BinaryExpression that many levels deep and
+// eslint's parser dies on it with "Maximum call stack size exceeded" -- the
+// file had been unlintable for exactly this reason. An array literal is flat.
 const payload =
-  "const B64 =\n" +
-  chunks.map((c, i) => `  "${c}"${i < chunks.length - 1 ? " +" : ""}`).join("\n") +
-  ";\n";
+  "const B64 = [\n" +
+  chunks.map((c) => `  "${c}",`).join("\n") +
+  '\n].join("");\n';
 
 source = source.replace(pinRe, `$1${sha}$3`).replace(b64Re, payload);
 writeFileSync(TS, source);

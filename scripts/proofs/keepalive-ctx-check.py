@@ -38,8 +38,25 @@ def main():
     num_ctx = int(m.group(1)) if m else None
 
     # What the chat request actually sends.
-    chk('the chat request sends options.num_ctx = NUM_CTX',
-        "'options': {'num_ctx': NUM_CTX}" in c4, 'found in the payload')
+    # Assert the INTENT -- that both agent-layer requests pin num_ctx to the
+    # constant -- rather than one exact dict literal. It used to match
+    # "'options': {'num_ctx': NUM_CTX}" verbatim, which broke the moment the
+    # payload gained a second option, even though the invariant still held.
+    n_ctx = c4.count("'num_ctx': NUM_CTX")
+    chk('both agent-layer requests pin num_ctx to NUM_CTX', n_ctx == 2,
+        '%d of 2 payloads' % n_ctx)
+    chk('num_ctx is never hard-coded to a literal in the request payloads',
+        "'num_ctx': 16384" not in c4 and "'num_ctx': 8192" not in c4,
+        'no literal num_ctx')
+
+    # The output bound added after a degenerate prompt was measured holding
+    # Ollama's single slot for 65s on a one-token request.
+    m_pred = re.search(r'^NUM_PREDICT\s*=\s*(\d+)', c4, re.M)
+    chk('the chat path declares NUM_PREDICT', bool(m_pred),
+        m_pred.group(1) if m_pred else 'absent')
+    n_pred = c4.count("'num_predict': NUM_PREDICT")
+    chk('both agent-layer requests cap their output at NUM_PREDICT', n_pred == 2,
+        '%d of 2 payloads' % n_pred)
 
     ping = re.search(r"'prompt': 'ping'.*?'options':\s*\{([^}]*)\}", c5)
     chk('the keep-alive ping sends an options block', bool(ping),
