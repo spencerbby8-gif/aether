@@ -219,7 +219,24 @@ protections are still refused, never bypassed.
 No artificial delays, no fake progress, no simulated tool results. Every
 measurement above is a real call.
 
-## 6. Gate after the change
+## 6. APK
+
+`apk/aether-2.0.10-release.apk` — 786 156 bytes, versionCode 39. Verified by
+unzipping `assets/aether-notebook-template.json` out of the built APK, decoding
+the embedded `_A_ORCH_SRC` literal the way the kernel does, and confirming:
+
+- the decoded module is 34 356 bytes, parses, and is **byte-identical to
+  `scripts/agent-orchestration.py`** — the copy the tests run against is the
+  copy that ships;
+- the full orchestration suite passes against that APK-extracted module:
+  **54 passed / 0 failed, routing 20/20**;
+- the patched `SYSMSG` naming all seven tools, the verification gate and the
+  budget are all present in the built cell.
+
+The build took 23 min under memory pressure (56 MB free at packaging). It
+completes at `-Xmx768m -XX:MaxMetaspaceSize=384m`, and only when run alone.
+
+## 7. Gate after the change
 
 ```
 tsc --noEmit                     0 errors
@@ -235,7 +252,7 @@ agent-loop-live.py               25 passed / 0 failed
 Template pin `b80d27c0ff59379ae97c4bfc96273e475525845fec5640652413d4041c2a981d`,
 rendered 166460 bytes.
 
-## 7. Not verified
+## 8. Not verified
 
 - **No live engine ran the patched kernel.** This is the biggest gap. Routing,
   planning, budgeting, normalization and verification are all proven
