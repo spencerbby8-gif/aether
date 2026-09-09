@@ -26,6 +26,14 @@ public final class ChatSession {
     /** Set once the user names the chat, so streaming never renames it back. */
     public boolean titleLocked;
     public final List<ChatMessage> messages;
+    /**
+     * The task this conversation is working on, with its lifecycle.
+     *
+     * Persisted with the session so a task survives the app being closed, and so
+     * a conversation handed to another engine carries what was already done
+     * instead of starting over. Null until the first message is sent.
+     */
+    public TaskRecord task;
 
     public ChatSession(String id, String title) {
         this.id = id;
@@ -81,13 +89,14 @@ public final class ChatSession {
 
     public JSONObject toJson() throws JSONException {
         JSONObject o = new JSONObject();
-        o.put("v", 1);
+        o.put("v", 2);
         o.put("id", id);
         o.put("title", title == null ? "New chat" : title);
         o.put("createdAt", createdAt);
         o.put("updatedAt", updatedAt);
         o.put("titleLocked", titleLocked);
         if (engine != null && !engine.isEmpty()) o.put("engine", engine);
+        if (task != null) o.put("task", task.toJson());
         JSONArray a = new JSONArray();
         for (ChatMessage m : messages) a.put(m.toJson());
         o.put("messages", a);
@@ -100,6 +109,10 @@ public final class ChatSession {
         s.updatedAt = o.optLong("updatedAt", s.updatedAt);
         s.titleLocked = o.optBoolean("titleLocked", false);
         s.engine = o.has("engine") && !o.isNull("engine") ? o.optString("engine") : null;
+        /* A session written before tasks existed has no "task" key; that is a
+           normal old chat, not a corrupt file. */
+        JSONObject to = o.optJSONObject("task");
+        s.task = to == null ? null : TaskRecord.fromJson(to);
         s.messages.clear();
         JSONArray a = o.optJSONArray("messages");
         if (a != null) {

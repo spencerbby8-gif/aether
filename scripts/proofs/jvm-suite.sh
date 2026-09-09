@@ -9,6 +9,12 @@
 # ShutdownProof) are deliberately excluded: they need a running Kaggle engine
 # and would report failure on a quiet morning. Run them when one is up.
 #
+# StatusProof is in the list and DOES touch Kaggle -- it reads real kernel
+# status, and its part 3 used to push a real kernel and wait 15 minutes for it
+# to boot on every run. That silently consumed GPU sessions (engine B reached
+# "Maximum batch GPU session count of 2 reached" this way). Part 3 is now
+# opt-in: AETHER_LIVE_PUSH=1 bash scripts/proofs/jvm-suite.sh
+#
 # FailoverProof is the one to run after any routing change. It exercises
 # discovery, classify and route against real tunnels, and is most informative
 # when one of them is genuinely dead -- which is the failure users actually
@@ -57,6 +63,8 @@ PROOFS=(
   "StatusProof|$REPO/android/credentials.properties $REPO/android/app/src/main/assets/aether-notebook-template.json"
   "PushRefusalProof|"
   "EngineLabelsProof|"
+  "TaskRecordProof|"
+  "TaskTrackerProof|"
 )
 
 fails=0

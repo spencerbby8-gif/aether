@@ -43,6 +43,8 @@ import com.aether.app.core.ChatMessage;
 import com.aether.app.core.ChatSession;
 import com.aether.app.core.ChatStore;
 import com.aether.app.core.MediaItem;
+import com.aether.app.core.TaskRecord;
+import com.aether.app.core.TaskTracker;
 import com.aether.app.core.TextNormalizer;
 
 import java.io.ByteArrayOutputStream;
@@ -456,6 +458,7 @@ public class ChatActivity extends AppCompatActivity {
                    cannot resurrect it. finish() collapses the strip and stops
                    any animation before the message is even on screen. */
                 for (String line : m.toolLines) b.activity.event(line);
+                b.activity.report = m.taskReport;
                 b.activity.finish();
                 if (m.media != null && !m.media.isEmpty()) {
                     b.media.addAll(m.media);
@@ -734,6 +737,8 @@ public class ChatActivity extends AppCompatActivity {
         final TextView label = Ui.tv(ChatActivity.this, "", 12, Ui.DIM);
         final TextView chevron = Ui.tv(ChatActivity.this, "", 10, Ui.DIM);
         final AgentActivity model = new AgentActivity();
+        /** How the task ended. Rendered under the steps when expanded. */
+        String report;
         private final AlphaAnimation pulse = new AlphaAnimation(1f, 0.22f);
         private boolean running;
         private boolean expanded;
@@ -812,11 +817,11 @@ public class ChatActivity extends AppCompatActivity {
             }
             label.setText(text);
             label.setTextColor(getColor(running ? Ui.ACCENT : Ui.DIM));
-            boolean steps = model.hasSteps();
-            chevron.setText(steps ? (expanded ? "\u25be" : "\u25b8") : "");
-            chevron.setVisibility(steps ? View.VISIBLE : View.GONE);
+            boolean detail = model.hasSteps() || (report != null && !report.isEmpty());
+            chevron.setText(detail ? (expanded ? "\u25be" : "\u25b8") : "");
+            chevron.setVisibility(detail ? View.VISIBLE : View.GONE);
             card.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
-            boolean show = expanded && steps;
+            boolean show = expanded && detail;
             list.setVisibility(show ? View.VISIBLE : View.GONE);
             if (show) renderList();
         }
@@ -837,6 +842,22 @@ public class ChatActivity extends AppCompatActivity {
                 lp.topMargin = Ui.dp(ChatActivity.this, 2);
                 lp.leftMargin = Ui.dp(ChatActivity.this, 12);
                 list.addView(row, lp);
+            }
+            /* How the task actually ended: what was done, what was verified,
+               what failed and what is left. This is the report the user is owed
+               at the end of a task, kept in the same collapsible strip as the
+               steps so it never competes with the answer. */
+            if (report != null && !report.isEmpty()) {
+                for (String line : report.split("\n")) {
+                    if (line.trim().isEmpty()) continue;
+                    TextView rr = Ui.tv(ChatActivity.this, line.trim(), 11, Ui.DIM);
+                    LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT);
+                    rlp.topMargin = Ui.dp(ChatActivity.this, 2);
+                    rlp.leftMargin = Ui.dp(ChatActivity.this, 12);
+                    list.addView(rr, rlp);
+                }
             }
         }
     }
@@ -1359,6 +1380,10 @@ public class ChatActivity extends AppCompatActivity {
         if (attachments != null) userMsg.attachments.addAll(attachments);
         current.messages.add(userMsg);
 
+        /* The task this prompt belongs to. An unfinished task is CONTINUED
+           rather than replaced, so "and now deploy it" stays the same job. */
+        TaskTracker.begin(current, prompt);
+
         TextView userBody = addUserBubble(prompt);
         if (attachments != null && !attachments.isEmpty()) {
             addAttachmentChips(userBody, attachments);
@@ -1581,7 +1606,14 @@ public class ChatActivity extends AppCompatActivity {
                 forget();
                 remember(next.slot, next.url);
                 if (b.model != null) b.model.engine = next.slot;
-                streamWithFailover(next.url, wire, prompt, b, false, history);
+                /* The new engine has never seen this task. Hand it the goal and
+                   what already succeeded, or it treats the same words as a fresh
+                   question and repeats work that had already worked. */
+                String carry = wire;
+                if (current != null && current.task != null && !current.task.isTerminal()) {
+                    carry = current.task.handoff() + "\n\n" + wire;
+                }
+                streamWithFailover(next.url, carry, prompt, b, false, history);
                 return;
             }
         }
@@ -1604,6 +1636,27 @@ public class ChatActivity extends AppCompatActivity {
             addSources(b);
             if (b.model != null) {
                 b.model.content = TextNormalizer.normalize(b.raw.toString());
+            }
+            /* This is the only place a turn ends, so it is the only place a task
+               could be left hanging in EXECUTING -- which is what made the agent
+               look like it had silently stopped. Whatever the turn really
+               produced is recorded here: a stop is CANCELLED, a failure is
+               FAILED, and success is only claimed once something was verified. */
+            if (current != null && current.task != null) {
+                TaskTracker.mirror(current.task, b.activity.model);
+                current.task.engine = b.model != null && b.model.engine != null
+                        ? b.model.engine : current.engine;
+                TaskTracker.close(current.task, ok, err,
+                        TextNormalizer.normalize(b.raw.toString()), ms);
+                /* Only worth showing when the task actually did something: a
+                   plain chat answer needs no report, and adding one to every
+                   message would bury the answer the user came for. */
+                if (!current.task.steps.isEmpty() || current.task.phase
+                        != TaskRecord.Phase.COMPLETED) {
+                    String rep = current.task.finalReport();
+                    b.model.taskReport = rep;
+                    b.activity.report = rep;
+                }
             }
             if (!ok && "cancelled".equals(err)) {
                 if (b.model != null) {

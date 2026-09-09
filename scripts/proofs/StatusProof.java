@@ -141,6 +141,23 @@ public final class StatusProof {
         check("a dead tunnel leaves the engine OFF or WAKING",
                 offCount + liveCount >= 0, offCount + " off, " + liveCount + " live");
 
+        /* Part 3 is not a unit test. It pushes a real kernel to Kaggle and then
+           polls for up to fifteen minutes waiting for it to boot, so every run
+           consumed a GPU session on a real account. That is how engine B ended
+           up at "Maximum batch GPU session count of 2 reached" while a suite
+           that advertises itself as offline reported 11/11. It stays available,
+           but it has to be asked for. */
+        if (!"1".equals(System.getenv("AETHER_LIVE_PUSH"))) {
+            section("real transition -- skipped");
+            System.out.println("  SKIP  this part pushes a real kernel to Kaggle and waits");
+            System.out.println("        up to 15 minutes for it to boot. Set");
+            System.out.println("        AETHER_LIVE_PUSH=1 to run it deliberately.");
+            System.out.println("\nSTATUS PROOF  " + pass + " passed, " + fail + " failed"
+                    + "  (part 3 skipped)");
+            System.exit(fail > 0 ? 1 : 0);
+            return;
+        }
+
         // ------------------------------------------- 3. a real state transition
         section("real transition on engine " + slot.toUpperCase(Locale.ROOT)
                 + ": wake -> live -> off");
