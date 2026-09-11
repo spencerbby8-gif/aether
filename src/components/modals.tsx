@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SearchResult, Settings } from "@/lib/types";
 import { cn, timeAgo, toast } from "@/lib/utils";
-import { engineOff, engineWake, useEngineSnapshot, type EngineSnapshot, type SlotHealth } from "@/lib/engine-client";
+import { engineOff, engineWake, useEngineSnapshot, type EngineSnapshot, type EngineSlot, type SlotHealth } from "@/lib/engine-client";
 import { ConversationStore } from "@/storage";
 import { Icon } from "./icons";
 
@@ -187,11 +187,11 @@ function HealthChip({ health, checked }: { health: SlotHealth; checked: boolean 
   );
 }
 
-const ENGINE_SLOTS = ["a", "b", "c"] as const;
+const ENGINE_SLOTS = ["a", "b", "c", "d"] as const;
 
 function EnginePanel({ busy, snapshot, onRefresh }: { busy: boolean; snapshot: EngineSnapshot | null; onRefresh: () => void }) {
   /* Which slot is mid-wake, so each button shows its OWN state (audit §4.3). */
-  const [wakingSlot, setWakingSlot] = useState<"a" | "b" | "c" | null>(null);
+  const [wakingSlot, setWakingSlot] = useState<EngineSlot | null>(null);
 
   const locked = busy || (snapshot?.activeOperations ?? 0) > 0;
 
@@ -200,7 +200,7 @@ function EnginePanel({ busy, snapshot, onRefresh }: { busy: boolean; snapshot: E
   const actuallyLive = live?.alive ?? false;
   const anyWaking = ENGINE_SLOTS.some((id) => (snapshot?.engines[id]?.health ?? "offline") === "waking");
 
-  const wake = async (engine: "a" | "b" | "c") => {
+  const wake = async (engine: EngineSlot) => {
     setWakingSlot(engine);
     try {
       const result = await engineWake(engine);

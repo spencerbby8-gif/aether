@@ -289,7 +289,7 @@ public final class EngineCore {
     private static final Pattern LIVE_RE =
             Pattern.compile("(?:AGENT LIVE LINK|alive)[:\\s]+(https?://[^\\s)]+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern TAG_RE =
-            Pattern.compile("engine\\s*[:=]?\\s*([abc])\\b", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("engine\\s*[:=]?\\s*([abcd])\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern SIG_RE =
             Pattern.compile("(?:\\bsig=|X-Aether-Sig:\\s*)([a-f0-9]{64})", Pattern.CASE_INSENSITIVE);
 

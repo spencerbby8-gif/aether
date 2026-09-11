@@ -87,7 +87,7 @@ export interface Project {
  *  - auto: use any available engine; A→B failover allowed
  *  - a / b: strictly that engine — never silently switched
  */
-export type ProviderId = "auto" | "a" | "b" | "c";
+export type ProviderId = "auto" | "a" | "b" | "c" | "d";
 
 export interface Settings {
   provider: ProviderId;
@@ -101,9 +101,14 @@ export const DEFAULT_SETTINGS: Settings = {
   reduceMotion: false,
 };
 
+/** Routing slots, in failover order. Single source for validation below. */
+export const PROVIDER_SLOTS = ["a", "b", "c", "d"] as const;
+
 /** Normalize legacy/unknown stored values to a valid routing mode. */
 export function normalizeRouting(value: unknown): ProviderId {
-  return value === "a" || value === "b" || value === "c" ? value : "auto";
+  return typeof value === "string" && (PROVIDER_SLOTS as readonly string[]).includes(value)
+    ? (value as ProviderId)
+    : "auto";
 }
 
 export interface ChatTurn {

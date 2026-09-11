@@ -34,7 +34,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { EngineId, EngineInfo } from "./contract";
+import { ENGINE_IDS, type EngineId, type EngineInfo } from "./contract";
 import { WORKSPACE_ROOT } from "@/server/tools/security";
 
 import type { EngineStateStore, ManagerEvent } from "./manager";
@@ -62,6 +62,7 @@ const EMPTY_ENGINES: Record<EngineId, EngineInfo> = {
   a: { id: "a", state: "off", url: null, lastSeen: null },
   b: { id: "b", state: "off", url: null, lastSeen: null },
   c: { id: "c", state: "off", url: null, lastSeen: null },
+  d: { id: "d", state: "off", url: null, lastSeen: null },
 };
 
 export function emptyPersistedState(): PersistedEngineState {
@@ -88,7 +89,7 @@ function coerceState(raw: unknown): PersistedEngineState | null {
   if (candidate.active !== "a" && candidate.active !== "b" && candidate.active !== "c") return null;
 
   const out = emptyPersistedState();
-  for (const id of ["a", "b", "c"] as EngineId[]) {
+  for (const id of ENGINE_IDS) {
     const info = candidate.engines[id];
     if (info && typeof info === "object" && info.id === id) {
       out.engines[id] = {
@@ -100,7 +101,7 @@ function coerceState(raw: unknown): PersistedEngineState | null {
     }
   }
   if (candidate.pushAt && typeof candidate.pushAt === "object") {
-    for (const id of ["a", "b", "c"] as EngineId[]) {
+    for (const id of ENGINE_IDS) {
       const at = candidate.pushAt[id];
       if (typeof at === "number" && Number.isFinite(at)) out.pushAt[id] = at;
     }

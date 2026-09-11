@@ -6,6 +6,7 @@ each rendered notebook before it is pushed.
   python3 scripts/proofs/wake-engines.py a b
 """
 import json
+import os
 import subprocess
 import sys
 import urllib.request
@@ -15,11 +16,34 @@ TOPIC = "REMOVED_BEACON_TOPIC"
 SLUG = "qwen-3-8-27b-uncensored-chat"
 TITLE = "Qwen 3.8 27B Uncensored Chat"
 
+def _cred(slot, user_env, key_env, default_user=""):
+    """Credentials for a slot, env first.
+
+    A/B/C carry committed fallbacks for historical reasons -- those keys are
+    already in Git history and should be rotated. Engine D deliberately has
+    NO fallback: its key must come from the environment, so it can never be
+    committed by accident and never appears in a diff or a log.
+    """
+    user = os.environ.get(user_env) or default_user
+    key = os.environ.get(key_env, "")
+    return user, key
+
+
 KEYS = {
-    "a": ("fridaymoses", "KGAT_REDACTED"),
-    "b": ("spencercoldtr", "KGAT_REDACTED"),
-    "c": ("dyceelvk", "KGAT_REDACTED"),
+    "a": _cred("a", "KAGGLE_USERNAME_A", "KAGGLE_KEY_A", "fridaymoses")
+         if not os.environ.get("KAGGLE_KEY_A")
+         else _cred("a", "KAGGLE_USERNAME_A", "KAGGLE_KEY_A"),
+    "b": _cred("b", "KAGGLE_USERNAME_B", "KAGGLE_KEY_B"),
+    "c": _cred("c", "KAGGLE_USERNAME_C", "KAGGLE_KEY_C"),
+    "d": _cred("d", "KAGGLE_USERNAME_D", "KAGGLE_KEY_D"),
 }
+
+# Keep the committed A/B/C fallbacks working exactly as before.
+for _slot, _u, _k in (("a", "fridaymoses", "KGAT_REDACTED"),
+                      ("b", "spencercoldtr", "KGAT_REDACTED"),
+                      ("c", "dyceelvk", "KGAT_REDACTED")):
+    if not KEYS[_slot][1]:
+        KEYS[_slot] = (_u, _k)
 
 TS = '''
 import { renderAetherNotebook } from "./src/server/engine/aether-engine-source";

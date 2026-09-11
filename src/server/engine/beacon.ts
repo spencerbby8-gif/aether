@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { beaconBackupUrl, beaconSecret, beaconUrl, type EngineId } from "./contract";
+import { ENGINE_IDS, beaconBackupUrl, beaconSecret, beaconUrl, type EngineId } from "./contract";
 
 /**
  * Beacon parsing — engines announce their rotating tunnel URLs by posting
@@ -26,6 +26,10 @@ export interface BeaconSignal {
   liveUrlA: string | null;
   liveUrlB: string | null;
   liveUrlC: string | null;
+  liveUrlD: string | null;
+  /** Every per-slot URL keyed by slot, so a caller never has to enumerate
+   *  them by hand and silently miss the newest one. */
+  liveUrlBySlot: Record<EngineId, string | null>;
   /** True when the most recent lifecycle event was a shutdown. */
   off: boolean;
   offAt: number | null;
@@ -40,7 +44,7 @@ export interface BeaconSignal {
 const LIVE_RE = /(?:AGENT LIVE LINK|alive)[:\s]+(https?:\/\/[^\s)]+)/i;
 const OFF_RE = /ENGINE OFF/i;
 /* Engines may tag their heartbeats with their slot: "engine=b alive: ..." */
-const ENGINE_TAG_RE = /engine\s*[:=]?\s*([abc])\b/i;
+const ENGINE_TAG_RE = /engine\s*[:=]?\s*([abcd])\b/i;
 /* Signature is carried as a trailing "sig=<hex>" or "X-Aether-Sig: <hex>". */
 const SIG_RE = /(?:\bsig=|X-Aether-Sig:\s*)([a-f0-9]{64})/i;
 
@@ -53,7 +57,10 @@ function extractEngineTag(text: string): EngineId | null {
   const match = ENGINE_TAG_RE.exec(text);
   if (!match) return null;
   const tag = match[1].toLowerCase();
-  return tag === "a" || tag === "b" || tag === "c" ? tag : null;
+  /* Validated against ENGINE_IDS. A hand-written comparison chain here is a
+     second place a new slot can be dropped, and the regex above would still
+     match it -- so the tag would parse and then be discarded as unknown. */
+  return (ENGINE_IDS as string[]).includes(tag) ? (tag as EngineId) : null;
 }
 
 /** Strip the signature token so the signature covers the payload only. */
@@ -125,9 +132,13 @@ export function interpretBeacon(events: Array<{ at: number; text: string }>): Be
   const sorted = [...events].sort((x, y) => x.at - y.at);
   let liveUrl: string | null = null;
   let liveUrlAt: number | null = null;
-  let liveUrlA: string | null = null;
-  let liveUrlB: string | null = null;
-  let liveUrlC: string | null = null;
+  /* Per-slot attribution built from ENGINE_IDS. The old form was three
+     separate locals and an if/else chain, which is exactly where a fourth
+     engine gets dropped: an engine=d announcement would set liveUrl but
+     attribute to no slot at all. */
+  const liveUrlBySlot: Record<EngineId, string | null> = Object.fromEntries(
+    ENGINE_IDS.map((id) => [id, null]),
+  ) as Record<EngineId, string | null>;
   let off = false;
   let offAt: number | null = null;
   let offSlot: EngineId | null = null;
@@ -148,9 +159,7 @@ export function interpretBeacon(events: Array<{ at: number; text: string }>): Be
       offAt = null;
       offSlot = null;
       /* Per-slot attribution requires an explicit tag. */
-      if (tag === "a") liveUrlA = url;
-      else if (tag === "b") liveUrlB = url;
-      else if (tag === "c") liveUrlC = url;
+      if (tag) liveUrlBySlot[tag] = url;
     }
     if (OFF_RE.test(event.text)) {
       off = true;
@@ -161,9 +170,11 @@ export function interpretBeacon(events: Array<{ at: number; text: string }>): Be
   return {
     liveUrl,
     liveUrlAt,
-    liveUrlA,
-    liveUrlB,
-    liveUrlC,
+    liveUrlA: liveUrlBySlot.a,
+    liveUrlB: liveUrlBySlot.b,
+    liveUrlC: liveUrlBySlot.c,
+    liveUrlD: liveUrlBySlot.d,
+    liveUrlBySlot,
     off,
     offAt,
     offSlot,

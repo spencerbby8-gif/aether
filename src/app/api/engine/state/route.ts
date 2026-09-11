@@ -1,6 +1,6 @@
 import { requireControlAuth } from "@/server/auth";
 import { getEngineManager } from "@/server/engine/manager";
-import { ENGINE_IDS, MODEL_NAME } from "@/server/engine/contract";
+import { ENGINE_IDS, MODEL_NAME, type EngineId } from "@/server/engine/contract";
 import { engineConfigured } from "@/server/engine/kaggle";
 import { discoverAlive, probeFleetHealth } from "@/server/engine/resolve";
 
@@ -30,9 +30,15 @@ export async function GET(request: Request) {
   const engineManager = await getEngineManager();
 
   const bound = engineManager.snapshot().engines;
+  /* Derived from ENGINE_IDS rather than listed by hand. Hardcoding {a,b,c}
+     here is how a fourth engine ends up present everywhere except the health
+     probe, which then reports it as unknown instead of checking it. */
+  const boundUrls = Object.fromEntries(
+    ENGINE_IDS.map((id) => [id, bound[id].url]),
+  ) as Record<EngineId, string | null>;
   const [live, health] = await Promise.all([
     discoverAlive(),
-    probeFleetHealth({ a: bound.a.url, b: bound.b.url, c: bound.c.url }),
+    probeFleetHealth(boundUrls),
   ]);
 
   /* Evict rotated tunnels the probe just proved unreachable. */

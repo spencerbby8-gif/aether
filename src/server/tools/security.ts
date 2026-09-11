@@ -3,6 +3,7 @@ import dns from "node:dns";
 import net from "node:net";
 import path from "node:path";
 import { Agent } from "undici";
+import { ENGINE_IDS } from "@/server/engine/contract";
 
 /**
  * Security perimeter for the LOCAL workspace tools (file + web).
@@ -284,28 +285,35 @@ export async function guardedFetch(input: string | URL, init: RequestInit = {}):
 
 /* ---------------- secrets ---------------- */
 
+/* The env var names holding engine credentials, derived from ENGINE_IDS.
+ * Slot "a" uses the unsuffixed names for historical reasons; b/c/d are
+ * suffixed. Adding a slot to ENGINE_IDS extends this list and therefore the
+ * redaction below without a second edit. */
+const ENGINE_SECRET_ENV_NAMES: string[] = ENGINE_IDS.flatMap((id) => {
+  const suffix = id === "a" ? "" : `_${id.toUpperCase()}`;
+  return [
+    `KAGGLE_KEY${suffix}`,
+    `KAGGLE_USERNAME${suffix}`,
+    `ENGINE_KERNEL_${id.toUpperCase()}`,
+    `ENGINE_URL_${id.toUpperCase()}`,
+  ];
+});
+
+
 /** Every env var whose VALUE must never appear in output leaving the server. */
 function sensitiveValues(): Array<string | undefined> {
   return [
     process.env.AETHER_AGENT_KEY,
     process.env.AETHER_AGENT_URL,
     process.env.DATABASE_URL,
-    /* Every engine account — A, B and C, keys AND usernames. */
-    process.env.KAGGLE_KEY,
-    process.env.KAGGLE_KEY_B,
-    process.env.KAGGLE_KEY_C,
-    process.env.KAGGLE_USERNAME,
-    process.env.KAGGLE_USERNAME_B,
-    process.env.KAGGLE_USERNAME_C,
+    /* Every engine account — A, B, C and D, keys AND usernames. Omitting a
+       slot here is how one account's key ends up in a log while the others
+       are scrubbed, so this list is generated from the same env names the
+       fleet actually reads rather than typed out per slot. */
+    ...ENGINE_SECRET_ENV_NAMES.map((n) => process.env[n]),
     process.env.ENGINE_OFF_KEY,
     process.env.AETHER_CONTROL_TOKEN,
     process.env.BEACON_SECRET,
-    process.env.ENGINE_KERNEL_A,
-    process.env.ENGINE_KERNEL_B,
-    process.env.ENGINE_KERNEL_C,
-    process.env.ENGINE_URL_A,
-    process.env.ENGINE_URL_B,
-    process.env.ENGINE_URL_C,
   ];
 }
 

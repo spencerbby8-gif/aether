@@ -97,7 +97,7 @@ function publicKill(result: KillResult, urlToSlot: Map<string, EngineId>): Publi
 
 /* ------------------------------- handlers ------------------------------- */
 
-export async function ensureAliveHandler(account?: "a" | "b" | "c"): Promise<HandlerResult> {
+export async function ensureAliveHandler(account?: EngineId): Promise<HandlerResult> {
   const engineManager = await getEngineManager(); // FIX (audit R3): durable state
   const result = await resolveEngine(account);
   if (result.status === "alive" && result.url) {

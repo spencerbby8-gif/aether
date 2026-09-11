@@ -323,7 +323,12 @@ public class SettingsActivity extends AppCompatActivity {
     private void buildRoutingRows() {
         routingRows.removeAllViews();
         routingTexts.clear();
-        String[] opts = {EngineRouter.AUTO, "a", "b", "c"};
+        /* AUTO plus every slot the router actually fails over to, taken from
+           EngineRouter so the list cannot drift from the real chain. */
+        String[] chain = EngineRouter.order();
+        String[] opts = new String[chain.length + 1];
+        opts[0] = EngineRouter.AUTO;
+        System.arraycopy(chain, 0, opts, 1, chain.length);
         for (String o : opts) {
             TextView row = new TextView(this);
             row.setTextSize(14);
@@ -354,7 +359,7 @@ public class SettingsActivity extends AppCompatActivity {
             StringBuilder sb = new StringBuilder();
             sb.append(selected ? "●  " : "○  ");
             if (EngineRouter.AUTO.equals(o)) {
-                sb.append("AUTO — first healthy, fails over A→B→C");
+                sb.append("AUTO — first healthy, fails over ").append(EngineRouter.chainLabel());
             } else {
                 EngineCore.EngineState st = states.get(o);
                 sb.append("Engine ").append(o.toUpperCase(Locale.ROOT))

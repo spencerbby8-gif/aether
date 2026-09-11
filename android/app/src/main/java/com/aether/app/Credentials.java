@@ -48,7 +48,7 @@ public final class Credentials {
             this.beaconTopic  = o.getString("beaconTopic");
             this.beaconSecret = o.optString("beaconSecret", "");
             this.telemetryTopic = o.optString("telemetryTopic", "");
-            for (String slot : new String[] {"a", "b", "c"}) {
+            for (String slot : new String[]{"a", "b", "c", "d"}) {
                 JSONObject e = o.optJSONObject("engine" + slot.toUpperCase());
                 if (e == null) continue;
                 String user = e.optString("user", "");

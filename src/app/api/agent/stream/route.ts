@@ -8,7 +8,9 @@ import {
   type EngineId,
 } from "@/server/engine/contract";
 import { ensureAliveHandler, type PublicResolveBody } from "@/server/engine/netlify";
+import type { EngineRouting } from "@/providers/engine-chat";
 import { requireControlAuth } from "@/server/auth";
+import { ENGINE_IDS } from "@/server/engine/contract";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -166,9 +168,14 @@ export async function POST(request: Request) {
   if (messages.length === 0) {
     return Response.json({ ok: false, error: "No usable messages (system messages are never sent)." }, { status: 400 });
   }
-  /* Routing mode: AUTO may fail over; A/B/C are strict — never silently switched. */
-  const mode: "auto" | "a" | "b" | "c" =
-    body.engine === "a" || body.engine === "b" || body.engine === "c" ? body.engine : "auto";
+  /* Routing mode: AUTO may fail over; a named slot is strict and never
+     silently switched. Validated against ENGINE_IDS so a new slot is honoured
+     instead of being downgraded to auto, which would look like the pin
+     working and then quietly route elsewhere. */
+  const mode: EngineRouting =
+    typeof body.engine === "string" && (ENGINE_IDS as string[]).includes(body.engine)
+      ? (body.engine as EngineRouting)
+      : "auto";
   const allowFailover = mode === "auto";
 
   /* Hold the operation across the ENTIRE stream, released exactly once. */

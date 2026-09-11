@@ -29,7 +29,26 @@ public final class EngineRouter {
     public static final String AUTO = "auto";
 
     /** Canonical failover order. */
-    private static final String[] ORDER = {"a", "b", "c"};
+    /** Failover order. A -> B -> C -> D. The array order IS the chain; every
+     *  loop below walks it rather than hardcoding a sequence. */
+    private static final String[] ORDER = {"a", "b", "c", "d"};
+
+    /** The failover chain as a display string, e.g. "A\u2192B\u2192C\u2192D".
+     *  Derived from ORDER so the UI can never advertise a chain the router
+     *  does not actually walk. */
+    public static String chainLabel() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ORDER.length; i++) {
+            if (i > 0) sb.append("\u2192");
+            sb.append(ORDER[i].toUpperCase(java.util.Locale.ROOT));
+        }
+        return sb.toString();
+    }
+
+    /** A copy of the failover order, for callers that build UI rows. */
+    public static String[] order() {
+        return ORDER.clone();
+    }
 
     private EngineRouter() {}
 
@@ -88,7 +107,7 @@ public final class EngineRouter {
     /**
      * Canonical form of a selection, for callers that need the same normalisation
      * the router applies (highlighting the right row, choosing a wake candidate).
-     * Returns "auto" or "a"/"b"/"c".
+     * Returns "auto" or "a"/"b"/"c"/"d".
      */
     public static String canonical(String selection) { return norm(selection); }
 
@@ -98,7 +117,7 @@ public final class EngineRouter {
     /**
      * Choose an engine.
      *
-     * @param selection AUTO, or "a"/"b"/"c" to pin one engine
+     * @param selection AUTO, or "a"/"b"/"c"/"d" to pin one engine
      * @param states    every engine's current state
      */
     public static Decision route(String selection, List<SlotState> states) {

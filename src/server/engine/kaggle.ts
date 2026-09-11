@@ -38,6 +38,7 @@ export function credentialEnvNames(engine: EngineId): string {
     a: "KAGGLE_USERNAME / KAGGLE_KEY",
     b: "KAGGLE_USERNAME_B / KAGGLE_KEY_B",
     c: "KAGGLE_USERNAME_C / KAGGLE_KEY_C",
+    d: "KAGGLE_USERNAME_D / KAGGLE_KEY_D",
   };
   return names[engine];
 }

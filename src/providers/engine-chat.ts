@@ -15,7 +15,7 @@ const CONNECT_TIMEOUT_MS = 30_000;
  * Partial output is preserved on abort and error.
  */
 
-export type EngineRouting = "auto" | "a" | "b" | "c";
+export type EngineRouting = "auto" | "a" | "b" | "c" | "d";
 
 export interface EngineChatOutcome {
   status: "complete" | "stopped" | "error";

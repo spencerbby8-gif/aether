@@ -43,6 +43,7 @@ export function engineUrlOverride(slot: EngineId): string | null {
     a: process.env.ENGINE_URL_A,
     b: process.env.ENGINE_URL_B,
     c: process.env.ENGINE_URL_C,
+    d: process.env.ENGINE_URL_D,
   };
   const url = env[slot];
   return url && /^https?:\/\//i.test(url) ? url.replace(/\/+$/, "") : null;
@@ -50,8 +51,11 @@ export function engineUrlOverride(slot: EngineId): string | null {
 
 
 /** Three-engine fleet: A, B, and C. AUTO failover order is A → B → C. */
-export type EngineId = "a" | "b" | "c";
-export const ENGINE_IDS: EngineId[] = ["a", "b", "c"];
+export type EngineId = "a" | "b" | "c" | "d";
+/* Order IS the failover order: A → B → C → D. Every consumer derives its
+ * order from this array rather than hardcoding one, so widening it is what
+ * extends the chain. */
+export const ENGINE_IDS: EngineId[] = ["a", "b", "c", "d"];
 
 /**
  * Kaggle REST base URL.

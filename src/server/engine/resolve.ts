@@ -86,12 +86,13 @@ interface Account {
   ds: string[];
 }
 
-/** Per-engine kernel slug, pinnable via ENGINE_KERNEL_<A|B|C>. */
+/** Per-engine kernel slug, pinnable via ENGINE_KERNEL_<A|B|C|D>. */
 export function kernelSlugFor(slot: EngineId): string {
   const env: Record<EngineId, string | undefined> = {
     a: process.env.ENGINE_KERNEL_A,
     b: process.env.ENGINE_KERNEL_B,
     c: process.env.ENGINE_KERNEL_C,
+    d: process.env.ENGINE_KERNEL_D,
   };
   const raw = env[slot];
   if (!raw) return DEFAULT_KERNEL_SLUG;
@@ -100,8 +101,10 @@ export function kernelSlugFor(slot: EngineId): string {
 }
 
 /**
- * Three-account fleet. AUTO failover order is A → B → C (the array order).
+ * Four-account fleet. AUTO failover order is A → B → C → D (the array order).
  * Credentials come ONLY from server env — never exposed to the client.
+ * A slot with no credentials is dropped by the filter below, so an
+ * unconfigured D simply never enters the chain rather than failing in it.
  */
 export function accounts(filter?: EngineId): Account[] {
   const defs: Account[] = [
@@ -122,6 +125,12 @@ export function accounts(filter?: EngineId): Account[] {
       user: process.env.KAGGLE_USERNAME_C ?? "",
       key: process.env.KAGGLE_KEY_C ?? "",
       ds: process.env.KAGGLE_DATASET_C ? [process.env.KAGGLE_DATASET_C] : [],
+    },
+    {
+      slot: "d",
+      user: process.env.KAGGLE_USERNAME_D ?? "",
+      key: process.env.KAGGLE_KEY_D ?? "",
+      ds: process.env.KAGGLE_DATASET_D ? [process.env.KAGGLE_DATASET_D] : [],
     },
   ];
   const all = defs.filter((a) => a.key && a.user);
@@ -149,13 +158,13 @@ async function fetchJson(
 }
 
 const LIVE_LINK_RE = /https?:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
-const ENGINE_TAG_RE = /engine\s*[:=]?\s*([abc])\b/i;
+const ENGINE_TAG_RE = /engine\s*[:=]?\s*([abcd])\b/i;
 
 function slotFromText(text: string): EngineId | null {
   const m = ENGINE_TAG_RE.exec(text);
   if (!m) return null;
   const t = m[1].toLowerCase();
-  return t === "a" || t === "b" || t === "c" ? t : null;
+  return (ENGINE_IDS as string[]).includes(t) ? (t as EngineId) : null;
 }
 
 /**
@@ -510,6 +519,7 @@ export async function wakeSlot(slot: EngineId): Promise<{ state: "waking" | "quo
       a: "KAGGLE_KEY / KAGGLE_USERNAME",
       b: "KAGGLE_KEY_B / KAGGLE_USERNAME_B",
       c: "KAGGLE_KEY_C / KAGGLE_USERNAME_C",
+      d: "KAGGLE_KEY_D / KAGGLE_USERNAME_D",
     };
     return { state: "error", detail: `${envNames[slot]} not configured on this server.` };
   }
@@ -615,6 +625,7 @@ export async function resolveEngine(account?: EngineId, deadlineMs = 25_000): Pr
       a: "KAGGLE_KEY / KAGGLE_USERNAME",
       b: "KAGGLE_KEY_B / KAGGLE_USERNAME_B",
       c: "KAGGLE_KEY_C / KAGGLE_USERNAME_C",
+      d: "KAGGLE_KEY_D / KAGGLE_USERNAME_D",
     };
     return { status: "error", slot: account ?? null, message: `${envNames[account ?? "a"]} env vars not set on the server.` };
   }

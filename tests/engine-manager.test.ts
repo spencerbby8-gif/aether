@@ -181,15 +181,18 @@ describe("EngineManager — wake and deterministic failover", () => {
     expect(calls.some((c) => c.includes("kaggle.com"))).toBe(false);
   });
 
-  it("failover advances exactly one slot in A→B→C→A order", async () => {
+  it("failover advances exactly one slot in A→B→C→D→A order", async () => {
     const { impl } = scriptedFetch({ healthy: [TUNNEL_B, TUNNEL_C], beacon: { liveUrl: TUNNEL_B, tag: "b" } });
     const manager = new EngineManager({ fetchImpl: impl });
     const first = await manager.failover("a");
     expect(first.slot).toBe("b");
     const second = await manager.failover("b");
     expect(second.slot).toBe("c");
+    /* C no longer wraps to A: D sits between them now. */
     const third = await manager.failover("c");
-    expect(third.slot).toBe("a");
+    expect(third.slot).toBe("d");
+    const fourth = await manager.failover("d");
+    expect(fourth.slot).toBe("a");
   });
 
   it("reportFailure evicts the stale URL so it is not reused", async () => {

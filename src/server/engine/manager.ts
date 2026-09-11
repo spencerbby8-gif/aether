@@ -60,6 +60,7 @@ export function createMemoryStore(): EngineStateStore {
     a: { id: "a", state: "off", url: null, lastSeen: null },
     b: { id: "b", state: "off", url: null, lastSeen: null },
     c: { id: "c", state: "off", url: null, lastSeen: null },
+    d: { id: "d", state: "off", url: null, lastSeen: null },
   };
   let active: EngineId = "a";
   let events: ManagerEvent[] = [];
@@ -230,14 +231,9 @@ export class EngineManager {
       return { url: null, state: "off", detail: "Beacon reports the engine is off." };
     }
 
-    const tagged =
-      signal && slot === "a"
-        ? signal.liveUrlA
-        : signal && slot === "b"
-          ? signal.liveUrlB
-          : signal && slot === "c"
-            ? signal.liveUrlC
-            : null;
+    /* Looked up by slot rather than through an if/else chain, so the newest
+       slot is attributed like every other one. */
+    const tagged = signal?.liveUrlBySlot?.[slot] ?? null;
 
     const candidates: string[] = [];
     if (tagged) candidates.push(tagged);
@@ -360,7 +356,7 @@ export class EngineManager {
       const signal = beacon?.signal ?? null;
       /* Prefer this slot's tagged URL; fall back to the generic announcement. */
       const tagged =
-        slot === "a" ? signal?.liveUrlA : slot === "b" ? signal?.liveUrlB : slot === "c" ? signal?.liveUrlC : null;
+        signal?.liveUrlBySlot?.[slot] ?? null;
       const url = tagged ?? signal?.liveUrl ?? null;
       lastEventAt = Math.max(lastEventAt, signal?.events[0]?.at ?? 0);
       if (url && !signal?.off) {
@@ -503,9 +499,10 @@ export class EngineManager {
   }
 
   /**
-   * Deterministic A → B → C → A failover. Each call advances exactly one step
-   * from the slot that failed, so repeated failures walk the fleet in a fixed
-   * order rather than oscillating.
+   * Deterministic failover along ENGINE_IDS: A → B → C → D → A. Each call
+   * advances exactly one step from the slot that failed, so repeated failures
+   * walk the whole fleet in a fixed order rather than oscillating. The order
+   * comes from ENGINE_IDS, so adding a slot extends the chain automatically.
    */
   async failover(from: EngineId): Promise<{ slot: EngineId; url: string | null; state: EngineState }> {
     const currentIndex = ENGINE_IDS.indexOf(from);
@@ -574,11 +571,12 @@ export class EngineManager {
     return {
       model: undefined as string | undefined, // filled by route (never leak secrets)
       active: this.store.getActive(),
-      engines: {
-        a: { ...engines.a },
-        b: { ...engines.b },
-        c: { ...engines.c },
-      },
+      /* Copied per slot from ENGINE_IDS, not listed by hand: a hand-written
+         copy is how a fourth engine goes missing from every snapshot while
+         still existing in the store. */
+      engines: Object.fromEntries(
+        ENGINE_IDS.map((id) => [id, { ...engines[id] }]),
+      ) as Record<EngineId, EngineInfo>,
       activeOperations: this.activeOperations,
       idleMs: this.idleMs(),
       idleLimitMinutes: idleMinutes(),
@@ -599,7 +597,9 @@ export class EngineManager {
       deployment: deploymentStatus(),
       /* Per-engine configuration flags — booleans only, never values. */
       kaggleConfigured: ENGINE_IDS.some((id) => engineConfigured(id)),
-      kaggle: { a: engineConfigured("a"), b: engineConfigured("b"), c: engineConfigured("c") },
+      kaggle: Object.fromEntries(
+        ENGINE_IDS.map((id) => [id, engineConfigured(id)]),
+      ) as Record<EngineId, boolean>,
       events: this.store.getEvents().slice(-12),
     };
   }

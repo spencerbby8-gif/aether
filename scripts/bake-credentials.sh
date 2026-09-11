@@ -55,14 +55,14 @@ cfg = {
     "beaconSecret": vals.get("beaconSecret", ""),
     "telemetryTopic": vals.get("telemetryTopic", ""),
 }
-for slot in ("A", "B", "C"):
+for slot in ("A", "B", "C", "D"):
     u, k = vals.get(f"engine{slot}.user", ""), vals.get(f"engine{slot}.key", "")
     if u and k:
         cfg["engine" + slot] = {"user": u, "key": k}
 
 optional = ("beaconSecret", "telemetryTopic")
 missing = [n for n, v in cfg.items() if not v and n not in optional]
-engines = [s for s in "ABC" if "engine" + s in cfg]
+engines = [s for s in "ABCD" if "engine" + s in cfg]
 print(f"  engines baked : {', '.join(engines) or 'NONE'}")
 print(f"  kernelSlug    : {cfg['kernelSlug'] or '(MISSING)'}")
 print(f"  offKey        : {'set' if cfg['offKey'] else '(MISSING)'}")

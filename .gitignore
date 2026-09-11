@@ -42,3 +42,4 @@ apk/*mapping.txt
 # Engine credentials baked into the APK — never commit
 android/credentials.properties
 android/app/src/main/assets/aether-credentials.dat
+__pycache__/

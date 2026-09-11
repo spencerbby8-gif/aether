@@ -136,9 +136,9 @@ afterAll(() => {
   vi.unstubAllGlobals();
 });
 
-describe("three-engine fleet contract", () => {
-  it("ENGINE_IDS contains a, b, and c in failover order", () => {
-    expect(ENGINE_IDS).toEqual(["a", "b", "c"]);
+describe("four-engine fleet contract", () => {
+  it("ENGINE_IDS contains a, b, c and d in failover order", () => {
+    expect(ENGINE_IDS).toEqual(["a", "b", "c", "d"]);
   });
 
   it("reads ENGINE_KERNEL_C for engine C", () => {

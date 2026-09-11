@@ -10,7 +10,7 @@ import { controlAuthHeaders } from "@/lib/control-auth";
 
 export type EngineState = "alive" | "waking" | "off" | "quota" | "unreachable" | "error";
 
-export type EngineSlot = "a" | "b" | "c";
+export type EngineSlot = "a" | "b" | "c" | "d";
 
 /** Real per-engine health, from that slot's own /api/ps probe. */
 export type SlotHealth = "live" | "waking" | "offline";
@@ -61,7 +61,7 @@ export interface EngineSnapshot {
   };
   kaggleConfigured: boolean;
   /** Per-engine configuration flags (booleans only — never credentials). */
-  kaggle?: { a: boolean; b: boolean; c: boolean };
+  kaggle?: { a: boolean; b: boolean; c: boolean; d: boolean };
   model?: string;
   events: Array<{ at: number; text: string }>;
   /**
