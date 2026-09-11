@@ -68,6 +68,7 @@ PROOFS=(
   "TaskGraphProof|"
   "TaskGraphExecutorProof|"
   "WebImagesProof|"
+  "AttachmentTextProof|"
 )
 
 fails=0

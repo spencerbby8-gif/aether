@@ -39,6 +39,7 @@ import android.provider.MediaStore;
 import com.aether.app.core.AgentActivity;
 import com.aether.app.core.AnswerBlocks;
 import com.aether.app.core.Attachment;
+import com.aether.app.core.AttachmentText;
 import com.aether.app.core.ChatMessage;
 import com.aether.app.core.ChatSession;
 import com.aether.app.core.ChatStore;
@@ -97,7 +98,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ChatActivity extends AppCompatActivity {
 
     /** Files larger than this are attached but not read into the prompt. */
-    private static final int INLINE_MAX_BYTES = 200_000;
     /** Never read more than this off a content URI, whatever it claims. */
     private static final int READ_MAX_BYTES = 8 * 1024 * 1024;
     /** Minimum gap between re-normalising the growing answer. */
@@ -1279,15 +1279,16 @@ public class ChatActivity extends AppCompatActivity {
         /* A transcript to attach to must exist before anything is stored. */
         if (current == null) current = store.create(null);
 
+        /* Text extraction and the size policy live in AttachmentText so they
+           can be tested without an Activity. */
         String text = null;
         boolean inline = false;
-        if (size > INLINE_MAX_BYTES) {
-            text = null;
-        } else if (isTextual(mime, name)) {
-            text = TextNormalizer.userInput(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
-            inline = true;
+        if (isTextual(mime, name)) {
+            AttachmentText.Prepared prep = AttachmentText.prepare(TextNormalizer.userInput(
+                    new String(bytes, java.nio.charset.StandardCharsets.UTF_8)));
+            text = prep.text;
+            inline = prep.sentToEngine;
         }
-
         java.io.File stored = store.storeAttachment(current.id, bytes, name);
         Attachment a = new Attachment(
                 stored != null ? stored.getName() : ChatStore.newId(),
