@@ -18,8 +18,8 @@ import {
 
 const REAL_ENV = { ...process.env };
 
-const LIVE_URL = "https://alive-engine.trycloudflare.com";
-const LIVE_URL_B = "https://beta-engine.trycloudflare.com";
+const LIVE_URL = "https://alive-engine-real-tunnel-host.trycloudflare.com";
+const LIVE_URL_B = "https://beta-engine-real-tunnel-host.trycloudflare.com";
 
 /* Beacon payload in the shape resolve.ts parses (webhook.site request list). */
 function beaconWith(liveUrl: string | null) {
@@ -199,7 +199,7 @@ describe("getEngineLinks + isEngineAlive", () => {
   it("isEngineAlive is true only for 200 + non-empty models[]", async () => {
     installFetch({ aliveUrls: [LIVE_URL] });
     expect(await isEngineAlive(LIVE_URL)).toBe(true);
-    expect(await isEngineAlive("https://dead.trycloudflare.com")).toBe(false);
+    expect(await isEngineAlive("https://dead-engine-real-tunnel-host.trycloudflare.com")).toBe(false);
   });
 });
 

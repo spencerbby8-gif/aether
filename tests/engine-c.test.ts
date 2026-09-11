@@ -12,9 +12,9 @@ import { interpretBeacon } from "@/server/engine/beacon";
 
 const REAL_ENV = { ...process.env };
 
-const LIVE_A = "https://alpha.trycloudflare.com";
-const LIVE_B = "https://beta.trycloudflare.com";
-const LIVE_C = "https://gamma.trycloudflare.com";
+const LIVE_A = "https://alpha-real-tunnel-hostname-1.trycloudflare.com";
+const LIVE_B = "https://beta-real-tunnel-hostname-1.trycloudflare.com";
+const LIVE_C = "https://gamma-real-tunnel-hostname-1.trycloudflare.com";
 
 function beaconWith(liveUrl: string | null) {
   if (!liveUrl) return { data: [] };

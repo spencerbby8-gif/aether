@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  liveLinkFrom,
   resetDiscoveryCache,
   resolveEngine,
   kernelSlugFor,
@@ -21,7 +22,7 @@ import { redactSecrets } from "@/server/tools/security";
 
 const REAL_ENV = { ...process.env };
 
-const LIVE_D = "https://delta.trycloudflare.com";
+const LIVE_D = "https://delta-real-tunnel-hostname-1.trycloudflare.com";
 
 /** webhook.site shape: heartbeats arrive as GET ?m=<message>. */
 function beaconWith(tag: string, liveUrl: string) {
@@ -266,5 +267,97 @@ describe("engine D — secret handling", () => {
     /* The accessor returns the key for server-side use; this asserts the
        ERROR path does not carry it, which is what actually reaches a client. */
     expect(credentialEnvNames("d")).not.toContain(creds?.key ?? "");
+  });
+});
+
+describe("tunnel URL extraction — regression for the api.trycloudflare.com bug", () => {
+  /* The kernel announced https://api.trycloudflare.com as its live link. That
+     is cloudflared's own control-plane host, which appears in its log before
+     the real quick-tunnel hostname. A bare first-match regex accepted it, so a
+     client connected to Cloudflare instead of to the engine and the failure
+     looked like an engine problem. */
+  const real = "https://minutes-smart-wars-room.trycloudflare.com";
+
+  it("never returns the cloudflared control-plane host", () => {
+    const text = `AGENT LIVE LINK: https://api.trycloudflare.com (tools: web_search)`;
+    expect(liveLinkFrom(text)).toBeNull();
+  });
+
+  it("picks the real tunnel when both hosts are present", () => {
+    const text = `Registering https://api.trycloudflare.com then LIVE LINK: ${real}`;
+    expect(liveLinkFrom(text)).toBe(real);
+  });
+
+  it("still accepts an ordinary quick-tunnel hostname", () => {
+    expect(liveLinkFrom(`alive: ${real} (idle 1 min)`)).toBe(real);
+  });
+
+  it("rejects a hostname too short to be a real tunnel", () => {
+    expect(liveLinkFrom("LIVE LINK: https://abc.trycloudflare.com")).toBeNull();
+  });
+});
+
+describe("stale-instance reaping — the dominant measured latency source", () => {
+  /* Kaggle leaves the previous kernel version running after a push. Two
+     versions of one engine share one GPU: measured live, the older instance
+     answered a five-token reply in 3.35s while the newer took 16.49s, and a
+     prompt-size sweep on the contended pair gave TTFTs of 127s / 187s / 205s
+     with no correlation to prompt length. Pushing over a live instance is
+     therefore a latency bug, not just a quota one. */
+
+  it("reaps a live stale instance of its own slot when it has to push", async () => {
+    const { reapSlotInstances } = await import("@/server/engine/resolve");
+    const calls = installFetch({
+      aliveUrls: [LIVE_D],
+      beaconUrl: LIVE_D,
+      beaconTag: "d",
+      kernelStatus: "complete",
+    });
+    const reaped = await reapSlotInstances("d");
+    /* The reaper must have POSTed /off to the live D tunnel. */
+    const offs = calls.filter((c) => c.includes("/off"));
+    expect(offs.some((c) => c.includes(LIVE_D))).toBe(true);
+    expect(reaped.some((r) => r.url === LIVE_D && r.result === "shutdown")).toBe(true);
+  });
+
+  it("does not reap instances belonging to another slot", async () => {
+    const { reapSlotInstances } = await import("@/server/engine/resolve");
+    const other = "https://other-engine-real-tunnel-host-1.trycloudflare.com";
+    const calls = installFetch({
+      aliveUrls: [other],
+      beaconUrl: other,
+      beaconTag: "a",
+      kernelStatus: "complete",
+    });
+    const reaped = await reapSlotInstances("d");
+    const offs = calls.filter((c) => c.includes("/off"));
+    expect(offs.some((c) => c.includes(other))).toBe(false);
+    expect(reaped.some((r) => r.url === other)).toBe(false);
+  });
+
+  it("a live engine resolves without pushing or reaping at all", async () => {
+    /* The common case must stay cheap: if D is already serving, resolving it
+       costs one health probe, not a shutdown plus a 10-minute kernel push. */
+    const calls = installFetch({
+      aliveUrls: [LIVE_D],
+      beaconUrl: LIVE_D,
+      beaconTag: "d",
+    });
+    const result = await resolveEngine("d");
+    expect(result.status).toBe("alive");
+    expect(calls.filter((c) => c.includes("/off")).length).toBe(0);
+    expect(calls.filter((c) => c.includes("/kernels/push")).length).toBe(0);
+  });
+
+  it("wakeSlot reports that it stopped a stale instance", async () => {
+    installFetch({
+      aliveUrls: [LIVE_D],
+      beaconUrl: LIVE_D,
+      beaconTag: "d",
+      kernelStatus: "complete",
+    });
+    const { wakeSlot } = await import("@/server/engine/resolve");
+    const out = await wakeSlot("d");
+    expect(out.detail.toLowerCase()).toContain("stale");
   });
 });

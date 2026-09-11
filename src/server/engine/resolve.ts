@@ -157,7 +157,26 @@ async function fetchJson(
   }
 }
 
-const LIVE_LINK_RE = /https?:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
+/* A real quick tunnel hostname is a long random label. cloudflared also logs
+   its own control plane at api.trycloudflare.com, and a bare first-match regex
+   accepted that as an engine URL -- so a client would have connected to
+   Cloudflare instead of to a kernel and reported a failure that looked like an
+   engine problem. Require the label length and reject the control-plane hosts. */
+const TUNNEL_DENY = new Set([
+  "api", "www", "dash", "developers", "blog", "status", "support",
+]);
+const LIVE_LINK_RE = /https?:\/\/([a-z0-9-]{20,})\.trycloudflare\.com/i;
+
+export function liveLinkFrom(text: string): string | null {
+  const re = new RegExp(LIVE_LINK_RE.source, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const host = m[1].toLowerCase();
+    if (TUNNEL_DENY.has(host) || host.startsWith("api")) continue;
+    return m[0];
+  }
+  return null;
+}
 const ENGINE_TAG_RE = /engine\s*[:=]?\s*([abcd])\b/i;
 
 function slotFromText(text: string): EngineId | null {
@@ -193,10 +212,10 @@ export async function getEngineLinks(beaconTimeoutMs = 15_000): Promise<EngineLi
       const m = it.query?.m ?? "";
       if (!m.includes("LIVE LINK")) continue;
       if (!verifyAnnouncement(m)) continue; // reject unsigned/spoofed
-      const u = LIVE_LINK_RE.exec(m);
+      const u = liveLinkFrom(m);
       if (u) {
         out.push({
-          url: u[0],
+          url: u,
           ageMinutes: Math.round((Date.now() - new Date(it.created_at ?? 0).getTime()) / 60_000),
           slot: slotFromText(m),
         });
@@ -211,10 +230,10 @@ export async function getEngineLinks(beaconTimeoutMs = 15_000): Promise<EngineLi
         const m = d.message ?? "";
         if (!m.includes("LIVE LINK")) continue;
         if (!verifyAnnouncement(m)) continue;
-        const u = LIVE_LINK_RE.exec(m);
+        const u = liveLinkFrom(m);
         if (u) {
           out.push({
-            url: u[0],
+            url: u,
             ageMinutes: Math.round((Date.now() - (d.time ?? 0) * 1000) / 60_000),
             slot: slotFromText(m),
           });
@@ -511,6 +530,45 @@ export async function wakeKernel(acc: Account): Promise<unknown> {
   return r.json;
 }
 
+/**
+ * Shut down every live instance of ONE slot before pushing a new one.
+ *
+ * Kaggle leaves the previous version of a kernel running after a push, and no
+ * API lists or stops those old versions. Two versions of the same engine on one
+ * account therefore share one GPU: measured directly, the older instance
+ * answered in 3.35 s while the newer one took 16.49 s for the same five-token
+ * reply, and a prompt-size sweep on the contended pair produced TTFTs of 127 s,
+ * 187 s and 205 s that did not correlate with prompt length at all. The only
+ * handle on an old instance is the tunnel URL it announced to the beacon.
+ *
+ * Returns the URLs it shut down, so the caller can report them.
+ */
+export async function reapSlotInstances(
+  slot: EngineId,
+): Promise<Array<{ url: string; result: string }>> {
+  const KEY = engineOffKey();
+  if (!KEY) return [];
+  const candidates: string[] = [];
+  const override = engineUrlOverride(slot);
+  if (override) candidates.push(override);
+  for (const l of await getEngineLinks()) {
+    if (l.slot !== slot) continue;
+    if (l.ageMinutes > 360) continue;
+    if (!candidates.includes(l.url)) candidates.push(l.url);
+  }
+  const reaped: Array<{ url: string; result: string }> = [];
+  for (const url of candidates) {
+    /* Nothing is listening at a URL that is already gone, and probing first
+       would cost a round trip per stale tunnel on every wake. */
+    const outcome = await shutdownEngineUrl(url, KEY, {
+      isAlive: async (u) => isEngineAlive(u),
+      timeoutMs: 8_000,
+    });
+    reaped.push({ url, result: outcome });
+  }
+  return reaped;
+}
+
 /** Wake one specific slot. Exposed so the manager and the routes share one path. */
 export async function wakeSlot(slot: EngineId): Promise<{ state: "waking" | "quota" | "error"; detail: string }> {
   const [acc] = accounts(slot);
@@ -548,7 +606,17 @@ export async function wakeSlot(slot: EngineId): Promise<{ state: "waking" | "quo
         };
       }
     }
+    /* Reap first. Pushing over a live instance leaves both running on one GPU,
+       which is the single largest measured latency source. */
+    const reaped = await reapSlotInstances(slot);
+    const stopped = reaped.filter((r) => r.result === "shutdown").length;
     await wakeKernel(acc);
+    if (stopped > 0) {
+      return {
+        state: "waking",
+        detail: `pushed after stopping ${stopped} stale engine ${slot} instance(s)`,
+      };
+    }
     markWakeDispatched(slot);
     recordWakeDispatch(slot);
     return { state: "waking", detail: `wake push sent to ${acc.user}` };

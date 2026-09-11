@@ -1,0 +1,27 @@
+{
+  "health": [
+    0.11411948400018446,
+    0.07987395799955266,
+    0.10505903200009925
+  ],
+  "model": "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS",
+  "model_bytes": 16863429914,
+  "vram_bytes": 14770493193,
+  "beacon": 0.3075909990002401,
+  "ttft_median": 3.6373641820000557,
+  "wall_median": 27.979855519999546,
+  "tool_start": 12.146747196999968,
+  "tool_task_wall": 52.01136929899985,
+  "tool_names": [
+    "run_command"
+  ],
+  "search_wall": 28.014698789999784,
+  "search_tools": [
+    "web_search"
+  ],
+  "browser_wall": 43.05852119300016,
+  "browser_tools": [
+    "browser",
+    "fetch_page"
+  ]
+}

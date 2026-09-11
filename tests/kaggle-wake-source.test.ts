@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("b80d27c0ff59379ae97c4bfc96273e475525845fec5640652413d4041c2a981d");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("8f3aa199404ca2d98e1ee062dc9dc1721e9b7d459aac6e8be60e19abc13a6251");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -161,14 +161,17 @@ describe("engine source — rendering", () => {
        `batch` for independent reads, and separate action (8 s) and page-load
        (30 s) budgets. Measured on a real Chromium: 6/11 workflows -> 11/11,
        100.5 s -> 4.0 s wall. No selector was added and no limit raised.
-       121128 -> 166460: the agent gained an orchestration layer. The system
+       121128 -> 166460: the agent gained an orchestration layer.
+       166460 -> 168008: tunnel-URL extraction hardened so cloudflared
+       control-plane host api.trycloudflare.com can no longer be announced
+       as the engine URL. The system
        prompt named four tools while seven were registered; it now names all
        seven and says when each applies. Requests are routed from ordinary
        language into a plan with dependencies, tool results are normalized
        into a brief for the model with the raw kept for the UI, the budget
        catches near-duplicate calls and abandons actions that failed twice,
        and the turn is verified against the requested outcome before it ends. */
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(166460);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(170792);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
