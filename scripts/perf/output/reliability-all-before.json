@@ -1,0 +1,1601 @@
+{
+  "a": {
+    "slot": "a",
+    "url": "https://specifications-greensboro-deposits-ethical.trycloudflare.com",
+    "health_times": [
+      0.5597900629999231,
+      0.18340706399999362,
+      0.15543304100003752,
+      0.14510934099996575,
+      0.30048506299999644
+    ],
+    "health_failures": 0,
+    "conn_times": [
+      0.03322577199992338,
+      0.04514428599998155,
+      0.0389385979999588,
+      0.030411181999966175,
+      0.031129600000099344
+    ],
+    "model": "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS",
+    "size_gb": 16.27,
+    "vram_gb": 14.65,
+    "chat_runs": [
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.12136830699989787,
+        "ttft": 2.4666603819999864,
+        "wall": 5.2292880469999545,
+        "chars": 109,
+        "chunks": 19,
+        "decode_chars_s": 39.455190209282605,
+        "decode_tok_s": 7.891038041856521,
+        "max_gap": 0.1475649600000679,
+        "median_gap": 0.14573981199998798,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203234.4981465,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.1287649749999673,
+        "ttft": 0.7422662449999962,
+        "wall": 2.6346438040000066,
+        "chars": 87,
+        "chunks": 13,
+        "decode_chars_s": 45.973912333843906,
+        "decode_tok_s": 9.194782466768782,
+        "max_gap": 0.17013995199999954,
+        "median_gap": 0.1432383139999729,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203239.7333724,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.15714224900000318,
+        "ttft": 0.7504474039999423,
+        "wall": 3.6322231859999192,
+        "chars": 120,
+        "chunks": 20,
+        "decode_chars_s": 41.640991207414125,
+        "decode_tok_s": 8.328198241482825,
+        "max_gap": 0.14604371699999774,
+        "median_gap": 0.1439997620000213,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203242.3764546,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.1331377760000123,
+        "ttft": 0.7332263710000007,
+        "wall": 3.6281427739999117,
+        "chars": 114,
+        "chunks": 20,
+        "decode_chars_s": 39.37937547414681,
+        "decode_tok_s": 7.875875094829363,
+        "max_gap": 0.14788603499994224,
+        "median_gap": 0.14476020699999026,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203246.0055277,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      }
+    ],
+    "chat_ok": 4,
+    "ttft_median": 0.7463568244999692,
+    "wall_median": 3.6301829799999155,
+    "decode_median": 8.109618141669673,
+    "tool_run": {
+      "ok": true,
+      "error": null,
+      "first_byte": 0.14840159300001687,
+      "ttft": 33.843226535999975,
+      "wall": 39.31609462899996,
+      "chars": 82,
+      "chunks": 38,
+      "decode_chars_s": 14.983003172483034,
+      "decode_tok_s": 2.9966006344966067,
+      "max_gap": 0.1495800310000277,
+      "median_gap": 0.14362074199993913,
+      "tools": [
+        "run_command"
+      ],
+      "first_tool_at": 26.677718438000056,
+      "plan": {
+        "goal": "Use run_command to compute 17*23 and tell me.",
+        "capabilities": [
+          "code_execution"
+        ],
+        "tools": [
+          "run_command"
+        ],
+        "evidence": [
+          "code ran and exited 0, artifact present if one was asked for"
+        ],
+        "steps": [
+          {
+            "id": "s1",
+            "intent": "code_execution",
+            "tool": "run_command",
+            "stage": 2,
+            "deps": [],
+            "status": "planned",
+            "result": null,
+            "brief": null,
+            "artifacts": [],
+            "started": null,
+            "ended": null,
+            "error": null,
+            "tries": 0
+          }
+        ],
+        "waves": 1,
+        "chained": false,
+        "urls": [],
+        "created": 1789203249.629261,
+        "finished": null,
+        "outcome": null,
+        "notes": []
+      },
+      "verification": {
+        "ok": true,
+        "unmet": [],
+        "outcome": "verified",
+        "budget": {
+          "calls": 1,
+          "replayed": 0,
+          "refused": 0,
+          "remaining": 23,
+          "max": 24
+        }
+      }
+    },
+    "long_run": {
+      "ok": true,
+      "error": null,
+      "first_byte": 0.3395971870000949,
+      "ttft": 8.99676032800005,
+      "wall": 194.97411793800006,
+      "chars": 4804,
+      "chunks": 962,
+      "decode_chars_s": 25.83110149394707,
+      "decode_tok_s": 5.166220298789414,
+      "max_gap": 44.68727754100007,
+      "median_gap": 0.14669123799990302,
+      "tools": [
+        "web_search",
+        "fetch_page",
+        "fetch_page",
+        "web_search",
+        "fetch_page"
+      ],
+      "first_tool_at": 76.69603958900007,
+      "plan": {
+        "goal": "Write about 300 words on the history of relational databases.",
+        "capabilities": [
+          "chat"
+        ],
+        "tools": [],
+        "evidence": [
+          "a non-empty answer"
+        ],
+        "steps": [
+          {
+            "id": "s1",
+            "intent": "chat",
+            "tool": null,
+            "stage": 4,
+            "deps": [],
+            "status": "planned",
+            "result": null,
+            "brief": null,
+            "artifacts": [],
+            "started": null,
+            "ended": null,
+            "error": null,
+            "tries": 0
+          }
+        ],
+        "waves": 1,
+        "chained": false,
+        "urls": [],
+        "created": 1789203289.1553347,
+        "finished": null,
+        "outcome": null,
+        "notes": []
+      },
+      "verification": {
+        "ok": true,
+        "unmet": [],
+        "outcome": "verified",
+        "budget": {
+          "calls": 5,
+          "replayed": 0,
+          "refused": 0,
+          "remaining": 19,
+          "max": 24
+        }
+      }
+    }
+  },
+  "b": {
+    "slot": "b",
+    "url": "https://market-packed-complimentary-challenging.trycloudflare.com",
+    "health_times": [
+      0.38741319199993995,
+      0.09465700900000229,
+      0.0678189720000546,
+      0.06547410600001058,
+      0.07753853799999888
+    ],
+    "health_failures": 0,
+    "conn_times": [
+      0.03210485800002516,
+      0.047953844999938156,
+      0.040800068999942596,
+      0.04098209300002509,
+      0.03820749399994838
+    ],
+    "model": "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS",
+    "size_gb": 16.27,
+    "vram_gb": 14.65,
+    "chat_runs": [
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.06799012999999832,
+        "ttft": 2.3744635729999573,
+        "wall": 5.393544854999959,
+        "chars": 122,
+        "chunks": 21,
+        "decode_chars_s": 40.409644062044144,
+        "decode_tok_s": 8.08192881240883,
+        "max_gap": 0.1541218370000479,
+        "median_gap": 0.14322096300003295,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203503.8430047,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.07797498200000064,
+        "ttft": 0.6726763360001087,
+        "wall": 2.8173190150000664,
+        "chars": 87,
+        "chunks": 15,
+        "decode_chars_s": 40.56619820723139,
+        "decode_tok_s": 8.113239641446278,
+        "max_gap": 0.14758962799999154,
+        "median_gap": 0.14265634149995776,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203509.2446268,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.07649403199991411,
+        "ttft": 0.6612164279999888,
+        "wall": 3.279408998000008,
+        "chars": 91,
+        "chunks": 18,
+        "decode_chars_s": 34.75680171225883,
+        "decode_tok_s": 6.951360342451766,
+        "max_gap": 0.15904038200005743,
+        "median_gap": 0.14458961100001488,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203512.06206,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.071606920000022,
+        "ttft": 0.6625369180000007,
+        "wall": 3.5597705820000556,
+        "chars": 120,
+        "chunks": 20,
+        "decode_chars_s": 41.41882012868871,
+        "decode_tok_s": 8.283764025737742,
+        "max_gap": 0.14752788800001326,
+        "median_gap": 0.1454625669999814,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203515.3385942,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      }
+    ],
+    "chat_ok": 4,
+    "ttft_median": 0.6676066270000547,
+    "wall_median": 3.419589790000032,
+    "decode_median": 8.097584226927554,
+    "tool_run": {
+      "ok": true,
+      "error": null,
+      "first_byte": 0.06256812100002662,
+      "ttft": 29.953294015999973,
+      "wall": 34.87280405399997,
+      "chars": 70,
+      "chunks": 34,
+      "decode_chars_s": 14.229059288281915,
+      "decode_tok_s": 2.845811857656383,
+      "max_gap": 0.15173936899998353,
+      "median_gap": 0.144203872999924,
+      "tools": [
+        "run_command"
+      ],
+      "first_tool_at": 25.809199386000046,
+      "plan": {
+        "goal": "Use run_command to compute 17*23 and tell me.",
+        "capabilities": [
+          "code_execution"
+        ],
+        "tools": [
+          "run_command"
+        ],
+        "evidence": [
+          "code ran and exited 0, artifact present if one was asked for"
+        ],
+        "steps": [
+          {
+            "id": "s1",
+            "intent": "code_execution",
+            "tool": "run_command",
+            "stage": 2,
+            "deps": [],
+            "status": "planned",
+            "result": null,
+            "brief": null,
+            "artifacts": [],
+            "started": null,
+            "ended": null,
+            "error": null,
+            "tries": 0
+          }
+        ],
+        "waves": 1,
+        "chained": false,
+        "urls": [],
+        "created": 1789203518.8894265,
+        "finished": null,
+        "outcome": null,
+        "notes": []
+      },
+      "verification": {
+        "ok": true,
+        "unmet": [],
+        "outcome": "verified",
+        "budget": {
+          "calls": 1,
+          "replayed": 0,
+          "refused": 0,
+          "remaining": 23,
+          "max": 24
+        }
+      }
+    },
+    "long_run": {
+      "ok": true,
+      "error": null,
+      "first_byte": 0.2726577160000261,
+      "ttft": 75.50932621599998,
+      "wall": 377.7372251999999,
+      "chars": 160,
+      "chunks": 47,
+      "decode_chars_s": 0.5294018207381658,
+      "decode_tok_s": 0.10588036414763316,
+      "max_gap": 155.97530345400003,
+      "median_gap": 0.15002561350001997,
+      "tools": [
+        "web_search",
+        "web_search",
+        "fetch_page",
+        "fetch_page",
+        "fetch_page",
+        "fetch_page",
+        "web_search",
+        "web_search",
+        "run_command",
+        "run_command",
+        "run_command"
+      ],
+      "first_tool_at": 20.828300815000034,
+      "plan": {
+        "goal": "Write about 300 words on the history of relational databases.",
+        "capabilities": [
+          "chat"
+        ],
+        "tools": [],
+        "evidence": [
+          "a non-empty answer"
+        ],
+        "steps": [
+          {
+            "id": "s1",
+            "intent": "chat",
+            "tool": null,
+            "stage": 4,
+            "deps": [],
+            "status": "planned",
+            "result": null,
+            "brief": null,
+            "artifacts": [],
+            "started": null,
+            "ended": null,
+            "error": null,
+            "tries": 0
+          }
+        ],
+        "waves": 1,
+        "chained": false,
+        "urls": [],
+        "created": 1789203553.972176,
+        "finished": null,
+        "outcome": null,
+        "notes": []
+      },
+      "verification": null
+    }
+  },
+  "c": {
+    "slot": "c",
+    "url": "https://rocks-purchasing-pavilion-sentence.trycloudflare.com",
+    "health_times": [
+      0.3820373080000081,
+      0.09884861499995168,
+      0.06902973499995824,
+      0.12086209399990366,
+      0.09140697899988481
+    ],
+    "health_failures": 0,
+    "conn_times": [
+      0.028890972999988662,
+      0.027438989000074798,
+      0.02818370800014236,
+      0.029685069000151998,
+      0.0317529530000229
+    ],
+    "model": "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS",
+    "size_gb": 16.27,
+    "vram_gb": 14.65,
+    "chat_runs": [
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.08300830099983614,
+        "ttft": 2.3279328249998343,
+        "wall": 4.477139462999958,
+        "chars": 87,
+        "chunks": 15,
+        "decode_chars_s": 40.48005364479756,
+        "decode_tok_s": 8.096010728959511,
+        "max_gap": 0.14657512199983103,
+        "median_gap": 0.1428003585000397,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203941.3244934,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.05925376799996229,
+        "ttft": 0.6556426230001762,
+        "wall": 4.4096982500000195,
+        "chars": 149,
+        "chunks": 26,
+        "decode_chars_s": 39.69040813576794,
+        "decode_tok_s": 7.938081627153588,
+        "max_gap": 0.1675178219998088,
+        "median_gap": 0.14326179100021363,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203945.7792866,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.06143479999991541,
+        "ttft": 0.6505267869999898,
+        "wall": 4.388607718999992,
+        "chars": 156,
+        "chunks": 26,
+        "decode_chars_s": 41.73264379177971,
+        "decode_tok_s": 8.34652875835594,
+        "max_gap": 0.14871585799983222,
+        "median_gap": 0.143481348000023,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203950.1927636,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.07839092699987305,
+        "ttft": 0.6610467989999051,
+        "wall": 2.835617898999999,
+        "chars": 87,
+        "chunks": 15,
+        "decode_chars_s": 40.00788937183808,
+        "decode_tok_s": 8.001577874367616,
+        "max_gap": 0.1591696339999089,
+        "median_gap": 0.14399344200012365,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789203954.5965557,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      }
+    ],
+    "chat_ok": 4,
+    "ttft_median": 0.6583447110000407,
+    "wall_median": 4.399152984500006,
+    "decode_median": 8.048794301663563,
+    "tool_run": {
+      "ok": true,
+      "error": null,
+      "first_byte": 0.08330672000010964,
+      "ttft": 32.92891361300008,
+      "wall": 34.94447891500022,
+      "chars": 19,
+      "chunks": 14,
+      "decode_chars_s": 9.42663578359153,
+      "decode_tok_s": 1.885327156718306,
+      "max_gap": 0.14830111499986742,
+      "median_gap": 0.14415691799990782,
+      "tools": [
+        "run_command"
+      ],
+      "first_tool_at": 27.529621808,
+      "plan": {
+        "goal": "Use run_command to compute 17*23 and tell me.",
+        "capabilities": [
+          "code_execution"
+        ],
+        "tools": [
+          "run_command"
+        ],
+        "evidence": [
+          "code ran and exited 0, artifact present if one was asked for"
+        ],
+        "steps": [
+          {
+            "id": "s1",
+            "intent": "code_execution",
+            "tool": "run_command",
+            "stage": 2,
+            "deps": [],
+            "status": "planned",
+            "result": null,
+            "brief": null,
+            "artifacts": [],
+            "started": null,
+            "ended": null,
+            "error": null,
+            "tries": 0
+          }
+        ],
+        "waves": 1,
+        "chained": false,
+        "urls": [],
+        "created": 1789203957.4375644,
+        "finished": null,
+        "outcome": null,
+        "notes": []
+      },
+      "verification": {
+        "ok": true,
+        "unmet": [],
+        "outcome": "verified",
+        "budget": {
+          "calls": 1,
+          "replayed": 0,
+          "refused": 0,
+          "remaining": 23,
+          "max": 24
+        }
+      }
+    },
+    "long_run": {
+      "ok": true,
+      "error": null,
+      "first_byte": 0.27778434299989385,
+      "ttft": 7.492624610999883,
+      "wall": 89.9893432209999,
+      "chars": 2683,
+      "chunks": 571,
+      "decode_chars_s": 32.52250568515066,
+      "decode_tok_s": 6.504501137030132,
+      "max_gap": 0.17317252999987431,
+      "median_gap": 0.1439851349999799,
+      "tools": [],
+      "first_tool_at": null,
+      "plan": {
+        "goal": "Write about 300 words on the history of relational databases.",
+        "capabilities": [
+          "chat"
+        ],
+        "tools": [],
+        "evidence": [
+          "a non-empty answer"
+        ],
+        "steps": [
+          {
+            "id": "s1",
+            "intent": "chat",
+            "tool": null,
+            "stage": 4,
+            "deps": [],
+            "status": "planned",
+            "result": null,
+            "brief": null,
+            "artifacts": [],
+            "started": null,
+            "ended": null,
+            "error": null,
+            "tries": 0
+          }
+        ],
+        "waves": 1,
+        "chained": false,
+        "urls": [],
+        "created": 1789203992.576391,
+        "finished": null,
+        "outcome": null,
+        "notes": []
+      },
+      "verification": {
+        "ok": true,
+        "unmet": [],
+        "outcome": "verified",
+        "budget": {
+          "calls": 0,
+          "replayed": 0,
+          "refused": 0,
+          "remaining": 24,
+          "max": 24
+        }
+      }
+    }
+  },
+  "d": {
+    "slot": "d",
+    "url": "https://preparing-provide-finder-chart.trycloudflare.com",
+    "health_times": [
+      0.3964886460000798,
+      0.10293119999982991,
+      0.0893411819999983,
+      0.08448349600007532,
+      0.07922293900014665
+    ],
+    "health_failures": 0,
+    "conn_times": [
+      0.031804318000013154,
+      0.0316459240000313,
+      0.027315471000065372,
+      0.03751034299989442,
+      0.03252655899996171
+    ],
+    "model": "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS",
+    "size_gb": 16.27,
+    "vram_gb": 14.65,
+    "chat_runs": [
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.07280748900006984,
+        "ttft": 2.5212887790000877,
+        "wall": 5.278375818000086,
+        "chars": 109,
+        "chunks": 19,
+        "decode_chars_s": 39.534479128934045,
+        "decode_tok_s": 7.906895825786809,
+        "max_gap": 0.1483560290000696,
+        "median_gap": 0.1448746984999616,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789204102.0222836,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.08037665200004085,
+        "ttft": 0.6914413819999936,
+        "wall": 3.915256377000105,
+        "chars": 123,
+        "chunks": 22,
+        "decode_chars_s": 38.15355415579477,
+        "decode_tok_s": 7.630710831158955,
+        "max_gap": 0.15470769400008066,
+        "median_gap": 0.14613775900011206,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789204107.308521,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.06713573900015035,
+        "ttft": 0.6620953950000512,
+        "wall": 2.916077822000034,
+        "chars": 90,
+        "chunks": 15,
+        "decode_chars_s": 39.92932638777875,
+        "decode_tok_s": 7.98586527755575,
+        "max_gap": 0.17485210199993162,
+        "median_gap": 0.14722541449998516,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789204111.2134418,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      },
+      {
+        "ok": true,
+        "error": null,
+        "first_byte": 0.06592959300019174,
+        "ttft": 0.6655095890000666,
+        "wall": 2.4325657570000203,
+        "chars": 76,
+        "chunks": 12,
+        "decode_chars_s": 43.00938553980475,
+        "decode_tok_s": 8.601877107960949,
+        "max_gap": 0.16178570500005662,
+        "median_gap": 0.14563446199986174,
+        "tools": [],
+        "first_tool_at": null,
+        "plan": {
+          "goal": "Reply with one short sentence about databases.",
+          "capabilities": [
+            "chat"
+          ],
+          "tools": [],
+          "evidence": [
+            "a non-empty answer"
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "intent": "chat",
+              "tool": null,
+              "stage": 4,
+              "deps": [],
+              "status": "planned",
+              "result": null,
+              "brief": null,
+              "artifacts": [],
+              "started": null,
+              "ended": null,
+              "error": null,
+              "tries": 0
+            }
+          ],
+          "waves": 1,
+          "chained": false,
+          "urls": [],
+          "created": 1789204114.1267989,
+          "finished": null,
+          "outcome": null,
+          "notes": []
+        },
+        "verification": {
+          "ok": true,
+          "unmet": [],
+          "outcome": "verified",
+          "budget": {
+            "calls": 0,
+            "replayed": 0,
+            "refused": 0,
+            "remaining": 24,
+            "max": 24
+          }
+        }
+      }
+    ],
+    "chat_ok": 4,
+    "ttft_median": 0.6784754855000301,
+    "wall_median": 3.4156670995000695,
+    "decode_median": 7.94638055167128,
+    "tool_run": {
+      "ok": true,
+      "error": null,
+      "first_byte": 0.18886073499993472,
+      "ttft": 29.60469025500015,
+      "wall": 33.13112746499996,
+      "chars": 63,
+      "chunks": 24,
+      "decode_chars_s": 17.865056499901026,
+      "decode_tok_s": 3.5730112999802053,
+      "max_gap": 0.1520442109999749,
+      "median_gap": 0.1466941510000197,
+      "tools": [
+        "run_command"
+      ],
+      "first_tool_at": 25.07513700200002,
+      "plan": {
+        "goal": "Use run_command to compute 17*23 and tell me.",
+        "capabilities": [
+          "code_execution"
+        ],
+        "tools": [
+          "run_command"
+        ],
+        "evidence": [
+          "code ran and exited 0, artifact present if one was asked for"
+        ],
+        "steps": [
+          {
+            "id": "s1",
+            "intent": "code_execution",
+            "tool": "run_command",
+            "stage": 2,
+            "deps": [],
+            "status": "planned",
+            "result": null,
+            "brief": null,
+            "artifacts": [],
+            "started": null,
+            "ended": null,
+            "error": null,
+            "tries": 0
+          }
+        ],
+        "waves": 1,
+        "chained": false,
+        "urls": [],
+        "created": 1789204116.6826859,
+        "finished": null,
+        "outcome": null,
+        "notes": []
+      },
+      "verification": {
+        "ok": true,
+        "unmet": [],
+        "outcome": "verified",
+        "budget": {
+          "calls": 1,
+          "replayed": 0,
+          "refused": 0,
+          "remaining": 23,
+          "max": 24
+        }
+      }
+    },
+    "long_run": {
+      "ok": true,
+      "error": null,
+      "first_byte": 0.3247151670000221,
+      "ttft": 10.332300469000074,
+      "wall": 86.19170339199991,
+      "chars": 2171,
+      "chunks": 518,
+      "decode_chars_s": 28.618733029096568,
+      "decode_tok_s": 5.723746605819313,
+      "max_gap": 0.1838520270000572,
+      "median_gap": 0.1458773229999224,
+      "tools": [],
+      "first_tool_at": null,
+      "plan": {
+        "goal": "Write about 300 words on the history of relational databases.",
+        "capabilities": [
+          "chat"
+        ],
+        "tools": [],
+        "evidence": [
+          "a non-empty answer"
+        ],
+        "steps": [
+          {
+            "id": "s1",
+            "intent": "chat",
+            "tool": null,
+            "stage": 4,
+            "deps": [],
+            "status": "planned",
+            "result": null,
+            "brief": null,
+            "artifacts": [],
+            "started": null,
+            "ended": null,
+            "error": null,
+            "tries": 0
+          }
+        ],
+        "waves": 1,
+        "chained": false,
+        "urls": [],
+        "created": 1789204149.951251,
+        "finished": null,
+        "outcome": null,
+        "notes": []
+      },
+      "verification": {
+        "ok": true,
+        "unmet": [],
+        "outcome": "verified",
+        "budget": {
+          "calls": 0,
+          "replayed": 0,
+          "refused": 0,
+          "remaining": 24,
+          "max": 24
+        }
+      }
+    }
+  }
+}

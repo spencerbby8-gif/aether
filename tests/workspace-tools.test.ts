@@ -130,6 +130,37 @@ print(json.dumps(out))
   });
 });
 
+describe("package_files must not swallow the previous archive", () => {
+  /* Measured live: a re-run packed the old svc.zip inside the new one, so the
+     archive listed itself as an entry and grew every time. */
+  const CASE = `
+import json, re, os, subprocess, sys, zipfile
+nb = json.loads(open(sys.argv[1]).read())
+src = nb["cells"][4]["source"]; src = "".join(src) if isinstance(src, list) else src
+ns = {"re": re, "os": os, "subprocess": subprocess}
+exec(src[src.find("SESSION_ROOT ="):src.find("def t_run_command")], ns)
+ns["SESSION_ROOT"] = sys.argv[2]; ns["GEN_DIR"] = sys.argv[3]
+sd = ns["_session_dir"]; pkg = ns["t_package_files"]
+ws = sd("repack"); ns["_CURRENT"] = {"ws": ws, "session": "repack"}
+os.makedirs(ws + "/svc")
+open(ws + "/svc/app.py", "w").write("x = 1")
+open(ws + "/svc/REPORT.md", "w").write("report")
+open(ws + "/svc.zip", "wb").write(b"PK\x03\x04oldarchive")
+msg = pkg(name="svc.zip")
+zp = os.path.join(ns["GEN_DIR"], "svc.zip")
+z = zipfile.ZipFile(zp)
+print(json.dumps({"entries": sorted(z.namelist()), "msg": msg}))
+`;
+
+  it("excludes a root-level .zip left over from a previous run", () => {
+    const out = runPython(CASE, [nbPath, sessionRoot, genDir]);
+    const r = JSON.parse(out.trim().split("\n").pop()!);
+    expect(r.entries).toEqual(["svc/REPORT.md", "svc/app.py"]);
+    expect(r.entries).not.toContain("svc.zip");
+    expect(r.msg).toContain("2 file(s)");
+  });
+});
+
 describe("package_files", () => {
   const CASE = `
 import json, re, os, subprocess, sys, zipfile, hashlib
