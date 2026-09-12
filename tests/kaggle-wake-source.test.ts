@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("5b4c42201b6801a425e63e22570ec8a41d067132a6339e1acb47b5f112eb2ad6");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("52616b26e7f93ff7df384df03b68ca8de7e6260f0f93d5b3396ce6c5110dbe1f");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -171,7 +171,7 @@ describe("engine source — rendering", () => {
        into a brief for the model with the raw kept for the UI, the budget
        catches near-duplicate calls and abandons actions that failed twice,
        and the turn is verified against the requested outcome before it ends. */
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(177720);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(182216);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
@@ -339,9 +339,15 @@ describe("engine source — keep-alive socket hygiene (the 501 bug)", () => {
   });
 
   it("drains the request body before the auth gate can return", () => {
+    /* Scoped to do_POST. The same key comparison legitimately appears in the
+       GET /workspace export too, and a bare indexOf now finds that one first,
+       which would make this assert nothing about the POST path it exists to
+       protect. */
     const py = enginePython();
-    const read = py.indexOf("body = self._read_body()");
-    const gate = py.indexOf("if self.headers.get('X-Engine-Key') != OFF_KEY:");
+    const post = py.indexOf("def do_POST(self):");
+    expect(post).toBeGreaterThan(-1);
+    const read = py.indexOf("body = self._read_body()", post);
+    const gate = py.indexOf("if self.headers.get('X-Engine-Key') != OFF_KEY:", post);
     expect(read).toBeGreaterThan(-1);
     expect(gate).toBeGreaterThan(-1);
     expect(read).toBeLessThan(gate);
@@ -354,7 +360,17 @@ describe("engine source — keep-alive socket hygiene (the 501 bug)", () => {
   });
 
   it("has exactly one authoritative key check, not a dead duplicate", () => {
-    expect(enginePython().match(/X-Engine-Key'\) != OFF_KEY/g)).toHaveLength(1);
+    /* The bug this guards was a second key check inside do_POST, after the
+       first one had already returned -- dead code that read as if /off were
+       gated twice. Each route legitimately gates itself, so the assertion is
+       one check per request method, counted within its own handler. */
+    const py = enginePython();
+    const post = py.indexOf("def do_POST(self):");
+    const get = py.indexOf("def do_GET(self):");
+    expect(post).toBeGreaterThan(-1);
+    expect(get).toBeGreaterThan(-1);
+    const postBody = py.slice(post, get > post ? get : undefined);
+    expect(postBody.match(/X-Engine-Key'\) != OFF_KEY/g)).toHaveLength(1);
   });
 
   it("flushes /off before the process exits, so the 200 is not lost", () => {

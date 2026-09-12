@@ -1,4 +1,5 @@
 import { getEngineManager } from "@/server/engine/manager";
+import { transferWorkspace } from "@/server/engine/workspace-transfer";
 import {
   ENGINE_OFF_HEADER,
   MODEL_NAME,
@@ -158,7 +159,7 @@ export async function POST(request: Request) {
      serverless host this instance may be brand new and its module memory empty. */
   const engineManager = await getEngineManager();
 
-  let body: { messages?: unknown; engine?: string };
+  let body: { messages?: unknown; engine?: string; session?: string };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -215,6 +216,9 @@ export async function POST(request: Request) {
     let base2 = base;
     let slot2 = slot;
     let didFailover = false;
+    /* Events raised before the stream exists: a failover happens while the
+       first connection attempt is still failing. Drained when it starts. */
+    const pendingEvents: unknown[] = [];
 
     const idleTimeoutMs = streamIdleTimeoutMs();
     const totalTimeoutMs = streamTotalTimeoutMs();
@@ -238,7 +242,14 @@ export async function POST(request: Request) {
               "content-type": "application/json",
               ...(offKey ? { [ENGINE_OFF_HEADER]: offKey } : {}),
             },
-            body: JSON.stringify({ model: MODEL_NAME, messages, stream: true }),
+            /* The session id binds the engine's workspace for this turn. Without
+               it every conversation shares one directory on the engine. */
+            body: JSON.stringify({
+              model: MODEL_NAME,
+              messages,
+              stream: true,
+              session: typeof body.session === "string" && body.session ? body.session : "default",
+            }),
             signal: guard.signal,
           });
           if (!response.ok || !response.body) throw new Error(`Engine chat responded ${response.status}.`);
@@ -247,9 +258,33 @@ export async function POST(request: Request) {
           if (request.signal.aborted) return null;
           /* Fail over only on a connection-level failure, before any content. */
           if (allowFailover && !didFailover) {
+            const deadUrl = base2;
+            const deadSlot = slot2;
             engineManager.reportFailure(slot2);
             const failover = await engineManager.failover(slot2);
             if (failover.state === "alive" && failover.url) {
+              /* Carry the workspace across, or the task resumes on an engine
+                 that does not have the files it already made. Best-effort:
+                 the old engine is often the thing that broke, and the task
+                 still continues on its history and plan without the files. */
+              const session = String(body.session ?? "default");
+              const moved = await transferWorkspace(
+                deadUrl,
+                failover.url,
+                session,
+                offKey ?? "",
+              ).catch(() => ({ status: "failed" as const, detail: "transfer threw" }));
+              /* Queued, not sent directly: `send` belongs to the stream built
+                 below this closure, so calling it here would be a
+                 use-before-initialisation. The stream drains the queue first. */
+              pendingEvents.push({
+                failover: {
+                  from: deadSlot,
+                  to: failover.slot,
+                  workspace: moved.status,
+                  files: moved.status === "restored" ? moved.files : 0,
+                },
+              });
               base2 = failover.url;
               slot2 = failover.slot;
               didFailover = true;
@@ -273,6 +308,7 @@ export async function POST(request: Request) {
             closed = true;
           }
         };
+        for (const event of pendingEvents.splice(0)) send(event);
         /* Guarantee exactly one terminal event, then close. */
         let terminated = false;
         const terminate = (line: unknown) => {
