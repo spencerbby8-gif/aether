@@ -1019,7 +1019,7 @@ public class ChatActivity extends AppCompatActivity {
             LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 190));
             card.addView(iv, ilp);
-            loadImage(item.url, iv, status);
+            loadImage(mediaUrl(item), iv, status);
         }
 
         /* An image the agent FOUND is not one it MADE, and the reader is
@@ -1056,7 +1056,7 @@ public class ChatActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         olp.leftMargin = Ui.dp(this, 6);
         open.setOnClickListener(v -> {
-            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(item.url))); }
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(mediaUrl(item)))); }
             catch (Exception e) { toast("Nothing on this phone can open that file"); }
         });
         row.addView(open, olp);
@@ -1075,6 +1075,30 @@ public class ChatActivity extends AppCompatActivity {
         clp.rightMargin = Ui.dp(this, 40);
         card.setLayoutParams(clp);
         return card;
+    }
+
+    /**
+     * The URL to load a media item from right now.
+     *
+     * Generated files live on an engine behind a quick tunnel, and that hostname
+     * changes on every restart, so the URL stored with an old message goes dead
+     * while the file is still there. Rebasing the path onto whichever engine is
+     * live now is what makes last week's image load again instead of showing a
+     * broken card. Web media is left alone: only engine-hosted files move.
+     */
+    private String mediaUrl(MediaItem item) {
+        String stored = item.url;
+        if (stored == null) return null;
+        if (!stored.contains("/files/")) return stored;
+        synchronized (lastStates) {
+            for (EngineRouter.SlotState st : lastStates) {
+                if (st != null && st.live && st.url != null && !st.url.isEmpty()) {
+                    String rebased = item.resolveUrl(st.url);
+                    if (rebased != null) return rebased;
+                }
+            }
+        }
+        return stored;
     }
 
     /** Decode off the UI thread; a full-size image must not stall the list. */
@@ -1116,7 +1140,7 @@ public class ChatActivity extends AppCompatActivity {
         status.setText("downloading\u2026");
         mediaExec.execute(() -> {
             try {
-                byte[] data = EngineCore.fetch(item.url, 120_000);
+                byte[] data = EngineCore.fetch(mediaUrl(item), 120_000);
                 String name = item.suggestedName();
                 String where = writeToDownloads(name,
                         item.isAudio() ? "audio/wav" : "image/jpeg", data);

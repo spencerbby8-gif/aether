@@ -55,6 +55,44 @@ public final class MediaItem {
         return url.startsWith("http://") || url.startsWith("https://");
     }
 
+    /**
+     * The path part of the URL, e.g. "/files/blue-cube.jpg".
+     *
+     * A generated file lives on the engine behind a quick tunnel, and the tunnel
+     * hostname changes every time the engine restarts. The stored URL therefore
+     * goes dead while the file itself is still there. Rebasing the path onto the
+     * engine's current URL is what makes an image from last week load again
+     * instead of showing a broken card.
+     */
+    public String path() {
+        int scheme = url.indexOf("://");
+        if (scheme < 0) return url;
+        int slash = url.indexOf('/', scheme + 3);
+        return slash < 0 ? "/" : url.substring(slash);
+    }
+
+    /**
+     * The URL to load now: `currentBaseUrl` when the engine has moved, the
+     * stored URL otherwise. Returns null when there is nothing usable, so the
+     * caller can show a real "media unavailable" instead of a broken image.
+     */
+    public String resolveUrl(String currentBaseUrl) {
+        if (!isValid()) return null;
+        if (currentBaseUrl == null || currentBaseUrl.isEmpty()) return url;
+        String base = currentBaseUrl;
+        while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+        if (!base.startsWith("http://") && !base.startsWith("https://")) return url;
+        String p = path();
+        if (!p.startsWith("/")) p = "/" + p;
+        return base + p;
+    }
+
+    /** True when the stored URL still points at the engine that is serving now. */
+    public boolean isStale(String currentBaseUrl) {
+        String live = resolveUrl(currentBaseUrl);
+        return live != null && !live.equals(url);
+    }
+
     public JSONObject toJson() throws JSONException {
         JSONObject o = new JSONObject();
         o.put("kind", kind);
