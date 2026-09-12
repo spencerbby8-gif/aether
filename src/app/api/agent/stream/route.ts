@@ -1,5 +1,5 @@
 import { getEngineManager } from "@/server/engine/manager";
-import { transferWorkspace } from "@/server/engine/workspace-transfer";
+import { fetchCheckpoint, transferWorkspace } from "@/server/engine/workspace-transfer";
 import {
   ENGINE_OFF_HEADER,
   MODEL_NAME,
@@ -219,6 +219,34 @@ export async function POST(request: Request) {
     /* Events raised before the stream exists: a failover happens while the
        first connection attempt is still failing. Drained when it starts. */
     const pendingEvents: unknown[] = [];
+    /*
+     * The newest checkpoint of this session, pulled off the engine while it is
+     * still alive.
+     *
+     * A checkpoint the engine writes to its own disk is worthless once the
+     * kernel dies -- the tunnel goes with it. The only party guaranteed to
+     * outlive the engine is whoever is reading the stream, so this route keeps
+     * the copy and hands it to the transfer if failover ever needs it. Without
+     * this, an engine that dies mid-task takes every file the task produced
+     * with it, and "continue from the last verified step" is not possible.
+     */
+    const sessionId = typeof body.session === "string" && body.session ? body.session : "default";
+    let heldCheckpoint: ArrayBuffer | null = null;
+    let checkpointInFlight = false;
+    const pullCheckpoint = (engineUrl: string) => {
+      if (checkpointInFlight || !offKey) return;
+      checkpointInFlight = true;
+      fetchCheckpoint(engineUrl, sessionId, offKey)
+        .then((buf) => {
+          if (buf) heldCheckpoint = buf;
+        })
+        .catch(() => {
+          /* Best effort: a failed pull must never disturb the stream. */
+        })
+        .finally(() => {
+          checkpointInFlight = false;
+        });
+    };
 
     const idleTimeoutMs = streamIdleTimeoutMs();
     const totalTimeoutMs = streamTotalTimeoutMs();
@@ -273,6 +301,8 @@ export async function POST(request: Request) {
                 failover.url,
                 session,
                 offKey ?? "",
+                fetch,
+                heldCheckpoint,
               ).catch(() => ({ status: "failed" as const, detail: "transfer threw" }));
               /* Queued, not sent directly: `send` belongs to the stream built
                  below this closure, so calling it here would be a
@@ -417,7 +447,12 @@ export async function POST(request: Request) {
             for (const line of lines) {
               const trimmed = line.trim();
               if (!trimmed) continue;
-              let parsed: { message?: { content?: string; thinking?: string }; done?: boolean; error?: string };
+              let parsed: {
+                message?: { content?: string; thinking?: string };
+                done?: boolean;
+                error?: string;
+                tool_result?: unknown;
+              };
               try {
                 parsed = JSON.parse(trimmed);
               } catch {
@@ -435,6 +470,11 @@ export async function POST(request: Request) {
               if (message?.content) {
                 send({ message: { role: "assistant", content: message.content } });
                 forwardedAny = true;
+              }
+              /* A tool result marks a completed step, which is exactly when the
+                 engine has just written a fresh checkpoint. */
+              if (parsed.tool_result) {
+                pullCheckpoint(base2);
               }
               if (parsed.done === true) {
                 sawDone = true;

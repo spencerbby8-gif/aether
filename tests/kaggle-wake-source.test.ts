@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("0a05b92a09408205ad24fe9b6b28fa77849714a5bdc6a4e12a2bb8891b664775");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("ac760a8e3b224e537633da50df294e7788eb6d984fcc5c8bd8ea8008601e2cb2");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -171,7 +171,7 @@ describe("engine source — rendering", () => {
        into a brief for the model with the raw kept for the UI, the budget
        catches near-duplicate calls and abandons actions that failed twice,
        and the turn is verified against the requested outcome before it ends. */
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(188081);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(191611);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
