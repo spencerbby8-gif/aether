@@ -105,8 +105,19 @@ if (py.includes("Access-Control-Allow-Origin")) fail("engine still sends a CORS 
  * control-flow statement in do_POST (checked below) and that nothing can return
  * before it.
  */
-const gateMatches = py.match(/X-Engine-Key'\) != OFF_KEY/g) ?? [];
-if (gateMatches.length !== 1) fail(`engine POST auth gate: expected exactly 1 key check, found ${gateMatches.length}.`);
+/*
+ * Scoped to do_POST. Each route legitimately gates itself, and the GET
+ * /workspace export has its own check, so counting across the whole file would
+ * report a false duplicate. The bug this guards was a second, DEAD check inside
+ * the /off branch of do_POST, so one check per request method is the real
+ * invariant.
+ */
+const postStart = py.indexOf("def do_POST(self):");
+if (postStart < 0) fail("do_POST not found in the engine python.");
+const getStart = py.indexOf("def do_GET(self):");
+const postBody = py.slice(postStart, getStart > postStart ? getStart : undefined);
+const gateMatches = postBody.match(/X-Engine-Key'\) != OFF_KEY/g) ?? [];
+if (gateMatches.length !== 1) fail(`engine POST auth gate: expected exactly 1 key check in do_POST, found ${gateMatches.length}.`);
 /*
  * The body is drained BEFORE the gate on purpose: this handler is HTTP/1.1, so
  * answering 403 without consuming the request body leaves those bytes in the
