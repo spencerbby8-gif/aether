@@ -26,7 +26,7 @@ beforeEach(() => {
   process.env.AETHER_CONTROL_TOKEN = CONTROL_TOKEN;
 });
 
-function startEngine(behavior: "answer" | "tool" | "thinking") {
+function startEngine(behavior: "answer" | "tool" | "thinking" | "drop-mid-content" | "drop-silent") {
   return new Promise<string>((resolve) => {
     server = createServer((req, res) => {
       if (req.method === "GET" && req.url === "/api/ps") {
@@ -43,6 +43,23 @@ function startEngine(behavior: "answer" | "tool" | "thinking") {
           res.write(JSON.stringify({ message: { role: "assistant", thinking: "↳ web_search returned 2 sources" }, done: false }) + "\n");
           res.write(JSON.stringify({ message: { role: "assistant", content: "Here are the results." }, done: false }) + "\n");
           res.end(JSON.stringify({ done: true }) + "\n");
+        } else if (behavior === "drop-mid-content") {
+          /* The engine dies partway through an answer: real content arrives and
+             then the socket is destroyed with no terminal event. This is the
+             case that used to be reported as a completed turn. */
+          /* Flush the partial answer before tearing the socket down, otherwise
+             nothing reaches the client and the test proves the wrong path. */
+          res.write(JSON.stringify({ message: { role: "assistant", content: "The answer beg" }, done: false }) + "\n");
+          res.write(JSON.stringify({ message: { role: "assistant", content: "ins here and then" }, done: false }) + "\n", () => {
+            res.destroy();
+          });
+          return;
+        } else if (behavior === "drop-silent") {
+          /* The engine dies before saying anything at all. */
+          res.write("", () => {
+            res.destroy();
+          });
+          return;
         } else if (behavior === "thinking") {
           res.write(JSON.stringify({ message: { role: "assistant", thinking: "considering the request" }, done: false }) + "\n");
           res.write(JSON.stringify({ message: { role: "assistant", content: "Hello! " }, done: false }) + "\n");
@@ -140,5 +157,58 @@ describe("real NDJSON streaming through /api/agent/stream", () => {
     expect(thinking.some((l) => String(l.message.thinking).includes("web_search"))).toBe(true);
     /* The final answer is relayed. */
     expect(lines.map((l) => l.message?.content ?? "").join("")).toBe("Here are the results.");
+  });
+});
+
+describe("a dropped engine connection is never reported as a completed turn", () => {
+  /* Reproduced against a fixture engine that destroys its socket. Before the
+     fix, a stream that carried content and then died emitted `done: true` with
+     no error, so the UI showed a finished answer that was actually cut off
+     mid-sentence -- the silent failure this route exists to prevent. */
+
+  it("keeps the partial answer AND says it was truncated", async () => {
+    const url = await startEngine("drop-mid-content");
+    await stubAlive(url);
+    const response = await streamPost(
+      new Request("http://localhost/api/agent/stream", {
+        method: "POST",
+        headers: { "content-type": "application/json", Authorization: `Bearer ${CONTROL_TOKEN}` },
+        body: JSON.stringify({ messages: [{ role: "user", content: "hi" }], tools: false }),
+      }),
+    );
+    const lines = (await response.text()).split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const content = lines.map((l) => l.message?.content ?? "").join("");
+    /* The real work is preserved... */
+    expect(content).toBe("The answer begins here and then");
+    /* ...and the truncation is stated rather than hidden behind done:true. */
+    const terminal = lines[lines.length - 1];
+    expect(terminal.done).toBe(true);
+    expect(terminal.truncated).toBe(true);
+    expect(terminal.error?.message).toMatch(/incomplete/i);
+    expect(terminal.error?.retriable).toBe(true);
+  });
+
+  it("reports a plain failure when nothing arrived at all", async () => {
+    const url = await startEngine("drop-silent");
+    await stubAlive(url);
+    const response = await streamPost(
+      new Request("http://localhost/api/agent/stream", {
+        method: "POST",
+        headers: { "content-type": "application/json", Authorization: `Bearer ${CONTROL_TOKEN}` },
+        body: JSON.stringify({ messages: [{ role: "user", content: "hi" }], tools: false }),
+      }),
+    );
+    const lines = (await response.text()).split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const terminal = lines[lines.length - 1];
+    /* No partial text to keep, and NOT marked truncated: this is a plain
+       failure, not a truncation. The wording differs by failure shape -- a
+       socket destroyed before any byte says the stream broke, a stream that
+       ends cleanly with nothing says there was no content -- but both must be
+       an error and neither may claim the turn completed. */
+    expect(terminal.truncated).toBeUndefined();
+    expect(terminal.done).toBeUndefined();
+    expect(terminal.error?.retriable).toBe(true);
+    expect(terminal.error?.message).toMatch(/broke|no content/i);
+    expect(lines.map((l) => l.message?.content ?? "").join("")).toBe("");
   });
 });

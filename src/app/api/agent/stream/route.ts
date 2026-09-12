@@ -326,6 +326,46 @@ export async function POST(request: Request) {
           release();
         };
 
+        /* Whether anything at all reached the client this turn. Declared above
+           endIncomplete so the closure can read it, and set in the forward loop. */
+        let forwardedAny = false;
+
+        /*
+         * End a turn that never reached the engine's terminal event.
+         *
+         * This is the single place that decides what the user is told when an
+         * engine disappears mid-turn, and it is reached from BOTH failure
+         * shapes: a socket that throws (a killed engine, a dropped tunnel) and a
+         * stream that simply ends. They used to be handled separately, and the
+         * throwing one discarded everything that had already arrived -- so a
+         * 3-minute answer cut off at the end surfaced as "The engine stream
+         * broke" with the text gone.
+         *
+         * Partial output is real work and is always kept. What differs is only
+         * whether there was any: with content, the turn is reported as
+         * truncated so the user can continue it; without, it is a plain failure.
+         */
+        const endIncomplete = (why: string) => {
+          engineManager.reportFailure(slot2);
+          if (!forwardedAny) {
+            terminate({
+              error: { message: why, retriable: true, engine: slot2 },
+            });
+            return;
+          }
+          terminate({
+            done: true,
+            truncated: true,
+            error: {
+              message:
+                "The engine connection dropped partway through, so this answer is incomplete. " +
+                "What arrived has been kept; ask to continue and it will pick up from here.",
+              retriable: true,
+              engine: slot2,
+            },
+          });
+        };
+
         /* Idle guard covering the streaming phase (connection guard above
            covers only the connect). */
         const guard = createIdleTimeoutSignal(request.signal, idleTimeoutMs, totalTimeoutMs);
@@ -348,7 +388,6 @@ export async function POST(request: Request) {
           const decoder = new TextDecoder();
           let buffer = "";
           let sawDone = false;
-          let forwardedAny = false;
 
           while (true) {
             let chunk: { done: boolean; value: Uint8Array | undefined };
@@ -357,18 +396,13 @@ export async function POST(request: Request) {
             } catch {
               if (request.signal.aborted) break;
               const reason = guard.reason();
-              terminate({
-                error: {
-                  message:
-                    reason === "idle"
-                      ? "The engine stopped responding."
-                      : reason === "total"
-                        ? "The generation exceeded its time limit."
-                        : "The engine stream broke.",
-                  retriable: true,
-                  engine: slot2,
-                },
-              });
+              endIncomplete(
+                reason === "idle"
+                  ? "The engine stopped responding."
+                  : reason === "total"
+                    ? "The generation exceeded its time limit."
+                    : "The engine stream broke.",
+              );
               return;
             }
             if (chunk.done) break;
@@ -410,8 +444,8 @@ export async function POST(request: Request) {
             if (sawDone) break;
           }
 
-          if (!sawDone && !forwardedAny && !request.signal.aborted) {
-            terminate({ error: { message: "The engine returned no content.", retriable: true, engine: slot2 } });
+          if (!sawDone && !request.signal.aborted) {
+            endIncomplete("The engine returned no content.");
             return;
           }
           terminate({ done: true });
