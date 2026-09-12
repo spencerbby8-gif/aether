@@ -89,6 +89,8 @@ def chat(url, messages, timeout=1500):
     last = None
     tools = []
     results = []
+    tool_busy = 0.0
+    tool_started_at = None
     plan = None
     verification = None
     error = None
@@ -109,8 +111,12 @@ def chat(url, messages, timeout=1500):
                 think = m.get("thinking") or ""
                 if "\U0001f6e0" in think:
                     tools.append(think.split("(")[0].split()[-1])
+                    tool_started_at = now
                     if not results:
                         results.append(("first_tool", now - t0))
+                if "tool_result" in d and tool_started_at is not None:
+                    tool_busy += now - tool_started_at
+                    tool_started_at = None
                 content = m.get("content") or ""
                 if content:
                     if ttft is None:
@@ -127,8 +133,17 @@ def chat(url, messages, timeout=1500):
     except Exception as e:
         error = "%s: %s" % (type(e).__name__, str(e)[:120])
     wall = time.perf_counter() - t0
-    decode = chars / max(wall - (ttft or 0), 1e-6)
+    # Decode rate must be measured over the time the model was actually
+    # generating, not over the whole turn. Dividing by (wall - ttft) on a
+    # tool-heavy turn folds every tool execution into the denominator: a 495 s
+    # turn with 13 tool calls reported "0.72 tok/s" while the same engine
+    # decodes at ~8 tok/s on an idle prompt. The arithmetic was not wrong, the
+    # quantity was, and it made a healthy engine look broken. tool_busy is the
+    # time spent inside tool calls, subtracted here.
+    gen_window = max(wall - (ttft or 0) - tool_busy, 1e-6)
+    decode = chars / gen_window
     return {
+        "tool_busy": tool_busy,
         "ok": error is None,
         "error": error,
         "first_byte": first_byte,
@@ -193,7 +208,7 @@ def bench_engine(slot, url, reps, quick):
         r = chat(url, [{"role": "user",
                         "content": "Reply with one short sentence about databases."}], timeout=900)
         runs.append(r)
-        print("  rep %d: first_byte %s  ttft %s  wall %6.2fs  chars %4d  decode %5.2f tok/s  max_gap %s"
+        print("  rep %d: first_byte %s  ttft %s  wall %6.2fs  chars %4d  gen %5.2f tok/s  max_gap %s"
               % (i + 1,
                  ("%.2fs" % r["first_byte"]) if r["first_byte"] else "n/a",
                  ("%.2fs" % r["ttft"]) if r["ttft"] else "n/a",

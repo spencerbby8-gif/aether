@@ -209,3 +209,59 @@ print(json.dumps(res))
     expect(r.empty).toContain("nothing to package");
   });
 });
+
+describe("an oversized user message is trimmed, not rejected", () => {
+  /* Reproduced live: a 48,087-character paste returned
+     HTTP 400 {"error":"request (8334 tokens) exceeds the available context
+     size (8192 tokens)"} -- a raw engine error and no answer. history_window
+     trimmed history and tool results but never a single large user message, so
+     one long paste was fatal. Pasting a lot of text must not be an error. */
+  const CASE = `
+import json, re, sys
+nb = json.loads(open(sys.argv[1]).read())
+src = nb["cells"][4]["source"]; src = "".join(src) if isinstance(src, list) else src
+ns = {"re": re, "NUM_CTX": 8192, "NUM_PREDICT": 4096}
+i = src.find("def history_window")
+j = src.find("\\n\\n# Bound a single generation")
+exec(src[i:j], ns)
+hw = ns["history_window"]
+SYS = {"role": "system", "content": "S" * 1400}
+
+def size(ms):
+    return sum(len(str(m.get("content") or "")) for m in ms)
+
+out = {}
+
+# A normal turn must be untouched.
+small = hw([SYS, {"role": "user", "content": "hi"}])
+out["small_untouched"] = small[-1]["content"] == "hi"
+
+# A 48k paste must come back inside the budget, question intact.
+big = "Background context. " * 4000 + "\\n\\nQUESTION: what word starts this message?"
+r = hw([SYS, {"role": "user", "content": big}])
+out["big_within_budget"] = size(r) <= 14000
+out["big_question_kept"] = "QUESTION: what word starts this message?" in r[-1]["content"]
+out["big_notice_present"] = "characters omitted from the middle" in r[-1]["content"]
+
+# A question at the very END of a huge paste must survive -- that is where
+# users put it, and losing it would silently change what was asked.
+huge = "X" * 60000 + "\\n\\nFINAL QUESTION HERE"
+r2 = hw([SYS, {"role": "user", "content": huge}])
+out["huge_question_at_end_kept"] = "FINAL QUESTION HERE" in r2[-1]["content"]
+out["huge_head_kept"] = r2[-1]["content"].startswith("X")
+out["huge_within_budget"] = size(r2) <= 14000
+
+# The system prompt must survive too, or the agent loses its instructions.
+out["system_kept"] = r2[0]["role"] == "system"
+
+print(json.dumps(out))
+`;
+
+  it("keeps the question, the head and the system prompt inside the budget", () => {
+    const out = runPython(CASE, [nbPath, sessionRoot, genDir]);
+    const r = JSON.parse(out.trim().split("\n").pop()!);
+    for (const [k, v] of Object.entries(r)) {
+      expect(v, `${k} should hold`).toBe(true);
+    }
+  });
+});
