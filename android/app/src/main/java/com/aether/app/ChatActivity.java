@@ -1312,6 +1312,12 @@ public class ChatActivity extends AppCompatActivity {
                     new String(bytes, java.nio.charset.StandardCharsets.UTF_8)));
             text = prep.text;
             inline = prep.sentToEngine;
+        } else if (AttachmentText.isUnsupportedBinary(mime, name)) {
+            /* The file cannot be read, so say so in the prompt itself. Without
+               this the model received an attachment with no text and no reason,
+               which is how it ends up describing a PDF it never opened. */
+            text = AttachmentText.unsupportedNotice(name, size, mime);
+            inline = true;
         }
         java.io.File stored = store.storeAttachment(current.id, bytes, name);
         Attachment a = new Attachment(

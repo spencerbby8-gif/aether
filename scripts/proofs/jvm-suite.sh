@@ -69,6 +69,7 @@ PROOFS=(
   "TaskGraphExecutorProof|"
   "WebImagesProof|"
   "AttachmentTextProof|"
+  "AttachmentBinaryProof|"
   "MediaUrlProof|"
 )
 
