@@ -237,7 +237,29 @@ The credential model is intact: `_B_GRANTS[(session,host,kind)]` with a 900 s TT
 
 ## §13 — Real artifact completion
 
-**FOUND** — `package_files` **packed the previous archive into itself**. Measured live: `4 entries: svc.zip, svc/REPORT.md, svc/app.py, svc/test_app.py` — `svc.zip` was the archive being written, so every re-run grew the file.
+**FOUND (1)** — `package_files` **packed the previous archive into itself**. Measured live: `4 entries: svc.zip, svc/REPORT.md, svc/app.py, svc/test_app.py` — `svc.zip` was the archive being written, so every re-run grew the file.
+
+**FOUND (2) — the more serious one: "packaged successfully" was a claim nothing checked.** Told to "package the workspace into build.zip", the model ran `zip -r build.zip build` through `run_command` instead of calling `package_files` — a perfectly reasonable choice — and the archive landed in the session workspace. `GEN_DIR` is what the tunnel serves, so:
+
+| | |
+|---|---|
+| `build.zip` on disk | **557 bytes**, confirmed with `ls` |
+| `/files/build.zip` | **HTTP 404** |
+| the answer | *"Created `build.zip` containing the `build/` directory"* |
+| verification | `{'ok': True, 'outcome': 'verified'}` |
+
+The file was real, the turn reported success, and the download did not exist. Two gaps: the archive was written where nothing serves it, and `verify_intent` had no notion of a downloadable file — "package X into build.zip" routed to `PACKAGE`, which means a Python *package install* and verifies by asking whether a module became importable. The check that passed was checking something else entirely.
+
+**FIXED** — `_publish_archives()` copies any archive the model builds in the workspace into `GEN_DIR` after every tool step (25 MB cap, only when the published copy is missing or older). Rather than argue with the model about which tool it prefers, publish whatever it produced. A new `ARCHIVE` intent, distinct from `PACKAGE`, routes on `package|bundle|archive|zip|compress|tar … .zip` and verifies against `SERVED_DIR`.
+
+**FOUND (3) — my own new verifier then rejected tasks that had genuinely succeeded.** Re-running the same prompt after the fix:
+
+| | |
+|---|---|
+| `build.zip` | **HTTP 200, 3792 bytes, valid zip, 13 entries** |
+| verification | `{'ok': False, 'unmet': ['archive: no archive filename was reported']}` |
+
+Root cause: `_archive_name()` read the filename out of the tool result, and `package_files` never repeats the archive's name in its own success message — it reports `ARCHIVE READY: 2 file(s), 233 bytes, sha256:…, 2 entries: …`. The check was reading whether the *text* mentioned a file instead of asking whether the *file* is there. Fixed with `_any_served_archive()`, which looks in `SERVED_DIR` and returns the newest archive actually present.
 
 **FIXED** — root-level `.zip` files are excluded; a workspace holding only previous archives reports `nothing to package` rather than producing a self-referential zip.
 
@@ -251,7 +273,9 @@ The credential model is intact: `_B_GRANTS[(session,host,kind)]` with a 900 s TT
 | `1 file(s), 151 bytes, sha256:91c89090ab9e57f0` | 151 B, **sha256 exact**, `testzip` clean |
 | `lagos.zip` 1048/1106 bytes | valid zip, entries `['lagos/test_lga.py','lagos/FINDINGS.md','lagos/lga.py']`, **no self-inclusion** |
 
-**REMAINING LIMITATION** — archives live on the engine and expire with its tunnel. No video artifacts were produced or tested.
+**MEASUREMENT** — routing 7/7: "Package the workspace into build.zip", "Zip everything up as report.zip", "Bundle the project to dist.tgz" all reach `ARCHIVE`, while "Install pandas" and "pip install requests" still reach `PACKAGE` and "write a script" still reaches `CODE`. Verification, all four branches against the real module: empty directory → False with guidance; the tool's own success message while the directory is empty → False (a claim is not evidence); file present → True; a named file that does not exist → True when another real archive is served. Publishing executed against real kernel code: a shell-built `build.zip` went from absent in `GEN_DIR` to present and valid, idempotent on a second call, and a newly created `second.zip` was picked up. **Live on engine D: `/files/build.zip` HTTP 200, 3792 bytes, valid — where the same prompt previously returned 404.**
+
+**REMAINING LIMITATION** — archives live on the engine and expire with its tunnel. No video artifacts were produced or tested. `_publish_archives` copies any root archive under 25 MB, so an unrelated large archive in the workspace would also be published.
 
 ---
 
@@ -323,19 +347,21 @@ Tools used: `web_search`, `fetch_page ×2`, `list_files`, `run_command ×8`, `pa
 
 | check | result |
 |---|---|
-| `vitest` | **332 passed / 0 failed** (was 288 before this whole effort) |
+| `vitest` | **333 passed / 0 failed** (was 288 before this whole effort) |
 | `tsc --noEmit` | **0 errors** |
 | `jvm-suite.sh` | **19/19 proofs** (was 16/16) |
 | `browser-reliability-live.py` | **11/11 workflows, 8/8 assertions** |
 | `browser-auth-live.py` | **30/30** |
-| `orchestration-live.py` | **54/54, routing 20/20** |
+| `orchestration-live.py` | **48/48 (quick), routing 20/20** |
 | `agent-loop-live.py` | **25/25** |
 | `command-execution-live.py` | **20/20** |
 | `failover-live.py` | **14/14** |
 | `end-to-end-live.py` task 1 | **14/14** |
 | `verify-engine-source.mjs` | **PASS** |
 | `gradle :app:compileDebugJavaWithJavac` | **BUILD SUCCESSFUL** |
-| Template pin | `ac760a8e3b22…`, rendered 191 639 bytes |
+| `orchestration-fix.py --check` | **OK, embedded module matches** |
+| Template pin | `8ee627bf657b…`, rendered 198 013 bytes |
+| APK | **2.4.0**, versionCode 43 |
 
 New this session: `engine-reliability.py`, `command-execution-live.py`, `failover-live.py`, `end-to-end-live.py`, `AttachmentBinaryProof`, plus tests for checkpoint recovery, truncation reporting and oversized-message trimming.
 
@@ -349,4 +375,12 @@ New this session: `engine-reliability.py`, `command-execution-live.py`, `failove
 4. **PDFs, images and Office documents are not read.** They are now detected and reported honestly, which is what the brief asked for, but there is no extraction.
 5. **The web agent (`src/agent/`) and the Netlify deploy were not exercised.** All live testing went through the engine kernel directly.
 6. **Task state is not persisted across an app restart.** The workspace survives via checkpoints; the plan and step index do not.
-7. **Two of my own measurements were wrong and I corrected them rather than reporting them:** the "0.72 tok/s decode" figure folded tool time into the denominator, and the "44.69 s stream stall" was a gap between content chunks, not a wire stall. Both are stated above with the corrected numbers.
+7. **Four of my own measurements or fixes were wrong and I corrected them rather than reporting them:**
+   - the "0.72 tok/s decode" figure folded tool time into the denominator;
+   - the "44.69 s stream stall" was a gap between content chunks, not a wire stall;
+   - my first checkpoint design wrote to the engine's own disk, which dies with the kernel — the test I wrote for it is what exposed the flaw;
+   - my first `ARCHIVE` verifier rejected tasks that had genuinely succeeded, because it read the tool's prose instead of the directory.
+
+8. **Two test harnesses were broken and hid real results.** `orchestration-live.py` did not extract the fetch-limit constants, so every fetch failed with `NameError` and surfaced as a *verification* failure — a harness bug wearing the costume of a product bug. `agent-loop-live.py` lacked `_CURRENT` and the workspace helpers, so `agent_stream` died before the first command ran. Both fixed; the suites now report 48/0 and 25/0.
+
+9. **The end-to-end kill proof's last full run was 19/20 then 16/20**, with the failures being (a) my test demanding a specific filename the model was free to choose differently, and (b) the archive-verification bug in §13. The archive bug is fixed and re-verified live; a clean 20/20 run of the whole proof against the final build has not been completed.
