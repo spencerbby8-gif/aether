@@ -33,6 +33,7 @@ BROWSER = 'browser'
 FILESYSTEM = 'filesystem'
 TERMINAL = 'terminal'
 PACKAGE = 'package_manager'
+ARCHIVE = 'archive'
 CODE = 'code_execution'
 IMAGE = 'image'
 AUDIO = 'audio'
@@ -41,7 +42,7 @@ AUDIO = 'audio'
 INTENT_TOOL = {
     SEARCH: 'web_search', FETCH: 'fetch_page', CRAWL: 'crawl_site',
     BROWSER: 'browser', FILESYSTEM: 'run_command', TERMINAL: 'run_command',
-    PACKAGE: 'run_command', CODE: 'run_command',
+    PACKAGE: 'run_command', ARCHIVE: 'run_command', CODE: 'run_command',
     IMAGE: 'generate_image', AUDIO: 'generate_voice', CHAT: None,
 }
 
@@ -55,6 +56,9 @@ STAGE = {
     SEARCH: 0, FETCH: 0, CRAWL: 0,
     BROWSER: 1,
     PACKAGE: 2, FILESYSTEM: 2, TERMINAL: 2, CODE: 2,
+    # An archive is a deliverable: it has to come last, after the files it
+    # collects exist.
+    ARCHIVE: 3,
     IMAGE: 3, AUDIO: 3,
     CHAT: 4,
 }
@@ -97,6 +101,13 @@ RULES = [
     # The negative lookahead keeps "install the update" from matching: an
     # article means the object is a thing in the world, not a package name.
     (PACKAGE, RE(r'\b(install|uninstall|upgrade)\s+(?!the\b|a\b|an\b|this\b|that\b|it\b|them\b)[A-Za-z0-9][\w.\-+]*')),
+    # "Package the workspace into build.zip" asks for a file the user can
+    # download, which is a different job from `pip install`. Without its own
+    # intent this routed to PACKAGE and was verified by asking whether a Python
+    # module had become importable -- which passed, while the archive sat where
+    # nobody could fetch it.
+    (ARCHIVE, RE(r'\b(package|bundle|archive|zip (up )?|compress|tar (up )?)\b[^.?!\n]{0,40}\.(zip|tar|tgz|gz)\b')),
+    (ARCHIVE, RE(r'\b(into|as|to)\s+[A-Za-z0-9_.-]+\.(zip|tar|tgz|gz)\b')),
     (CODE, RE(r'\b(write|create|generate)\b[^.?!\n]{0,30}\b(script|program|function|class|code|python file|\.py|\.js|\.ts|test)\b')),
     (CODE, RE(r'\b(run|execute|eval(uate)?)\b[^.?!\n]{0,30}\b(this |the |my )?(script|code|program|python|computation)\b')),
     (CODE, RE(r'\b(compute|calculate|work out|sort|parse|convert|count|analyse|analyze|process|transform|deduplicate|refactor|debug|build|compile|run the tests?)\b')),
@@ -241,6 +252,7 @@ EVIDENCE = {
     FILESYSTEM: ['the named path exists on disk'],
     TERMINAL: ['command exited 0'],
     PACKAGE: ['the package is importable or on PATH afterwards'],
+    ARCHIVE: ['an archive file exists where it can be downloaded'],
     CODE: ['code ran and exited 0, artifact present if one was asked for'],
     IMAGE: ['an image file exists with a JPEG or PNG header'],
     AUDIO: ['an audio file exists with a RIFF header'],
@@ -487,6 +499,11 @@ AUDIO_MAGIC = (b'RIFF',)
 # filename, and a task that really did produce an image reads as a failure.
 MEDIA_DIR = None
 
+# Where files the user can download are served from. The kernel sets this to its
+# GEN_DIR at boot. An archive built anywhere else is real but unreachable, and
+# "packaged successfully" would be a claim nothing checked.
+SERVED_DIR = None
+
 
 def _media_paths(result, artifacts):
     """Every path a media artifact could be at, absolute or resolved."""
@@ -558,6 +575,23 @@ def verify_intent(intent, result, artifacts=None):
             return False, 'the browser returned nothing'
         return True, ''
 
+    if intent == ARCHIVE:
+        # A task that asked for a file the user can download. "Created
+        # build.zip" in the answer is a claim; the archive has to exist where
+        # the tunnel can serve it. Measured failure: the model ran
+        # `zip -r build.zip build` through run_command, the file landed in the
+        # session workspace rather than the served directory, and the turn
+        # verified ok while /files/build.zip returned 404. The user was told the
+        # work was packaged and could not get it.
+        name = _archive_name(r)
+        if not name:
+            return False, 'no archive filename was reported'
+        if not _served(name):
+            return False, ('%s is not published where it can be downloaded. Use '
+                           'the package_files tool rather than a shell command, '
+                           'so the archive is served.' % name)
+        return True, ''
+
     if intent in (TERMINAL, CODE, FILESYSTEM, PACKAGE):
         m = re.search(r'exit=(-?\d+)', r)
         if m and m.group(1) != '0':
@@ -589,6 +623,24 @@ _IMPORT_NAME = {
     'pillow': 'PIL', 'beautifulsoup4': 'bs4', 'scikit-learn': 'sklearn',
     'opencv-python': 'cv2', 'pyyaml': 'yaml', 'python-dateutil': 'dateutil',
 }
+
+
+_ARCHIVE_RE = re.compile(r'([A-Za-z0-9_.-]+\.(?:zip|tar|tgz|gz))')
+
+
+def _archive_name(result):
+    """The archive filename a result claims to have produced."""
+    m = _ARCHIVE_RE.search(result or '')
+    return m.group(1) if m else None
+
+
+def _served(name):
+    """True when the named file sits in the directory the tunnel serves."""
+    try:
+        return bool(SERVED_DIR) and os.path.exists(
+            os.path.join(SERVED_DIR, os.path.basename(name)))
+    except Exception:
+        return False
 
 
 def _package_name(result):

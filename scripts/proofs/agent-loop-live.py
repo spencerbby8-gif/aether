@@ -122,15 +122,28 @@ def build_ns(script):
         "html": __import__("html"),
         "notify": lambda m: None,
         "GEN_DIR": str(WORK),
+        # The per-session workspace binding. agent_stream sets it at the top of
+        # every turn and t_run_command reads it; without it the loop died with
+        # NameError before the first command ran.
+        "_CURRENT": {"ws": str(WORK), "session": "proof"},
+        "SESSION_ROOT": str(WORK),
+        # The session-id pattern _session_dir validates against. It arrives from
+        # a client, so it is checked rather than joined blindly.
+        "_SESSION_RE": re.compile(r"^[A-Za-z0-9_-]{1,64}$"),
         # Constants the loop reads. Values match the kernel.
-        "MODEL": "test-model", "NUM_CTX": 16384, "NUM_PREDICT": 4096,
+        "MODEL": "test-model", "NUM_CTX": 8192, "NUM_PREDICT": 4096,
         "TOOL_RESULT_MAX": 2500, "THINK": False, "THINK_ALWAYS": False,
         "TOOLS": [],
     }
     exec(compile(boot, "<orch-boot>", "exec"), ns)
 
+    # _session_dir resolves the per-session workspace that agent_stream binds at
+    # the top of every turn; _checkpoint_workspace runs after each tool step.
+    # Both are kernel functions the loop calls, so they have to come along.
     fns = slice_fns(src, {"agent_stream", "history_window", "has_user_query",
-                          "needs_reasoning", "last_user_text"})
+                          "needs_reasoning", "last_user_text",
+                          "_session_dir", "_checkpoint_workspace",
+                          "_publish_archives"})
     exec(compile(fns, "<kernel-fns>", "exec"), ns)
 
     ns["SYSMSG"] = "test system prompt"

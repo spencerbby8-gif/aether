@@ -288,6 +288,11 @@ def _a_load_orch():
     exec(compile(_A_ORCH_SRC, _A_ORCH, 'exec'), _g)
     # The verifier resolves media reported by bare filename against this.
     _g['MEDIA_DIR'] = GEN_DIR
+    # GEN_DIR is what the tunnel serves at /files/. An archive the model builds
+    # anywhere else is real but undownloadable, and "packaged successfully"
+    # would be a claim nothing checked -- measured live as a 557-byte build.zip
+    # that existed on disk while /files/build.zip returned 404.
+    _g['SERVED_DIR'] = GEN_DIR
 
 
 _a_load_orch()

@@ -103,8 +103,17 @@ def extract_tools():
     src = "".join(src) if isinstance(src, list) else src
     tree = ast.parse(src)
     want_fn = {"t_web_search", "t_fetch_page", "t_crawl_site", "t_run_command",
-               "t_generate_image", "t_generate_voice", "_readable", "_safe_name"}
-    want_assign = {"BLOCK", "GEN_DIR"}
+               "t_generate_image", "t_generate_voice", "_readable", "_safe_name",
+               "_checkpoint_workspace"}
+    # _CURRENT is the per-session workspace binding the kernel sets before each
+    # turn; run_command reads it, so the harness has to provide it or every
+    # command dies with NameError before it runs.
+    # The fetch limits are module-level constants t_fetch_page and t_crawl_site
+    # read on every call. Omitting them made every fetch in this suite fail with
+    # "name '_FETCH_SECS' is not defined", which then read as a verification
+    # failure and hid the real result behind it.
+    want_assign = {"BLOCK", "GEN_DIR", "_CURRENT", "SESSION_ROOT",
+                   "_FETCH_SECS", "_FETCH_CONNECT_SECS", "_FETCH_MAX_BYTES"}
     keep = []
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in want_fn:
@@ -126,6 +135,9 @@ def extract_tools():
     exec(compile("import subprocess, os, json, time, re, html as htmlmod\n"
                  "import urllib.request, urllib.parse\nurl = None\n" + code,
                  "<kernel-tools>", "exec"), ns)
+    # Point the workspace at this test's directory so run_command has somewhere
+    # real to execute in, the way agent_stream binds it on a live engine.
+    ns.setdefault("_CURRENT", {"ws": str(WORK), "session": "proof"})
     return ns
 
 

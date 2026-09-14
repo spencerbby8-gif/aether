@@ -265,3 +265,54 @@ print(json.dumps(out))
     }
   });
 });
+
+describe("an archive the model builds in the workspace gets published", () => {
+  /* Measured live: told to "package the workspace into build.zip", the model ran
+     `zip -r build.zip build` through run_command instead of package_files. The
+     archive was real -- 557 bytes, confirmed on disk -- but it sat in the
+     session workspace while GEN_DIR is what the tunnel serves, so
+     /files/build.zip returned 404 and the user was told it was packaged. */
+  const CASE = `
+import json, re, os, subprocess, sys, time, zipfile
+nb = json.loads(open(sys.argv[1]).read())
+src = nb["cells"][4]["source"]; src = "".join(src) if isinstance(src, list) else src
+ns = {"re": re, "os": os, "subprocess": subprocess, "time": time}
+exec(src[src.find("SESSION_ROOT ="):src.find("def t_run_command")], ns)
+# Both kernel paths must point at the temp directories before any helper runs,
+# or the code tries to create /kaggle/working/... and the test dies on a
+# permission error that has nothing to do with the behaviour under test.
+ns["GEN_DIR"] = sys.argv[3]
+ns["SESSION_ROOT"] = sys.argv[2]
+sd = ns["_session_dir"]; pub = ns["_publish_archives"]
+ws = sd("pubcase"); ns["_CURRENT"] = {"ws": ws, "session": "pubcase"}
+os.makedirs(ws + "/build")
+open(ws + "/build/util.py", "w").write("def double(x): return 2*x\\n")
+subprocess.run(["zip", "-qr", "build.zip", "build"], cwd=ws, capture_output=True)
+gen = ns["GEN_DIR"]
+before = sorted(os.listdir(gen))
+pub()
+after = sorted(os.listdir(gen))
+pub()
+again = sorted(os.listdir(gen))
+z = zipfile.ZipFile(os.path.join(gen, "build.zip"))
+print(json.dumps({
+  "shell_built_it": os.path.exists(ws + "/build.zip"),
+  "before": before,
+  "after": after,
+  "idempotent": again == after,
+  "entries": sorted(z.namelist()),
+  "valid": z.testzip() is None,
+}))
+`;
+
+  it("copies a shell-built zip into the served directory", () => {
+    const out = runPython(CASE, [nbPath, sessionRoot, genDir]);
+    const r = JSON.parse(out.trim().split("\n").pop()!);
+    expect(r.shell_built_it).toBe(true);
+    expect(r.before).not.toContain("build.zip");
+    expect(r.after).toContain("build.zip");
+    expect(r.idempotent).toBe(true);
+    expect(r.entries).toContain("build/util.py");
+    expect(r.valid).toBe(true);
+  });
+});

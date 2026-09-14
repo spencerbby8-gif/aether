@@ -1,0 +1,41 @@
+============================================================================
+TASK 1 - COMPLEX MULTI-CAPABILITY TASK on engine C
+============================================================================
+  wall 698.2s | ttft 99.48s | decode 0.48 tok/s | tool calls 12
+  tools: ['web_search', 'run_command', 'fetch_page', 'fetch_page', 'run_command', 'run_command', 'run_command', 'run_command', 'list_files', 'run_command', 'run_command', 'package_files']
+  verification: {'ok': True, 'unmet': [], 'outcome': 'verified', 'budget': {'calls': 12, 'replayed': 0, 'refused': 0, 'remaining': 12, '
+  PASS  used web search  ['fetch_page', 'list_files', 'package_files', 'run_command', 'web_search']
+  PASS  fetched a real source
+  PASS  ran real commands
+  PASS  packaged the artifact
+  PASS  reached a verified outcome  verified
+  PASS  plan was published before any tool ran  goal=Research how many local government areas Lagos State has, us
+  FAIL  every tool call succeeded  11/12 ok
+  PASS  lagos.zip is downloadable  http=200 927 bytes
+  PASS  archive is valid
+  PASS  archive holds the code  ['FINDINGS.md', 'lagos/test_lga.py', 'lagos/lga.py']
+  PASS  archive holds the findings  ['FINDINGS.md', 'lagos/test_lga.py', 'lagos/lga.py']
+  PASS  archive does not contain itself  ['FINDINGS.md', 'lagos/test_lga.py', 'lagos/lga.py']
+  PASS  a real source URL is cited
+
+============================================================================
+TASK 2 - SAME KIND OF TASK, ENGINE KILLED MID-EXECUTION
+============================================================================
+  starting on engine C, will be killed partway
+  victim had made 3 tool call(s) at 100.1s; killing engine C now
+  /off -> http=200
+  victim turn ended: error=None tools=['run_command', 'run_command', 'run_command']
+  PASS  engine C is really dead  http=530
+  client-held checkpoint: 423 bytes (pulled while the engine lived)
+  PASS  workspace restored onto engine D  http=200
+  survivor turn: wall 57.2s | tools=['list_files', 'run_command', 'run_command', 'run_command', 'run_command'] | verified=None
+  PASS  engine D continued the task  None
+  PASS  survivor inspected the workspace  ['list_files', 'run_command', 'run_command', 'run_command', 'run_command']
+  FAIL  survivor reached a verified outcome  None
+  FAIL  build.zip is downloadable  http=404 0 bytes
+
+============================================================================
+END-TO-END: 16 passed, 3 failed
+  task 1 (complex, multi-capability) : COMPLETE
+  task 2 (engine killed mid-task)    : NOT VERIFIED
+============================================================================
