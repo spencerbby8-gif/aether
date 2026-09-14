@@ -583,14 +583,19 @@ def verify_intent(intent, result, artifacts=None):
         # session workspace rather than the served directory, and the turn
         # verified ok while /files/build.zip returned 404. The user was told the
         # work was packaged and could not get it.
+        # Believe the directory, not the prose. A name in the result is enough
+        # when it is there; otherwise fall back to what is actually served.
         name = _archive_name(r)
-        if not name:
-            return False, 'no archive filename was reported'
-        if not _served(name):
+        if name and _served(name):
+            return True, ''
+        if _any_served_archive():
+            return True, ''
+        if name:
             return False, ('%s is not published where it can be downloaded. Use '
                            'the package_files tool rather than a shell command, '
                            'so the archive is served.' % name)
-        return True, ''
+        return False, ('no archive was produced. Use the package_files tool to '
+                       'create one the user can download.')
 
     if intent in (TERMINAL, CODE, FILESYSTEM, PACKAGE):
         m = re.search(r'exit=(-?\d+)', r)
@@ -632,6 +637,33 @@ def _archive_name(result):
     """The archive filename a result claims to have produced."""
     m = _ARCHIVE_RE.search(result or '')
     return m.group(1) if m else None
+
+
+def _any_served_archive():
+    """The newest archive actually present in the served directory, or None.
+
+    The verifier's first attempt at this only read the filename out of the tool
+    result, which failed on the tool's OWN success message: package_files
+    reports "ARCHIVE READY: 2 file(s), 233 bytes, sha256:..., 2 entries: ..."
+    and never repeats the archive's name. So a task that had genuinely produced
+    a downloadable archive was told it had not, and the model was sent off to
+    redo work that was already done. Checking the directory is the honest test
+    anyway: the question is whether the file is there, not whether the text
+    mentioned it.
+    """
+    try:
+        if not SERVED_DIR or not os.path.isdir(SERVED_DIR):
+            return None
+        cands = []
+        for f in os.listdir(SERVED_DIR):
+            if f.lower().endswith(('.zip', '.tar', '.tgz', '.gz')):
+                try:
+                    cands.append((os.path.getmtime(os.path.join(SERVED_DIR, f)), f))
+                except Exception:
+                    pass
+        return max(cands)[1] if cands else None
+    except Exception:
+        return None
 
 
 def _served(name):
