@@ -1,0 +1,71 @@
+
+==========================================================================
+ENGINE A  https://seminars-athletic-comp-email.trycloudflare.com
+==========================================================================
+  health /api/ps  : median 0.257s  min 0.126s  max 0.645s  (5 probes, 0 failures)
+  conn establish  : median 0.036s  min 0.030s
+  model           : hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  residency       : 16.16 GB in VRAM of 16.16 GB
+  rep 1: first_byte 0.24s  ttft 0.82s  wall   1.99s  chars  102  gen 17.36 tok/s  max_gap 0.07s
+  rep 2: first_byte 0.37s  ttft 0.72s  wall   1.96s  chars   89  gen 14.35 tok/s  max_gap 0.08s
+  rep 3: first_byte 0.14s  ttft 0.49s  wall   1.53s  chars   87  gen 16.66 tok/s  max_gap 0.07s
+  rep 4: first_byte 1.10s  ttft 1.45s  wall   2.58s  chars   80  gen 14.17 tok/s  max_gap 0.07s
+  SUMMARY         : ttft median 0.77s | wall median 1.97s | decode median 15.51 tok/s | 4/4 ok
+  tool latency    : first tool at 7.27s | wall 8.8s | tools=['run_command'] | verified=True
+  long request    : survived | wall 49.8s | chars 2455 | decode 12.36 tok/s | max_gap 0.08s
+
+==========================================================================
+ENGINE B  https://warned-kitchen-survivor-janet.trycloudflare.com
+==========================================================================
+  health /api/ps  : median 0.101s  min 0.096s  max 0.453s  (5 probes, 0 failures)
+  conn establish  : median 0.049s  min 0.044s
+  model           : hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  residency       : 16.16 GB in VRAM of 16.16 GB
+  rep 1: first_byte 0.43s  ttft 1.00s  wall   1.83s  chars   76  gen 18.34 tok/s  max_gap 0.07s
+  rep 2: first_byte 0.07s  ttft 0.41s  wall   1.74s  chars  109  gen 16.45 tok/s  max_gap 0.07s
+  rep 3: first_byte 0.07s  ttft 0.41s  wall   1.46s  chars   87  gen 16.57 tok/s  max_gap 0.07s
+  rep 4: first_byte 0.08s  ttft 0.42s  wall   1.25s  chars   76  gen 18.23 tok/s  max_gap 0.07s
+  SUMMARY         : ttft median 0.41s | wall median 1.60s | decode median 17.40 tok/s | 4/4 ok
+  tool latency    : first tool at 6.89s | wall 8.3s | tools=['run_command'] | verified=True
+  long request    : survived | wall 71.2s | chars 4001 | decode 12.26 tok/s | max_gap 9.67s
+
+==========================================================================
+ENGINE C  https://managed-olympic-language-transition.trycloudflare.com
+==========================================================================
+  health /api/ps  : median 0.276s  min 0.159s  max 0.631s  (5 probes, 0 failures)
+  conn establish  : median 0.035s  min 0.031s
+  model           : hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  residency       : 16.16 GB in VRAM of 16.16 GB
+  rep 1: first_byte 0.15s  ttft 0.74s  wall   1.97s  chars   91  gen 14.80 tok/s  max_gap 0.07s
+  rep 2: first_byte 0.26s  ttft 0.60s  wall   1.62s  chars   87  gen 17.08 tok/s  max_gap 0.07s
+  rep 3: first_byte 0.13s  ttft 0.47s  wall   1.49s  chars   87  gen 17.03 tok/s  max_gap 0.07s
+  rep 4: first_byte 0.25s  ttft 0.59s  wall   1.68s  chars   78  gen 14.32 tok/s  max_gap 0.07s
+  SUMMARY         : ttft median 0.59s | wall median 1.65s | decode median 15.91 tok/s | 4/4 ok
+  tool latency    : first tool at 7.66s | wall 9.1s | tools=['run_command'] | verified=True
+  long request    : survived | wall 67.3s | chars 2284 | decode 14.30 tok/s | max_gap 0.08s
+
+==========================================================================
+ENGINE D  https://assumed-month-carlos-listing.trycloudflare.com
+==========================================================================
+  health /api/ps  : median 0.210s  min 0.195s  max 0.595s  (5 probes, 0 failures)
+  conn establish  : median 0.032s  min 0.029s
+  model           : hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  residency       : 16.16 GB in VRAM of 16.16 GB
+  rep 1: first_byte 0.20s  ttft 0.78s  wall   2.15s  chars  113  gen 16.50 tok/s  max_gap 0.07s
+  rep 2: first_byte 0.18s  ttft 0.56s  wall   1.65s  chars   90  gen 16.50 tok/s  max_gap 0.08s
+  rep 3: first_byte 0.19s  ttft 0.54s  wall   2.01s  chars  112  gen 15.23 tok/s  max_gap 0.08s
+  rep 4: first_byte 0.24s  ttft 0.60s  wall   1.85s  chars  110  gen 17.67 tok/s  max_gap 0.08s
+  SUMMARY         : ttft median 0.58s | wall median 1.93s | decode median 16.50 tok/s | 4/4 ok
+  tool latency    : first tool at 7.78s | wall 10.9s | tools=['run_command'] | verified=True
+  long request    : survived | wall 88.0s | chars 2431 | decode 12.24 tok/s | max_gap 0.08s
+
+==========================================================================
+CROSS-ENGINE COMPARISON
+==========================================================================
+  slot health    conn      ttft        wall      decode   probes failed
+  a    0.257s    0.036s    0.77s       1.97s     15.51    0
+  b    0.101s    0.049s    0.41s       1.60s     17.40    0
+  c    0.276s    0.035s    0.59s       1.65s     15.91    0
+  d    0.210s    0.032s    0.58s       1.93s     16.50    0
+
+saved /home/user/aether/scripts/perf/output/reliability-audit-final.json

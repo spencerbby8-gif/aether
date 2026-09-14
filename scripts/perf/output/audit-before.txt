@@ -1,0 +1,71 @@
+
+==========================================================================
+ENGINE A  https://photographer-historical-knife-blast.trycloudflare.com
+==========================================================================
+  health /api/ps  : median 0.244s  min 0.213s  max 0.254s  (5 probes, 0 failures)
+  conn establish  : median 0.036s  min 0.029s
+  model           : hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  residency       : 16.16 GB in VRAM of 16.16 GB
+  rep 1: first_byte 0.22s  ttft 2.22s  wall   3.27s  chars   87  gen 16.60 tok/s  max_gap 0.09s
+  rep 2: first_byte 0.24s  ttft 0.57s  wall   1.57s  chars   87  gen 17.48 tok/s  max_gap 0.07s
+  rep 3: first_byte 0.23s  ttft 0.55s  wall   1.81s  chars  109  gen 17.30 tok/s  max_gap 0.07s
+  rep 4: first_byte 0.52s  ttft 0.84s  wall   2.04s  chars   91  gen 15.21 tok/s  max_gap 0.07s
+  SUMMARY         : ttft median 0.71s | wall median 1.92s | decode median 16.95 tok/s | 4/4 ok
+  tool latency    : first tool at 12.73s | wall 16.0s | tools=['run_command'] | verified=True
+  long request    : survived | wall 32.4s | chars 1994 | decode 14.58 tok/s | max_gap 0.07s
+
+==========================================================================
+ENGINE B  https://anyone-voters-launches-weblogs.trycloudflare.com
+==========================================================================
+  health /api/ps  : median 0.100s  min 0.065s  max 0.465s  (5 probes, 0 failures)
+  conn establish  : median 0.032s  min 0.030s
+  model           : hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  residency       : 16.16 GB in VRAM of 16.16 GB
+  rep 1: first_byte 0.10s  ttft 0.66s  wall   1.66s  chars   87  gen 17.42 tok/s  max_gap 0.07s
+  rep 2: first_byte 0.11s  ttft 0.46s  wall   2.12s  chars  148  gen 17.82 tok/s  max_gap 0.07s
+  rep 3: first_byte 0.15s  ttft 0.49s  wall   1.29s  chars   76  gen 18.99 tok/s  max_gap 0.07s
+  rep 4: first_byte 0.09s  ttft 0.43s  wall   1.43s  chars   87  gen 17.38 tok/s  max_gap 0.07s
+  SUMMARY         : ttft median 0.47s | wall median 1.55s | decode median 17.62 tok/s | 4/4 ok
+  tool latency    : first tool at 11.52s | wall 15.5s | tools=['run_command'] | verified=True
+  long request    : survived | wall 42.5s | chars 2081 | decode 12.82 tok/s | max_gap 0.08s
+
+==========================================================================
+ENGINE C  https://organized-investor-surgeon-turns.trycloudflare.com
+==========================================================================
+  health /api/ps  : median 0.285s  min 0.153s  max 0.578s  (5 probes, 0 failures)
+  conn establish  : median 0.031s  min 0.029s
+  model           : hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  residency       : 16.16 GB in VRAM of 16.16 GB
+  rep 1: first_byte 0.14s  ttft 0.73s  wall   1.73s  chars   90  gen 18.03 tok/s  max_gap 0.07s
+  rep 2: first_byte 0.15s  ttft 0.50s  wall   1.70s  chars   91  gen 15.21 tok/s  max_gap 0.07s
+  rep 3: first_byte 0.28s  ttft 0.62s  wall   1.42s  chars   77  gen 19.20 tok/s  max_gap 0.07s
+  rep 4: first_byte 0.15s  ttft 0.49s  wall   1.50s  chars   87  gen 17.36 tok/s  max_gap 0.07s
+  SUMMARY         : ttft median 0.56s | wall median 1.60s | decode median 17.69 tok/s | 4/4 ok
+  tool latency    : first tool at 11.40s | wall 13.9s | tools=['run_command'] | verified=True
+  long request    : survived | wall 100.2s | chars 4976 | decode 10.65 tok/s | max_gap 19.50s
+
+==========================================================================
+ENGINE D  https://podcast-fan-delivered-alien.trycloudflare.com
+==========================================================================
+  health /api/ps  : median 0.185s  min 0.140s  max 0.512s  (5 probes, 0 failures)
+  conn establish  : median 0.032s  min 0.029s
+  model           : hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  residency       : 16.16 GB in VRAM of 16.16 GB
+  rep 1: first_byte 0.16s  ttft 0.72s  wall   1.76s  chars   87  gen 16.69 tok/s  max_gap 0.07s
+  rep 2: first_byte 0.16s  ttft 0.53s  wall   1.78s  chars   91  gen 14.48 tok/s  max_gap 0.07s
+  rep 3: first_byte 0.14s  ttft 0.49s  wall   1.83s  chars  109  gen 16.30 tok/s  max_gap 0.08s
+  rep 4: first_byte 0.14s  ttft 0.48s  wall   1.82s  chars  106  gen 15.80 tok/s  max_gap 0.08s
+  SUMMARY         : ttft median 0.51s | wall median 1.80s | decode median 16.05 tok/s | 4/4 ok
+  tool latency    : first tool at 13.44s | wall 16.2s | tools=['run_command'] | verified=True
+  long request    : survived | wall 34.3s | chars 1757 | decode 14.88 tok/s | max_gap 0.14s
+
+==========================================================================
+CROSS-ENGINE COMPARISON
+==========================================================================
+  slot health    conn      ttft        wall      decode   probes failed
+  a    0.244s    0.036s    0.71s       1.92s     16.95    0
+  b    0.100s    0.032s    0.47s       1.55s     17.62    0
+  c    0.285s    0.031s    0.56s       1.60s     17.69    0
+  d    0.185s    0.032s    0.51s       1.80s     16.05    0
+
+saved /home/user/aether/scripts/perf/output/reliability-audit-before.json

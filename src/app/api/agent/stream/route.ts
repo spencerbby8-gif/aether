@@ -437,9 +437,12 @@ export async function POST(request: Request) {
             }
             if (chunk.done) break;
 
-            /* Any engine event proves liveness — reset the idle budget. */
+            /* Any engine event proves liveness — reset the idle budget, and
+               count it as a success so a recovered engine is reinstated rather
+               than staying condemned by earlier failures. */
             guard.kick();
             engineManager.touch();
+            engineManager.noteOutcome(slot2, true);
 
             buffer += decoder.decode(chunk.value, { stream: true });
             const lines = buffer.split("\n");

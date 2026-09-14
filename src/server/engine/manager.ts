@@ -463,13 +463,22 @@ export class EngineManager {
   /** Pick the engine to work against: active slot first, any alive second. */
   pickEngine(): EngineId {
     const engines = this.store.get();
-    if (engines[this.store.getActive()].state === "alive") return this.store.getActive();
-    const other = ENGINE_IDS.find((id) => engines[id].state === "alive");
+    const active = this.store.getActive();
+    /* Prefer the active engine, but not if it has been failing: a degraded
+       engine that is still nominally "alive" is worse than a healthy other one,
+       because every turn against it is a coin flip. */
+    if (engines[active].state === "alive" && !this.isDegraded(active)) return active;
+    const other = ENGINE_IDS.find(
+      (id) => engines[id].state === "alive" && !this.isDegraded(id),
+    );
     if (other) {
+      if (other !== active) this.log(`avoiding degraded engine ${active} → ${other}`);
       this.store.setActive(other);
       return other;
     }
-    return this.store.getActive();
+    /* Everything alive is degraded. Use the active one rather than failing
+       outright: a 55% engine still answers more often than nothing. */
+    return active;
   }
 
   /** Mark a slot's URL stale and evict it (rotating-URL failure). */
@@ -478,6 +487,47 @@ export class EngineManager {
     if (engine.state === "alive") {
       this.bind(slot, "unreachable", null, "Operation failed against the cached URL — evicted.");
     }
+    this.noteOutcome(slot, false);
+  }
+
+  /* ---------------- degraded-engine detection ---------------- */
+
+  /**
+   * Rolling success/failure tally per slot.
+   *
+   * An engine is not only "up" or "down". Measured on a live engine: 40 health
+   * probes two seconds apart returned 22 successes and 18 failures -- a 55%
+   * success rate with the longest outage about six seconds. Every individual
+   * probe looked like a transient blip, so nothing ever tripped the failover
+   * path, and the user experienced an engine that kept dropping mid-turn. A
+   * rate is the only thing that distinguishes that from noise.
+   */
+  private outcomes = new Map<EngineId, boolean[]>();
+
+  /** Record one operation's outcome; keeps the most recent 8. */
+  noteOutcome(slot: EngineId, ok: boolean): void {
+    const recent = this.outcomes.get(slot) ?? [];
+    recent.push(ok);
+    if (recent.length > 8) recent.shift();
+    this.outcomes.set(slot, recent);
+  }
+
+  /**
+   * True when a slot has failed often enough recently that it should not be
+   * chosen. Requires at least 4 samples so a single bad probe cannot condemn a
+   * healthy engine, and tolerates 1 failure in 4 so ordinary blips do not
+   * either.
+   */
+  isDegraded(slot: EngineId): boolean {
+    const recent = this.outcomes.get(slot) ?? [];
+    if (recent.length < 4) return false;
+    const failures = recent.filter((x) => !x).length;
+    return failures / recent.length > 0.25;
+  }
+
+  /** Forget a slot's history, e.g. after it has been restarted. */
+  clearOutcomes(slot: EngineId): void {
+    this.outcomes.delete(slot);
   }
 
   /**

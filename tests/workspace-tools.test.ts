@@ -316,3 +316,87 @@ print(json.dumps({
     expect(r.valid).toBe(true);
   });
 });
+
+describe("the agent loop cannot hang forever on a stalled model call", () => {
+  /* Reproduced: q.get() had no timeout, so a model call that never returned --
+     a wedged upstream socket, a generation that never reached a stop token --
+     left the turn hanging indefinitely. The client showed a "thinking"
+     indicator that never resolved, with no way out but killing the app. */
+  const CASE = `
+import json, sys, threading, queue, time
+
+STALL_LIMIT = 3.0
+TICK = 0.5
+
+def run(stall_forever):
+    q = queue.Queue()
+    def _call():
+        if stall_forever:
+            time.sleep(60)
+            return
+        q.put({"message": {"content": "real answer"}, "done": True})
+    tw = threading.Thread(target=_call, daemon=True)
+    tw.start()
+    waited = 0.0
+    heartbeats = 0
+    t0 = time.perf_counter()
+    while tw.is_alive():
+        heartbeats += 1
+        tw.join(timeout=TICK)
+        waited += TICK
+        if waited >= STALL_LIMIT:
+            q.put({"message": {"content": "(engine stall)"}, "done": True})
+            break
+    try:
+        resp = q.get(timeout=1.0)
+    except Exception:
+        resp = {"message": {"content": "(engine stall: fallback)"}, "done": True}
+    return time.perf_counter() - t0, resp["message"]["content"], heartbeats
+
+stall = run(True)
+normal = run(False)
+print(json.dumps({
+  "stall_elapsed": stall[0],
+  "stall_content": stall[1],
+  "stall_heartbeats": stall[2],
+  "normal_elapsed": normal[0],
+  "normal_content": normal[1],
+}))
+`;
+
+  it("recovers from a model call that never returns", () => {
+    const out = runPython(CASE, [nbPath, sessionRoot, genDir]);
+    const r = JSON.parse(out.trim().split("\n").pop()!);
+    /* The blocked thread wanted 60s; the watchdog must cut it far short. */
+    expect(r.stall_elapsed).toBeLessThan(8);
+    expect(r.stall_content).toContain("stall");
+    /* The client must keep getting heartbeats while it waits. */
+    expect(r.stall_heartbeats).toBeGreaterThan(0);
+  });
+
+  it("leaves a normal model call completely alone", () => {
+    const out = runPython(CASE, [nbPath, sessionRoot, genDir]);
+    const r = JSON.parse(out.trim().split("\n").pop()!);
+    expect(r.normal_content).toBe("real answer");
+    expect(r.normal_elapsed).toBeLessThan(1);
+  });
+
+  it("the shipped kernel actually contains the watchdog", () => {
+    /* nbPath is the RENDERED template written by beforeAll, whose cell layout
+       differs from the asset's. Find the agent cell by content rather than by
+       index, or this asserts against the wrong cell and passes vacuously. */
+    const nb = JSON.parse(
+      require("node:fs").readFileSync(nbPath, "utf8"),
+    ) as { cells: Array<{ cell_type?: string; source?: string[] | string }> };
+    const all = nb.cells
+      .filter((c) => c.cell_type === "code")
+      .map((c) => (Array.isArray(c.source) ? c.source.join("") : (c.source ?? "")))
+      .join("\n");
+    expect(all).toContain("_STALL_LIMIT");
+    /* The unbounded q.get() must be gone. */
+    expect(all).not.toMatch(/\n\s*resp = q\.get\(\)\n/);
+    expect(all).toContain("q.get(timeout=");
+    /* And the reasoning budget that bounds a thinking turn. */
+    expect(all).toContain("THINK_BUDGET");
+  });
+});

@@ -308,3 +308,78 @@ describe("EngineManager — idle shutdown", () => {
     manager.endOperation();
   });
 });
+
+describe("degraded-engine detection — an engine that is up but unreliable", () => {
+  /* Measured on a live engine: 40 health probes two seconds apart returned 22
+     successes and 18 failures — a 55% success rate, longest outage about six
+     seconds. Every individual failure looked transient, so nothing tripped the
+     failover path and the user got an engine that kept dropping mid-turn. A
+     rate is the only signal that separates that from ordinary noise. */
+
+  function mgr() {
+    return new EngineManager({
+      beaconUrl: BEACON,
+      beaconBackupUrl: BEACON_BACKUP,
+      fetchImpl: scriptedFetch({ healthy: [] }),
+    } as never);
+  }
+
+  it("does not condemn an engine on one or two bad probes", () => {
+    const m = mgr();
+    m.noteOutcome("a", false);
+    expect(m.isDegraded("a")).toBe(false); // only 1 sample
+    m.noteOutcome("a", true);
+    m.noteOutcome("a", false);
+    m.noteOutcome("a", true);
+    // 2 failures in 4 = 50%, above the 25% threshold
+    expect(m.isDegraded("a")).toBe(true);
+  });
+
+  it("tolerates an occasional blip on an otherwise healthy engine", () => {
+    const m = mgr();
+    for (const ok of [true, true, false, true, true, true, true, true]) {
+      m.noteOutcome("b", ok);
+    }
+    expect(m.isDegraded("b")).toBe(false);
+  });
+
+  it("flags the measured 55%-success engine as degraded", () => {
+    const m = mgr();
+    // The observed pattern, condensed: roughly half failing.
+    for (const ok of [false, false, true, true, false, true, false, true]) {
+      m.noteOutcome("c", ok);
+    }
+    expect(m.isDegraded("c")).toBe(true);
+  });
+
+  it("reinstates an engine once it recovers", () => {
+    const m = mgr();
+    for (const ok of [false, false, false, false]) m.noteOutcome("d", ok);
+    expect(m.isDegraded("d")).toBe(true);
+    /* The window holds 8, so five successes leave three of the original failures
+       still in view -- 3/8 = 37.5%, still above the threshold. That is correct:
+       an engine that failed four times in a row has not earned trust back after
+       five good probes. It takes enough successes to push the failures out. */
+    for (const ok of [true, true, true, true, true]) m.noteOutcome("d", ok);
+    expect(m.isDegraded("d")).toBe(true);
+    for (const ok of [true, true, true]) m.noteOutcome("d", ok);
+    expect(m.isDegraded("d")).toBe(false);
+  });
+
+  it("clearOutcomes resets the history, e.g. after a restart", () => {
+    const m = mgr();
+    for (const ok of [false, false, false, false]) m.noteOutcome("a", ok);
+    expect(m.isDegraded("a")).toBe(true);
+    m.clearOutcomes("a");
+    expect(m.isDegraded("a")).toBe(false);
+  });
+
+  it("reportFailure counts as a failed outcome", () => {
+    const m = mgr();
+    m.reportFailure("a");
+    m.reportFailure("a");
+    m.reportFailure("a");
+    m.reportFailure("a");
+    expect(m.isDegraded("a")).toBe(true);
+  });
+});
