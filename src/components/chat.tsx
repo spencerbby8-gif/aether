@@ -86,7 +86,10 @@ export function ChatHeader({
      * status endpoint reports `waking: true` once the push is dispatched,
      * which drives the indicator until /api/ps confirms live. */
     setWakeRequested(true);
-    toast("Waking engine — this takes about 10 minutes. The status indicator will update when it's live.", "info");
+    /* No number in this first toast. A hardcoded "about 10 minutes" was a
+       guess dressed as an estimate; the real ETA arrives with the wake
+       response and comes from the boot stage the engine itself published. */
+    toast("Waking engine…", "info");
     void engineWake()
       .then((result) => {
         if (result.status === "alive") {
@@ -96,8 +99,17 @@ export function ChatHeader({
           toast("Engine is live.", "ok");
         } else if (result.status === "waking") {
           /* Keep the wake flag set — the boot is in progress. The polled
-           * engine status will flip to "live" when /api/ps responds. */
-          toast(`Wake dispatched (${result.reason ?? "boot in progress"}). Booting…`, "info");
+           * engine status will flip to "live" when /api/ps responds.
+           * ETA only when the server can measure one from the real boot
+           * stage; the reason string IS that stage when one is known. */
+          const eta =
+            result.etaMinutes != null
+              ? ` ~${result.etaMinutes} min left`
+              : "";
+          toast(
+            `Booting: ${result.reason ?? "kernel starting"}${eta}`,
+            "info",
+          );
         } else {
           setWakeRequested(false);
           toast(result.message ?? "Engine could not be woken.", "danger");

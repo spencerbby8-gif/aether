@@ -243,7 +243,7 @@ function EnginePanel({ busy, snapshot, onRefresh }: { busy: boolean; snapshot: E
   return (
     <div className="mt-1 px-1">
       <p className="px-1 pb-1.5 pt-3 text-[10.5px] font-semibold uppercase tracking-wider text-fog-600">
-        Engine power · three Kaggle GPUs
+        Engine power · four Kaggle GPUs
       </p>
       <div className="rounded-xl border border-line bg-ink-800 p-3.5">
         {/* Truthful live banner — driven by a fresh /api/ps health check.
@@ -285,7 +285,7 @@ function EnginePanel({ busy, snapshot, onRefresh }: { busy: boolean; snapshot: E
           </span>
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {ENGINE_SLOTS.map((id) => {
             const info = snapshot?.engines[id];
             const health = info?.health ?? "offline";

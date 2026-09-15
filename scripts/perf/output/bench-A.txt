@@ -1,0 +1,45 @@
+==============================================================================
+ENGINE BENCHMARK: A
+  url   : https://compression-end-academic-marked.trycloudflare.com
+  reps  : 3
+==============================================================================
+
+[1] connection and health
+  /api/ps round trip : min 0.205s  median 0.227s  max 0.332s
+  model              : hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  size               : 16.16 GB, in VRAM 16.16 GB (fully resident)
+
+[2] discovery beacon
+  beacon round trip  : 0.301s
+
+[3] model internals via /api/generate (Ollama's own numbers)
+  ctx 16384  prefill 225.1 tok/s (192 tok / 0.85s) | decode 14.95 tok/s (128 tok / 8.56s) | load 19.79s | wall 29.42s
+  ctx 4096   prefill 215.4 tok/s (192 tok / 0.89s) | decode 14.85 tok/s (128 tok / 8.62s) | load 9.53s | wall 19.50s
+  ctx 2048   prefill 205.5 tok/s (192 tok / 0.93s) | decode 14.44 tok/s (128 tok / 8.86s) | load 9.62s | wall 19.62s
+
+[4] chat TTFT and streaming (repeated, identical prompt)
+  rep 1: first_byte 0.21s  ttft 18.07s  wall 26.19s  chars 582  chunks 124
+  rep 2: first_byte 0.45s  ttft 0.80s  wall 9.13s  chars 624  chunks 126
+  rep 3: first_byte 0.20s  ttft 0.54s  wall 9.90s  chars 642  chunks 142
+  ttft   median 0.80s  min 0.54s  max 18.07s
+  wall   median 9.90s
+  stream 72 chars/sec median
+
+[5] tool-start latency (real tool call)
+  tools called       : run_command
+  time to first tool : 6.57s
+  task wall          : 9.42s
+  plan published     : True
+  verification       : True
+
+[6] web search latency (real search)
+  tools              : web_search
+  time to first tool : 6.38s
+  task wall          : 18.16s
+
+[7] browser latency (real Chromium)
+  tools              : browser, browser, fetch_page
+  task wall          : 26.22s
+
+==============================================================================
+saved /home/user/aether/scripts/perf/output/bench-A.json

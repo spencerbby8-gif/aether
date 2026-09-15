@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Watch a real Kaggle engine boot and capture its live tunnel URL from ntfy.
-KEY=KGAT_REDACTED
-USER=fridaymoses
+KEY="${KAGGLE_KEY_A:?set KAGGLE_KEY_A to the slot-A Kaggle API key}"
+USER="${KAGGLE_USERNAME_A:-fridaymoses}"
 SLUG=qwen-3-8-27b-uncensored-chat
 TOPIC=aether-proof-7f3k9x2q
 OUT=/tmp/aether-real/watch.log

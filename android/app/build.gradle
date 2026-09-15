@@ -7,8 +7,8 @@ android {
         applicationId 'com.aether.app'
         minSdk 26
         targetSdk 37
-        versionCode 43
-        versionName '2.4.0'
+        versionCode 45
+        versionName '2.6.0'
     }
     signingConfigs {
         release {

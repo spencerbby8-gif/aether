@@ -351,6 +351,124 @@ def test_plain_chat_untouched():
        json.dumps(ver[-1] if ver else {})[:160])
 
 
+def test_consecutive_failure_breaker():
+    head("G. a run of failing steps ends the turn instead of grinding to the ceiling")
+    # This is the turn that was measured live: the model re-issues the same
+    # command with one character changed each time, so `duplicate_of` never
+    # matches and every execution looks new. Each one fails. Before the
+    # breaker the turn ran to the 24-call ceiling -- n=24, roles
+    # SUATAUATATATATATATATATATAT, empty answer.
+    calls = []
+
+    def failing(command, **kw):
+        calls.append(command)
+        return "exit=1\ncommand not found: %s" % command
+
+    # Eight distinct commands, each failing. More than _MAX_CONSEC_FAIL (3),
+    # fewer than the budget ceiling (24) -- so only the breaker can stop it.
+    script = [{"tool_calls": [{"function": {"name": "run_command",
+                                            "arguments": {"command": "probe-%d" % i}}}]}
+              for i in range(8)]
+    script.append({"content": "all done"})
+    ns = build_ns(script)
+    ns["EXEC"]["run_command"] = failing
+    h = FakeHandler()
+    ns["agent_stream"](h, {"messages": [{"role": "user",
+                                         "content": "run the probe command until it works"}],
+                           "model": "m"})
+    ev = h.events()
+    text = " ".join((e.get("message") or {}).get("content", "") for e in ev)
+    ok("the turn stopped after 3 consecutive failing steps", len(calls) == 3,
+       "executions=%d (want 3)" % len(calls))
+    ok("it said why it stopped", "steps in a row failed" in text, text[:160])
+    ok("it did not burn the whole budget", len(calls) < 8,
+       "executions=%d of the 8 offered" % len(calls))
+    ok("the model was not called for the remaining steps",
+       len(ns["_calls"]) <= 5, "model calls=%d" % len(ns["_calls"]))
+
+
+def test_a_recovery_resets_the_failure_count():
+    head("H. a success in the middle resets the counter -- real work is not cut off")
+    ran = []
+    seq = ["exit=1\nnope", "exit=1\nnope", "exit=0\nok", "exit=1\nnope",
+           "exit=1\nnope", "exit=0\nok"]
+
+    def flaky(command, **kw):
+        ran.append(command)
+        return seq[len(ran) - 1] if len(ran) <= len(seq) else "exit=0\nok"
+
+    script = [{"tool_calls": [{"function": {"name": "run_command",
+                                            "arguments": {"command": "step-%d" % i}}}]}
+              for i in range(6)]
+    script.append({"content": "finished the work"})
+    ns = build_ns(script)
+    ns["EXEC"]["run_command"] = flaky
+    h = FakeHandler()
+    ns["agent_stream"](h, {"messages": [{"role": "user",
+                                         "content": "run each step and fix failures"}],
+                           "model": "m"})
+    text = " ".join((e.get("message") or {}).get("content", "") for e in h.events())
+    ok("all six steps ran -- two failures twice is not a run of three",
+       len(ran) == 6, "executions=%d (want 6)" % len(ran))
+    ok("the turn was never broken off", "steps in a row failed" not in text,
+       text[:160])
+
+
+def test_silent_tool_steps_are_bounded():
+    head("I. a turn that runs tools without ever answering is stopped")
+    ran = []
+
+    def fine(command, **kw):
+        ran.append(command)
+        return "exit=0\nok"
+
+    # Every step calls a tool and produces no content, and every step differs,
+    # so neither the budget's repeat guard nor the failure breaker applies.
+    # This is the shape the live 24-message turn had.
+    script = [{"tool_calls": [{"function": {"name": "run_command",
+                                            "arguments": {"command": "c-%d" % i}}}]}
+              for i in range(20)]
+    script.append({"content": "done at last"})
+    ns = build_ns(script)
+    ns["EXEC"]["run_command"] = fine
+    h = FakeHandler()
+    ns["agent_stream"](h, {"messages": [{"role": "user",
+                                         "content": "keep running commands"}],
+                           "model": "m"})
+    text = " ".join((e.get("message") or {}).get("content", "") for e in h.events())
+    ok("it stopped at 12 silent steps, not 20", len(ran) == 12,
+       "executions=%d (want 12)" % len(ran))
+    ok("it said the work is saved", "steps in a row ran tools" in text, text[:180])
+
+
+def test_a_real_multitool_turn_is_not_cut_off():
+    head("J. six silent tool steps -- a genuine multi-tool task -- still finish")
+    ran = []
+
+    def fine(command, **kw):
+        ran.append(command)
+        return "exit=0\nok"
+
+    # Measured on a live engine: a real search/fetch/write/package task runs
+    # about six tool steps before it answers. Twice that is the limit, so this
+    # must complete untouched.
+    script = [{"tool_calls": [{"function": {"name": "run_command",
+                                            "arguments": {"command": "c-%d" % i}}}]}
+              for i in range(6)]
+    script.append({"content": "the answer, at last"})
+    ns = build_ns(script)
+    ns["EXEC"]["run_command"] = fine
+    h = FakeHandler()
+    ns["agent_stream"](h, {"messages": [{"role": "user",
+                                         "content": "run these six commands then answer"}],
+                           "model": "m"})
+    text = " ".join((e.get("message") or {}).get("content", "") for e in h.events())
+    ok("all six steps ran", len(ran) == 6, "executions=%d" % len(ran))
+    ok("the final answer reached the client", "the answer, at last" in text,
+       text[:160])
+    ok("no breaker fired", "I stopped" not in text, text[:160])
+
+
 def main():
     WORK.mkdir(parents=True, exist_ok=True)
     test_plan_published()
@@ -359,6 +477,10 @@ def main():
     test_verification_gate()
     test_happy_path_still_works()
     test_plain_chat_untouched()
+    test_consecutive_failure_breaker()
+    test_a_recovery_resets_the_failure_count()
+    test_silent_tool_steps_are_bounded()
+    test_a_real_multitool_turn_is_not_cut_off()
     print("\n%d passed, %d failed" % (PASSED, FAILED))
     return 1 if FAILED else 0
 

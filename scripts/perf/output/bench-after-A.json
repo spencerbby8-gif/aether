@@ -1,0 +1,53 @@
+{
+  "health": [
+    0.25896776000081445,
+    0.2828616190017783,
+    0.16791126799944323
+  ],
+  "model": "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS",
+  "model_bytes": 16163977294,
+  "vram_bytes": 16163977294,
+  "beacon": 0.35414506099914433,
+  "ctx": {
+    "16384": {
+      "prefill_tok_s": 249.44913316426224,
+      "decode_tok_s": 15.380770192067368,
+      "load_s": 0.001067406,
+      "wall_s": 9.226216371000191,
+      "prompt_tokens": 192,
+      "gen_tokens": 128
+    },
+    "4096": {
+      "prefill_tok_s": 218.40618089491932,
+      "decode_tok_s": 15.304588209764278,
+      "load_s": 9.770935278,
+      "wall_s": 19.146875923997868,
+      "prompt_tokens": 192,
+      "gen_tokens": 128
+    },
+    "2048": {
+      "prefill_tok_s": 226.5075136789303,
+      "decode_tok_s": 15.286838414296252,
+      "load_s": 9.797418968,
+      "wall_s": 19.149209215000155,
+      "prompt_tokens": 192,
+      "gen_tokens": 128
+    }
+  },
+  "ttft_median": 0.7242477950021566,
+  "wall_median": 10.072980913999345,
+  "tool_start": 6.29837461599891,
+  "tool_task_wall": 8.916757893999602,
+  "tool_names": [
+    "run_command"
+  ],
+  "search_wall": 10.931576891001896,
+  "search_tools": [
+    "web_search"
+  ],
+  "browser_wall": 19.430997139999818,
+  "browser_tools": [
+    "browser",
+    "fetch_page"
+  ]
+}

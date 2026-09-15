@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("b9d75affd599588f64a9edf5d39dd9248c89321ae6e66dd378528b15a05b349c");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("7ead9c01a9e762a8109da423c5447eff0c97f12a3e3c26e3125b3bc25388c2b8");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -171,7 +171,7 @@ describe("engine source — rendering", () => {
        into a brief for the model with the raw kept for the UI, the budget
        catches near-duplicate calls and abandons actions that failed twice,
        and the turn is verified against the requested outcome before it ends. */
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(202176);
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(218270);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 
@@ -302,9 +302,17 @@ describe("engine source — real streaming, not a replay (audit §4 item 9)", ()
 
   it("has a streaming reader that forwards deltas as they arrive", () => {
     const py = enginePython();
-    expect(py).toContain("def ollama_stream(payload, push, timeout=1200, on_think=None):");
+    expect(py).toContain("def ollama_stream(payload, push, timeout=1200, on_think=None, on_progress=None):");
     /* curl -N is what makes ollama flush each NDJSON chunk immediately. */
     expect(py).toMatch(/curl','-s','-N'/);
+    /* Stall detector v2: silence-based limits (90s first progress / 45s between
+       chunks / 900s backstop), replacing the flat 180s wall-clock limit that
+       killed healthy long generations and took 3x longer to report dead ones. */
+    expect(py).toContain("_FIRST_PROGRESS_LIMIT = 90.0");
+    expect(py).toContain("_NO_PROGRESS_LIMIT = 45.0");
+    expect(py).not.toContain("_STALL_LIMIT = 180.0");
+    /* The final answer call is watchdogged too (it used to freeze for 1200s). */
+    expect(py).toContain("_fwatch");
     /* Tool calls must still be detected, or the agent loop breaks. */
     expect(py).toContain("for tc in (mm.get('tool_calls') or []): tcs.append(tc)");
   });

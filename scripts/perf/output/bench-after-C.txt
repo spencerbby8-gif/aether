@@ -1,0 +1,45 @@
+==============================================================================
+ENGINE BENCHMARK: C
+  url   : https://REDACTED-TUNNEL.trycloudflare.com
+  reps  : 3
+==============================================================================
+
+[1] connection and health
+  /api/ps round trip : min 0.125s  median 0.273s  max 0.623s
+  model              : hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS
+  size               : 16.16 GB, in VRAM 16.16 GB (fully resident)
+
+[2] discovery beacon
+  beacon round trip  : 0.354s
+
+[3] model internals via /api/generate (Ollama's own numbers)
+  ctx 16384  prefill 248.5 tok/s (192 tok / 0.77s) | decode 15.34 tok/s (128 tok / 8.35s) | load 0.00s | wall 9.42s
+  ctx 4096   prefill 225.3 tok/s (192 tok / 0.85s) | decode 15.29 tok/s (128 tok / 8.37s) | load 10.15s | wall 19.53s
+  ctx 2048   prefill 228.5 tok/s (192 tok / 0.84s) | decode 15.29 tok/s (128 tok / 8.37s) | load 10.22s | wall 19.57s
+
+[4] chat TTFT and streaming (repeated, identical prompt)
+  rep 1: first_byte 0.36s  ttft 17.57s  wall 24.70s  chars 553  chunks 116
+  rep 2: first_byte 0.24s  ttft 0.59s  wall 7.58s  chars 538  chunks 111
+  rep 3: first_byte 0.12s  ttft 0.47s  wall 10.65s  chars 769  chunks 160
+  ttft   median 0.59s  min 0.47s  max 17.57s
+  wall   median 10.65s
+  stream 77 chars/sec median
+
+[5] tool-start latency (real tool call)
+  tools called       : run_command
+  time to first tool : 5.97s
+  task wall          : 8.35s
+  plan published     : True
+  verification       : True
+
+[6] web search latency (real search)
+  tools              : web_search
+  time to first tool : 6.03s
+  task wall          : 11.65s
+
+[7] browser latency (real Chromium)
+  tools              : browser, fetch_page
+  task wall          : 17.96s
+
+==============================================================================
+saved /home/user/aether/scripts/perf/output/bench-C.json

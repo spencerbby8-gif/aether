@@ -1,0 +1,18 @@
+{
+  "slot": "d",
+  "url": "https://comm-sentence-importantly-strong.trycloudflare.com",
+  "stages": {
+    "kernel boot": 1789497561,
+    "ollama download": 1789497562,
+    "model pull start": 1789497630,
+    "model pull": 1789497631,
+    "model on disk": 1789498015,
+    "VRAM warmup": 1789498016,
+    "orchestration": 1789498016,
+    "_link": 1789498025,
+    "_health": 1789498117.3438878,
+    "_health_dt": 0.15764040700014448
+  },
+  "total": 556.3438878059387,
+  "push": 2.162145975000385
+}

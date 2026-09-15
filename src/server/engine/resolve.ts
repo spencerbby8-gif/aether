@@ -313,6 +313,46 @@ export function markWakeDispatched(slot?: EngineId): void {
  */
 const BOOT_STAGE_MAX_MIN = 25;
 
+/**
+ * Where a boot is, measured from the beacon rather than guessed.
+ *
+ * The client is told an ETA the moment a wake is dispatched, and it used to be
+ * a flat 10 minutes no matter what the engine had actually reached. Measured
+ * against real boots (scripts/perf/wake-profile.py, engine D):
+ *
+ *   stage                    seconds from kernel boot
+ *   starting / ollama              0-19
+ *   pulling-model                 38
+ *   model on disk                215
+ *   warming up (weights->VRAM)   216
+ *   tunnel ready                 337 -> ~221 after the warmup moved off the
+ *                                        critical path
+ *   health READY                 347 -> ~222
+ *
+ * So a client that asked during the model pull was told "10 minutes" when 5
+ * were left, and one that asked during the warmup was told "10 minutes" when
+ * under 2 were left. The estimate below comes from the stage the engine itself
+ * last announced, and it is deliberately conservative: an overestimate the
+ * user watches count down is honest, an underestimate that expires is not.
+ */
+const STAGE_ETA_MINUTES: Array<{ match: RegExp; eta: number }> = [
+  { match: /model on disk|model-ready/i, eta: 2 },
+  { match: /warming up|warming in the background/i, eta: 2 },
+  { match: /warming in the background|tunnel/i, eta: 1 },
+  { match: /pulling/i, eta: 4 },
+  { match: /downloading|ollama/i, eta: 6 },
+  { match: /queued|starting/i, eta: 7 },
+];
+
+/** Minutes left for a boot at a given stage. Never returns a guess of 0. */
+function etaMinutesForStage(stage: string | undefined | null): number {
+  if (!stage) return 7;
+  for (const rule of STAGE_ETA_MINUTES) {
+    if (rule.match.test(stage)) return rule.eta;
+  }
+  return 7;
+}
+
 interface BootStage {
   slot: EngineId | null;
   stage: string;
@@ -629,6 +669,16 @@ export async function wakeSlot(slot: EngineId): Promise<{ state: "waking" | "quo
 }
 
 /**
+ * Minutes left in a boot that has not announced anything yet.
+ *
+ * Used only when there is no stage to read. `wakeSlot` has just handed back a
+ * detail string (e.g. "wake push sent to <user>"), which says the push landed
+ * but nothing about how far the kernel has got, so the worst honest case —
+ * a boot that has not started pulling — is what the client is told.
+ */
+const WAKE_ETA_NO_STAGE_MIN = 7;
+
+/**
  * Wake / discover. Returns an alive engine URL, or wakes whichever account has
  * quota left (deterministic A→B→C failover), or reports waking/error.
  *
@@ -683,7 +733,14 @@ export async function resolveEngine(account?: EngineId, deadlineMs = 25_000): Pr
     };
   }
   if (timeLeft() <= 0) {
-    return { status: "waking", etaMinutes: 10, reason: "discovery timed out — a boot may still be in progress", slot: account ?? null };
+    return {
+      status: "waking",
+      /* Read from the engine's own last stage, not a constant. See
+         etaMinutesForStage for the measured per-stage times. */
+      etaMinutes: etaMinutesForStage((await latestBootStage())?.stage),
+      reason: "discovery timed out — a boot may still be in progress",
+      slot: account ?? null,
+    };
   }
 
   /* 3) Nothing alive — waking needs credentials. */
@@ -702,11 +759,23 @@ export async function resolveEngine(account?: EngineId, deadlineMs = 25_000): Pr
   const failures: string[] = [];
   for (const acc of accs) {
     if (timeLeft() <= 0) {
-      return { status: "waking", etaMinutes: 10, reason: "wake dispatch timed out — a boot may still be in progress", slot: acc.slot };
+      return {
+        status: "waking",
+        etaMinutes: etaMinutesForStage((await latestBootStage())?.stage),
+        reason: "wake dispatch timed out — a boot may still be in progress",
+        slot: acc.slot,
+      };
     }
     const outcome = await wakeSlot(acc.slot);
     if (outcome.state === "waking") {
-      return { status: "waking", etaMinutes: 10, reason: outcome.detail, slot: acc.slot };
+      /* A wake that was just dispatched has announced no stage yet, so there is
+         nothing to read: report the honest worst case. */
+      return {
+        status: "waking",
+        etaMinutes: WAKE_ETA_NO_STAGE_MIN,
+        reason: outcome.detail,
+        slot: acc.slot,
+      };
     }
     if (outcome.state === "quota") {
       failures.push(`${acc.user}: out of GPU quota`);

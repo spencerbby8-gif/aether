@@ -19,6 +19,16 @@ import { shutdownConfirmed, shutdownEngineUrl } from "./shutdown";
 import { engineStateStore } from "./state-store";
 
 /**
+ * Routing hysteresis. A healthy engine only takes over from the active one
+ * when its median probe latency is lower by more than this margin. Live
+ * probes this session spanned 0.13s–0.65s medians across four engines, while
+ * repeat probes of one engine vary by ~0.1s — a margin below the variation
+ * would flap the active engine on noise, and one above the real spread would
+ * never route anywhere. 150ms sits between the two measured numbers.
+ */
+const LATENCY_SWITCH_MARGIN_MS = 150;
+
+/**
  * EngineManager — authoritative server-side lifecycle for the Kaggle engines.
  *
  * FIX (audit C3): shutdown uses the engine's REAL contract — POST {url}/off with
@@ -460,25 +470,69 @@ export class EngineManager {
 
   /* ---------------- failover ---------------- */
 
-  /** Pick the engine to work against: active slot first, any alive second. */
+  /**
+   * Pick the engine to work against: the FASTEST healthy one, with a margin
+   * so noise does not flap the choice.
+   *
+   * Was: active slot first, then the first alive slot in ENGINE_IDS order —
+   * i.e. "first available", which routes every AUTO turn to engine A even
+   * when C answers health probes 3x faster (measured spread this session:
+   * 0.13s–0.65s medians across live engines). Latency samples come from the
+   * health probes the UI poll already performs (probeFleetHealth feeds
+   * noteLatency), so this adds zero probing overhead of its own.
+   *
+   * Hysteresis: the active engine keeps the job unless another healthy engine
+   * is faster by more than LATENCY_SWITCH_MARGIN_MS of median probe latency.
+   * A degraded engine is never chosen; it is reinstated by noteOutcome once
+   * it has recovered (see the recovery rule there), not by this method.
+   */
   pickEngine(): EngineId {
     const engines = this.store.get();
     const active = this.store.getActive();
-    /* Prefer the active engine, but not if it has been failing: a degraded
-       engine that is still nominally "alive" is worse than a healthy other one,
-       because every turn against it is a coin flip. */
-    if (engines[active].state === "alive" && !this.isDegraded(active)) return active;
-    const other = ENGINE_IDS.find(
+    const healthy = ENGINE_IDS.filter(
       (id) => engines[id].state === "alive" && !this.isDegraded(id),
     );
-    if (other) {
-      if (other !== active) this.log(`avoiding degraded engine ${active} → ${other}`);
-      this.store.setActive(other);
-      return other;
+    if (healthy.length === 0) {
+      /* Everything alive is degraded (or nothing is alive). Use the active
+         slot rather than failing outright: a 55% engine still answers more
+         often than nothing. */
+      return active;
     }
-    /* Everything alive is degraded. Use the active one rather than failing
-       outright: a 55% engine still answers more often than nothing. */
-    return active;
+    if (healthy.includes(active)) {
+      const activeMs = this.medianLatency(active);
+      let best = active;
+      let bestMs = activeMs;
+      for (const id of healthy) {
+        if (id === active) continue;
+        const ms = this.medianLatency(id);
+        if (ms === null) continue; /* never displace a measured engine with an unmeasured one */
+        if (bestMs === null || ms < bestMs - LATENCY_SWITCH_MARGIN_MS) {
+          best = id;
+          bestMs = ms;
+        }
+      }
+      if (best !== active) {
+        this.log(
+          `routing to faster engine ${active} → ${best} ` +
+            `(${activeMs === null ? "?" : Math.round(activeMs)}ms → ${Math.round(bestMs as number)}ms median)`,
+        );
+        this.store.setActive(best);
+      }
+      return best;
+    }
+    /* Active is dead or degraded: fail over to the fastest healthy engine. */
+    let best = healthy[0];
+    let bestMs = this.medianLatency(healthy[0]);
+    for (const id of healthy.slice(1)) {
+      const ms = this.medianLatency(id);
+      if (ms !== null && (bestMs === null || ms < bestMs)) {
+        best = id;
+        bestMs = ms;
+      }
+    }
+    this.log(`avoiding ${this.isDegraded(active) ? "degraded" : "dead"} engine ${active} → ${best}`);
+    this.store.setActive(best);
+    return best;
   }
 
   /** Mark a slot's URL stale and evict it (rotating-URL failure). */
@@ -486,6 +540,9 @@ export class EngineManager {
     const engine = this.store.get()[slot];
     if (engine.state === "alive") {
       this.bind(slot, "unreachable", null, "Operation failed against the cached URL — evicted.");
+      /* The URL that produced these latencies is gone; its numbers must not
+         rank the slot's next tunnel. */
+      this.latencies.delete(slot);
     }
     this.noteOutcome(slot, false);
   }
@@ -504,12 +561,59 @@ export class EngineManager {
    */
   private outcomes = new Map<EngineId, boolean[]>();
 
-  /** Record one operation's outcome; keeps the most recent 8. */
+  /** Record one operation's outcome; keeps the most recent 8.
+   *
+   *  Recovery rule: a slot that is currently degraded is reinstated as soon
+   *  as its last 4 outcomes are all successes. Without this, a fixed window
+   *  only dilutes old failures slowly (3 failures in 8 need 6 successes to
+   *  clear the >25% bar), so a recovered engine sat excluded for twice as
+   *  long as it was broken. Reinstatement requires 4 CONSECUTIVE successes —
+   *  one lucky probe cannot bring back a flapping engine. */
   noteOutcome(slot: EngineId, ok: boolean): void {
     const recent = this.outcomes.get(slot) ?? [];
     recent.push(ok);
     if (recent.length > 8) recent.shift();
+    if (recent.length >= 4 && recent.slice(-4).every(Boolean) && this.isDegraded(slot)) {
+      this.outcomes.delete(slot);
+      this.log(`engine ${slot} recovered (4 consecutive successes) — reinstated`);
+      return;
+    }
     this.outcomes.set(slot, recent);
+  }
+
+  /* ---------------- latency-aware routing ---------------- */
+
+  /**
+   * Rolling probe-latency window per slot, fed by the health probes the
+   * system already runs (the state route's probeFleetHealth reports
+   * latencyMs per slot on every UI poll). Nothing here initiates a probe:
+   * routing uses history the fleet is producing anyway.
+   */
+  private latencies = new Map<EngineId, number[]>();
+
+  /** Record a successful health probe's round-trip time; keeps the last 8. */
+  noteLatency(slot: EngineId, ms: number): void {
+    if (!Number.isFinite(ms) || ms <= 0) return;
+    const recent = this.latencies.get(slot) ?? [];
+    recent.push(ms);
+    if (recent.length > 8) recent.shift();
+    this.latencies.set(slot, recent);
+  }
+
+  /** Median of the recent latency window, or null when unmeasured. Median,
+   *  not mean: one 5s timeout must not outweigh seven 0.2s probes. */
+  medianLatency(slot: EngineId): number | null {
+    const recent = this.latencies.get(slot);
+    if (!recent || recent.length === 0) return null;
+    const s = [...recent].sort((x, y) => x - y);
+    const mid = s.length >> 1;
+    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  }
+
+  /** Forget a slot's latency history, e.g. after it has been restarted on a
+   *  new tunnel. */
+  clearLatencies(slot: EngineId): void {
+    this.latencies.delete(slot);
   }
 
   /**
@@ -525,9 +629,12 @@ export class EngineManager {
     return failures / recent.length > 0.25;
   }
 
-  /** Forget a slot's history, e.g. after it has been restarted. */
+  /** Forget a slot's history, e.g. after it has been restarted. Latency
+   *  goes with it: numbers measured against a dead tunnel describe a host
+   *  that no longer exists. */
   clearOutcomes(slot: EngineId): void {
     this.outcomes.delete(slot);
+    this.latencies.delete(slot);
   }
 
   /**

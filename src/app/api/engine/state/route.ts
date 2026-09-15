@@ -45,6 +45,20 @@ export async function GET(request: Request) {
   for (const id of ENGINE_IDS) {
     if (health[id].staleUrl) engineManager.reportFailure(id);
   }
+  /* Feed the router from the probes this poll already paid for: successful
+     probes contribute latency samples (median drives AUTO engine choice) and
+     a success outcome (which also clears degradation after 4 in a row);
+     a probed-but-dead slot contributes a failure. No extra requests. */
+  for (const id of ENGINE_IDS) {
+    const h = health[id];
+    if (!h.checked) continue;
+    if (h.state === "live") {
+      if (h.latencyMs !== null) engineManager.noteLatency(id, h.latencyMs);
+      engineManager.noteOutcome(id, true);
+    } else {
+      engineManager.noteOutcome(id, false);
+    }
+  }
   /* Re-read AFTER evicting: otherwise this response reports the very URL it has
      just discarded, and the UI stays one poll behind reality (audit A5). */
   const snapshot = engineManager.snapshot();

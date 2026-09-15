@@ -1,0 +1,17 @@
+COLD WAKE — dataset-cache boot timelines (beacon, measured 2026-09-15)
+
+engine  ollama-from-cache  model-from-cache  AGENT-LIVE   WARM-OK
+A       +19s               +30s              +37s         (bg)
+B       +17s               +27s              +34s         +220s
+C       +20s               +31s              +38s         (bg)
+D       +18s               +29s              +36s         +241s
+
+BEFORE (network downloads, same session, same accounts):
+engine  ollama download    model pull        AGENT-LIVE
+A       41s                353s              +416s
+B       30s                159s              +212s
+C       21s                111s              +151s
+D       38s                202s              +262s
+
+Kaggle-side scheduling (push -> 'stage: starting') is additional and
+varies: measured 60-540s this session depending on Kaggle's GPU queue.

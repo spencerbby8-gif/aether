@@ -352,18 +352,29 @@ describe("degraded-engine detection — an engine that is up but unreliable", ()
     expect(m.isDegraded("c")).toBe(true);
   });
 
-  it("reinstates an engine once it recovers", () => {
+  it("reinstates an engine only after a demonstrated recovery", () => {
     const m = mgr();
     for (const ok of [false, false, false, false]) m.noteOutcome("d", ok);
     expect(m.isDegraded("d")).toBe(true);
-    /* The window holds 8, so five successes leave three of the original failures
-       still in view -- 3/8 = 37.5%, still above the threshold. That is correct:
-       an engine that failed four times in a row has not earned trust back after
-       five good probes. It takes enough successes to push the failures out. */
-    for (const ok of [true, true, true, true, true]) m.noteOutcome("d", ok);
+    /* Recovery rule: 4 CONSECUTIVE successes reinstate immediately. The old
+       behaviour let the fixed window dilute failures slowly (3-in-8 needed
+       six successes to clear 25%), so a recovered engine stayed excluded
+       about twice as long as it was broken. One, two or three lucky probes
+       still do not bring back a flapping engine. */
+    m.noteOutcome("d", true);
+    m.noteOutcome("d", true);
+    m.noteOutcome("d", true);
+    expect(m.isDegraded("d")).toBe(true); // 3 in a row: not yet
+    m.noteOutcome("d", true);
+    expect(m.isDegraded("d")).toBe(false); // 4th in a row: recovered
+  });
+
+  it("an interleaved success does not count as recovery", () => {
+    const m = mgr();
+    for (const ok of [false, false, false, false]) m.noteOutcome("d", ok);
+    // t f t t t: the failure resets the streak, and 3/8 failures is still >25%
+    for (const ok of [true, false, true, true, true]) m.noteOutcome("d", ok);
     expect(m.isDegraded("d")).toBe(true);
-    for (const ok of [true, true, true]) m.noteOutcome("d", ok);
-    expect(m.isDegraded("d")).toBe(false);
   });
 
   it("clearOutcomes resets the history, e.g. after a restart", () => {
@@ -381,5 +392,110 @@ describe("degraded-engine detection — an engine that is up but unreliable", ()
     m.reportFailure("a");
     m.reportFailure("a");
     expect(m.isDegraded("a")).toBe(true);
+  });
+});
+
+describe("latency-aware AUTO routing — fastest healthy engine wins", () => {
+  /* Was: pickEngine() returned the first alive, non-degraded slot in
+     ENGINE_IDS order — "first available", so AUTO always landed on A even
+     when C probed 3x faster (live spread this session: 0.13s–0.65s medians).
+     Latency samples ride on the health probes the state route already runs;
+     routing itself never probes. */
+
+  function mgr() {
+    return new EngineManager({
+      beaconUrl: BEACON,
+      beaconBackupUrl: BEACON_BACKUP,
+      fetchImpl: scriptedFetch({ healthy: [] }),
+    } as never);
+  }
+
+  function alive(m: ReturnType<typeof mgr>, slots: Array<"a" | "b" | "c" | "d">) {
+    for (const s of slots) m.noteAlive(s, `https://${s}.trycloudflare.com`);
+  }
+
+  it("stays on the active engine when nothing is measured", () => {
+    const m = mgr();
+    alive(m, ["a", "b", "c"]);
+    m.noteAlive("b", "https://b.trycloudflare.com"); // sets active = b
+    expect(m.pickEngine()).toBe("b");
+  });
+
+  it("routes to a decisively faster healthy engine", () => {
+    const m = mgr();
+    alive(m, ["a", "b", "c"]);
+    m.noteAlive("a", "https://a.trycloudflare.com"); // active = a
+    for (let i = 0; i < 5; i++) {
+      m.noteLatency("a", 620);
+      m.noteLatency("b", 140);
+    }
+    expect(m.pickEngine()).toBe("b");
+  });
+
+  it("does not flap on sub-margin differences", () => {
+    const m = mgr();
+    alive(m, ["a", "b"]);
+    m.noteAlive("a", "https://a.trycloudflare.com"); // active = a
+    for (let i = 0; i < 5; i++) {
+      m.noteLatency("a", 300);
+      m.noteLatency("b", 220); // 80ms faster: inside the 150ms margin
+    }
+    expect(m.pickEngine()).toBe("a");
+  });
+
+  it("never displaces a measured engine with an unmeasured one", () => {
+    const m = mgr();
+    alive(m, ["a", "b"]);
+    m.noteAlive("a", "https://a.trycloudflare.com");
+    for (let i = 0; i < 3; i++) m.noteLatency("a", 900); // slow, but measured
+    expect(m.pickEngine()).toBe("a");
+  });
+
+  it("median, not mean: one timeout does not outweigh seven fast probes", () => {
+    const m = mgr();
+    for (const ms of [200, 210, 190, 5000, 205, 195, 200, 210]) m.noteLatency("a", ms);
+    const med = m.medianLatency("a");
+    expect(med).not.toBeNull();
+    expect(med as number).toBeLessThan(300);
+  });
+
+  it("fails over to the FASTEST healthy engine, not the first slot", () => {
+    const m = mgr();
+    alive(m, ["a", "b", "c"]);
+    m.noteAlive("a", "https://a.trycloudflare.com"); // active = a
+    // kill a
+    for (let i = 0; i < 4; i++) m.noteOutcome("a", false);
+    for (let i = 0; i < 3; i++) {
+      m.noteLatency("b", 500);
+      m.noteLatency("c", 160);
+    }
+    expect(m.pickEngine()).toBe("c");
+  });
+
+  it("a degraded engine is skipped even when it is the fastest", () => {
+    const m = mgr();
+    alive(m, ["a", "b"]);
+    m.noteAlive("a", "https://a.trycloudflare.com");
+    for (let i = 0; i < 4; i++) m.noteOutcome("b", false); // b degraded
+    for (let i = 0; i < 3; i++) {
+      m.noteLatency("a", 800);
+      m.noteLatency("b", 100); // fastest, but degraded
+    }
+    expect(m.pickEngine()).toBe("a");
+  });
+
+  it("reportFailure drops the dead tunnel's latencies", () => {
+    const m = mgr();
+    alive(m, ["a"]);
+    for (let i = 0; i < 3; i++) m.noteLatency("a", 120);
+    m.reportFailure("a");
+    expect(m.medianLatency("a")).toBeNull();
+  });
+
+  it("rejects nonsense latency samples", () => {
+    const m = mgr();
+    m.noteLatency("a", -5);
+    m.noteLatency("a", Number.NaN);
+    expect(m.medianLatency("a")).toBeNull();
   });
 });
