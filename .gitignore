@@ -37,6 +37,7 @@ android/app/release/
 
 # APK binaries are reproducible via scripts/build-apk.sh; keep them out of git.
 apk/*.apk
+!apk/aether-2.6.0-release.apk
 apk/*mapping.txt
 
 # Engine credentials baked into the APK — never commit
