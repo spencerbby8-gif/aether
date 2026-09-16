@@ -39,8 +39,8 @@ import time
 import urllib.error
 import urllib.request
 
-OFF_KEY = "REMOVED_ENGINE_OFF_KEY"
-BEACON = "https://ntfy.sh/REMOVED_BEACON_TOPIC/json?poll=1&since=3h"
+OFF_KEY = os.environ["ENGINE_OFF_KEY"]
+BEACON = "https://ntfy.sh/" + os.environ["BEACON_TOPIC"] + "/json?poll=1&since=3h"
 RESULTS = {}
 
 

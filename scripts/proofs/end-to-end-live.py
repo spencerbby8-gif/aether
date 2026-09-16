@@ -10,6 +10,7 @@ engine must finish. This is the recovery path, exercised for real.
 
 Usage: end-to-end-live.py --engines a=URL c=URL
 """
+import os
 import argparse
 import io
 import json
@@ -19,7 +20,7 @@ import urllib.error
 import urllib.request
 import zipfile
 
-KEY = "REMOVED_ENGINE_OFF_KEY"
+KEY = os.environ["ENGINE_OFF_KEY"]
 
 
 def post(url, path, data=None, ctype="application/json", timeout=120):

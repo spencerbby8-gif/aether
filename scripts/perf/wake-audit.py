@@ -7,6 +7,7 @@ assumed, because Kaggle gives no API for "the kernel is now serving".
 
 Usage: wake-audit.py [--since MINUTES] [--wait]
 """
+import os
 import argparse
 import json
 import re
@@ -15,7 +16,7 @@ import time
 import urllib.error
 import urllib.request
 
-BEACON = "https://ntfy.sh/REMOVED_BEACON_TOPIC/json?poll=1&since=%dm"
+BEACON = "https://ntfy.sh/" + os.environ["BEACON_TOPIC"] + "/json?poll=1&since=%dm"
 LINK_RE = re.compile(
     r"engine=([abcd]) AGENT LIVE LINK: (https://[a-z0-9-]{20,}\.trycloudflare\.com)")
 STAGE_RE = re.compile(r"engine=([abcd]) stage: ([^\n]{0,60})")

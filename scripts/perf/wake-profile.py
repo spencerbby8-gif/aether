@@ -20,8 +20,8 @@ import time
 import urllib.error
 import urllib.request
 
-BEACON = "https://ntfy.sh/REMOVED_BEACON_TOPIC/json?poll=1&since=%dm"
-KEY = os.environ.get("ENGINE_OFF_KEY", "REMOVED_ENGINE_OFF_KEY")
+BEACON = "https://ntfy.sh/" + os.environ["BEACON_TOPIC"] + "/json?poll=1&since=%dm"
+KEY = os.environ["ENGINE_OFF_KEY"]
 
 # Beacon stage lines, in the order the kernel emits them.
 STAGES = [

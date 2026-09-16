@@ -8,6 +8,7 @@ event arrived with a kind, a URL and a source naming the browser.
 
 Usage: python3 scripts/proofs/live-browser-media-check.py <tunnel-url>
 """
+import os
 import json
 import ssl
 import sys
@@ -15,7 +16,7 @@ import time
 import urllib.request
 
 CTX = ssl.create_default_context()
-KEY = 'REMOVED_ENGINE_OFF_KEY'
+KEY = os.environ["ENGINE_OFF_KEY"]
 TOOLS = ['web_search', 'fetch_page', 'crawl_site', 'run_command',
          'generate_image', 'generate_voice', 'browser']
 PROMPT = ('Use the browser tool to navigate to https://example.com and then take '

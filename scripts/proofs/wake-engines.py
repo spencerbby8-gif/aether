@@ -11,8 +11,8 @@ import subprocess
 import sys
 import urllib.request
 
-OFF_KEY = "REMOVED_ENGINE_OFF_KEY"
-TOPIC = "REMOVED_BEACON_TOPIC"
+OFF_KEY = os.environ["ENGINE_OFF_KEY"]
+TOPIC = os.environ["BEACON_TOPIC"]
 SLUG = "qwen-3-8-27b-uncensored-chat"
 TITLE = "Qwen 3.8 27B Uncensored Chat"
 

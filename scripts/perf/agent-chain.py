@@ -12,6 +12,7 @@ replay a REAL capture instead of a synthetic one.
 
   python3 -u scripts/perf/agent-chain.py <tunnel-url> [--turns N] [--capture PATH]
 """
+import os
 import json
 import ssl
 import statistics
@@ -19,7 +20,7 @@ import sys
 import time
 import urllib.request
 
-OFF_KEY = "REMOVED_ENGINE_OFF_KEY"
+OFF_KEY = os.environ["ENGINE_OFF_KEY"]
 CTX = ssl.create_default_context()
 TOOLS = ["web_search", "fetch_page", "crawl_site", "run_command",
          "generate_image", "generate_voice", "browser"]

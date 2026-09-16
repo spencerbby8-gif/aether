@@ -44,7 +44,7 @@ import urllib.error
 import urllib.request
 import zipfile
 
-KEY = os.environ.get("ENGINE_OFF_KEY", "REMOVED_ENGINE_OFF_KEY")
+KEY = os.environ["ENGINE_OFF_KEY"]
 PASSED = 0
 FAILED = 0
 

@@ -25,6 +25,7 @@ faster, the ceiling was a config and the report must say so.
 
 Usage: decode-ceiling.py --engine URL [--quick]
 """
+import os
 import argparse
 import json
 import statistics
@@ -33,7 +34,7 @@ import time
 import urllib.error
 import urllib.request
 
-KEY = "REMOVED_ENGINE_OFF_KEY"
+KEY = os.environ["ENGINE_OFF_KEY"]
 MODEL = "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS"
 
 

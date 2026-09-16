@@ -10,6 +10,7 @@ stream:
     load_duration_ns                             -> model (re)load
 
 That separates "the model is slow" from "our agent loop is slow" with numbers
+import os
 from the engine itself rather than from wall-clock guesses.
 
 Cloudflare kills responses after ~100 s, so every probe is bounded and the
@@ -24,7 +25,7 @@ import sys
 import time
 import urllib.request
 
-OFF_KEY = "REMOVED_ENGINE_OFF_KEY"
+OFF_KEY = os.environ["ENGINE_OFF_KEY"]
 CTX = ssl.create_default_context()
 MODEL = "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS"
 

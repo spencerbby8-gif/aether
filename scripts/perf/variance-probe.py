@@ -15,6 +15,7 @@ supervisor tick) shows up as a pattern in the timestamps.
 
 Usage: python3 -u scripts/perf/variance-probe.py <tunnel-url> [count] [gap_s]
 """
+import os
 import json
 import ssl
 import statistics
@@ -22,7 +23,7 @@ import sys
 import time
 import urllib.request
 
-OFF_KEY = "REMOVED_ENGINE_OFF_KEY"
+OFF_KEY = os.environ["ENGINE_OFF_KEY"]
 CTX = ssl.create_default_context()
 MODEL = "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS"
 

@@ -18,6 +18,7 @@ stability. That difference IS the cost of context assembly.
 
 Usage: python3 -u scripts/perf/context-cache-probe.py <tunnel-url> [turns]
 """
+import os
 import json
 import ssl
 import statistics
@@ -25,7 +26,7 @@ import sys
 import time
 import urllib.request
 
-OFF_KEY = "REMOVED_ENGINE_OFF_KEY"
+OFF_KEY = os.environ["ENGINE_OFF_KEY"]
 CTX = ssl.create_default_context()
 MODEL = "hf.co/JonathanColetti/Qwen3.8-27B-Uncensored-GGUF:IQ4_XS"
 CHUNK = "The quick brown fox jumps over the lazy dog near the riverbank at dawn. "

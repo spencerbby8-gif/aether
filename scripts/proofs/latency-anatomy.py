@@ -15,6 +15,7 @@ It measures the four things that could be slow, separately:
 
 Usage: python3 scripts/proofs/latency-anatomy.py <tunnel-url>
 """
+import os
 import json
 import ssl
 import sys
@@ -22,7 +23,7 @@ import time
 import urllib.request
 
 CTX = ssl.create_default_context()
-KEY = 'REMOVED_ENGINE_OFF_KEY'
+KEY = os.environ["ENGINE_OFF_KEY"]
 BASE = sys.argv[1].rstrip('/')
 
 S = 1e9

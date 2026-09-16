@@ -11,6 +11,7 @@ announcement and check the new address actually serves.
 
 Usage: python3 scripts/proofs/tunnel-heal-check.py <tunnel-url> <slot>
 """
+import os
 import json
 import ssl
 import subprocess
@@ -19,8 +20,8 @@ import time
 import urllib.request
 
 CTX = ssl.create_default_context()
-KEY = 'REMOVED_ENGINE_OFF_KEY'
-TOPIC = 'REMOVED_BEACON_TOPIC'
+KEY = os.environ["ENGINE_OFF_KEY"]
+TOPIC = os.environ["BEACON_TOPIC"]
 
 passed = failed = 0
 

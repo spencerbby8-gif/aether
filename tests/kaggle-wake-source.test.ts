@@ -58,7 +58,7 @@ function enginePython(): string {
 
 describe("engine source — template integrity gate", () => {
   it("exposes the pinned SHA-256 of the stored template", () => {
-    expect(AETHER_NOTEBOOK_SHA256).toBe("7ead9c01a9e762a8109da423c5447eff0c97f12a3e3c26e3125b3bc25388c2b8");
+    expect(AETHER_NOTEBOOK_SHA256).toBe("045d972ca95997cad92f16b3904019786c68d86580a9f445d3534f8c39593a1c");
   });
 
   it("the stored template decodes to the pinned bytes and is a valid notebook", () => {
@@ -84,7 +84,7 @@ describe("engine source — no secret is stored in the repo (audit C3/C5)", () =
     const fileText = readFileSync("src/server/engine/aether-engine-source.ts", "utf8");
     const template = aetherNotebookTemplate();
 
-    /* Patterns, not values: a leaked OFF_KEY was REMOVED_ENGINE_OFF_KEY, the beacon token
+    /* Patterns, not values: a leaked OFF_KEY was nxoff-XXXX, the beacon token
        is a UUID, the ntfy topic matched btb-kaggle-*. */
     const forbidden = [
       /nxoff-[A-Za-z0-9]{8,}/,
@@ -170,8 +170,13 @@ describe("engine source — rendering", () => {
        language into a plan with dependencies, tool results are normalized
        into a brief for the model with the raw kept for the UI, the budget
        catches near-duplicate calls and abandons actions that failed twice,
-       and the turn is verified against the requested outcome before it ends. */
-    expect(Buffer.byteLength(rendered, "utf8")).toBe(218270);
+       and the turn is verified against the requested outcome before it ends.
+       218270 -> 222665: browser agent recovery -- step failures are
+       classified (blocked / transient / recover / terminal) before the
+       circuit breakers count them, so CAPTCHA and other explicit
+       user-action blockers no longer trip the generic consecutive-failure
+       rail. Every rail stays bounded; see tests/browser-recovery.test.ts. */
+    expect(Buffer.byteLength(rendered, "utf8")).toBe(222665);
     expect(() => JSON.parse(rendered)).not.toThrow();
   });
 

@@ -21,8 +21,8 @@ import sys
 import time
 import urllib.request
 
-TOPIC = 'REMOVED_BEACON_TOPIC'
-OFF_KEY = 'REMOVED_ENGINE_OFF_KEY'
+TOPIC = os.environ["BEACON_TOPIC"]
+OFF_KEY = os.environ["ENGINE_OFF_KEY"]
 CTX = ssl.create_default_context()
 # Only announcements made after this script started: older ones belong to
 # previous engine versions whose quick tunnels are already dead.

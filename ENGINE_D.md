@@ -24,7 +24,7 @@ changed.
 | chat endpoint | `POST /api/chat`, NDJSON, chunked, one JSON object per line |
 | auth | every POST gated on `X-Engine-Key`; absent/wrong key → `{"status":"forbidden"}` |
 | shutdown | `POST /off` → `{"status":"shutting down"}`, releases the GPU |
-| beacon | webhook.site primary + ntfy backup, topic `REMOVED_BEACON_TOPIC` |
+| beacon | webhook.site primary + ntfy backup, topic `<set via BEACON_TOPIC>` |
 | slot tagging | every announcement prefixed `engine=<slot>` |
 | tools | `web_search`, `fetch_page`, `crawl_site`, `run_command`, `generate_image`, `generate_voice`, `browser` |
 | browser | real headless Chromium via Playwright, helper as a separate process |

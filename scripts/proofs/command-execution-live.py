@@ -8,6 +8,7 @@ of being skipped quietly.
 
 Usage: command-execution-live.py --engine URL
 """
+import os
 import argparse
 import json
 import sys
@@ -15,7 +16,7 @@ import time
 import urllib.error
 import urllib.request
 
-KEY = "REMOVED_ENGINE_OFF_KEY"
+KEY = os.environ["ENGINE_OFF_KEY"]
 
 
 def run(url, cmd, session, timeout=600):

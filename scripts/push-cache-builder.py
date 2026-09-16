@@ -27,7 +27,7 @@ import time
 import urllib.request
 
 SLUG = "aether-cache-builder-one-off"
-BEACON_TOPIC = "REMOVED_BEACON_TOPIC"
+BEACON_TOPIC = os.environ["BEACON_TOPIC"]
 
 KEYS = {
     "a": (os.environ.get("KAGGLE_USERNAME_A", "fridaymoses"), os.environ.get("KAGGLE_KEY_A", "")),

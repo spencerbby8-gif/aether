@@ -12,6 +12,7 @@ Two different claims, checked separately:
 
 Usage: python3 scripts/proofs/thinking-proof.py <url> [<url> ...]
 """
+import os
 import json
 import ssl
 import sys
@@ -19,7 +20,7 @@ import time
 import urllib.request
 
 CTX = ssl.create_default_context()
-KEY = 'REMOVED_ENGINE_OFF_KEY'
+KEY = os.environ["ENGINE_OFF_KEY"]
 TOOLS = ['web_search', 'fetch_page', 'crawl_site', 'run_command',
          'generate_image', 'generate_voice', 'browser']
 

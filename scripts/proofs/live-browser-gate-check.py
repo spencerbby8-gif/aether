@@ -9,13 +9,14 @@ value was withheld, but the field was written, which is the part that matters.
 
 Usage: python3 scripts/proofs/live-browser-gate-check.py <tunnel-url>
 """
+import os
 import json
 import ssl
 import sys
 import urllib.request
 
 CTX = ssl.create_default_context()
-KEY = 'REMOVED_ENGINE_OFF_KEY'
+KEY = os.environ["ENGINE_OFF_KEY"]
 SECRET = 'hunter2secret'
 FORM = ("data:text/html,<form><input id='u' name='email'>"
         "<input id='pw' type='password'></form>")

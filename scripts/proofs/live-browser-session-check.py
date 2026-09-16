@@ -12,6 +12,7 @@ session, and the saved state lands on disk at 0600 without the secret in it.
 
 Usage: python3 scripts/proofs/live-browser-session-check.py <tunnel-url>
 """
+import os
 import json
 import re
 import ssl
@@ -19,7 +20,7 @@ import sys
 import urllib.request
 
 CTX = ssl.create_default_context()
-KEY = 'REMOVED_ENGINE_OFF_KEY'
+KEY = os.environ["ENGINE_OFF_KEY"]
 TOOLS = ['browser', 'run_command']
 SECRET = 's3cret-DONOTLEAK'
 PROMPT = """Use the browser tool for each step below, in order. After every step, print

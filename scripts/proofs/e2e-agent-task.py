@@ -12,13 +12,14 @@ cites where the numbers came from.
 
 Usage: python3 scripts/proofs/e2e-agent-task.py <tunnel-url> [goal]
 """
+import os
 import json
 import re
 import sys
 import time
 import urllib.request
 
-OFF_KEY = "REMOVED_ENGINE_OFF_KEY"
+OFF_KEY = os.environ["ENGINE_OFF_KEY"]
 
 DEFAULT_GOAL = (
     "Research the current population of Lagos, Nigeria. Check at least two "

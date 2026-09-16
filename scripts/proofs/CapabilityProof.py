@@ -12,13 +12,14 @@ exits non-zero.
 
 Usage: python3 -u scripts/proofs/CapabilityProof.py <tunnel-url>
 """
+import os
 import json
 import ssl
 import sys
 import time
 import urllib.request
 
-OFF_KEY = "REMOVED_ENGINE_OFF_KEY"
+OFF_KEY = os.environ["ENGINE_OFF_KEY"]
 CTX = ssl.create_default_context()
 
 # Lines the kernel emits for operational progress. Anything else in the

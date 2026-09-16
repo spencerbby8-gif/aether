@@ -22,7 +22,7 @@ import time
 import urllib.error
 import urllib.request
 
-KEY = os.environ.get("ENGINE_OFF_KEY", "REMOVED_ENGINE_OFF_KEY")
+KEY = os.environ["ENGINE_OFF_KEY"]
 
 
 def post(url, path, data=None, ctype="application/json", timeout=60):

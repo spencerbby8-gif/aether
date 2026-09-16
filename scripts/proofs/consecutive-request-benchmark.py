@@ -13,6 +13,7 @@ single request can demonstrate.
 
 Usage: python3 scripts/proofs/consecutive-request-benchmark.py <tunnel-url>
 """
+import os
 import json
 import ssl
 import statistics
@@ -21,7 +22,7 @@ import time
 import urllib.request
 
 CTX = ssl.create_default_context()
-KEY = 'REMOVED_ENGINE_OFF_KEY'
+KEY = os.environ["ENGINE_OFF_KEY"]
 TOOLS = ['web_search', 'fetch_page', 'crawl_site', 'run_command',
          'generate_image', 'generate_voice', 'browser']
 

@@ -29,7 +29,7 @@ import time
 import urllib.error
 import urllib.request
 
-KEY = os.environ.get("ENGINE_OFF_KEY", "REMOVED_ENGINE_OFF_KEY")
+KEY = os.environ["ENGINE_OFF_KEY"]
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
 

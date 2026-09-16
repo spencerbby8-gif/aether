@@ -1,38 +1,39 @@
 # Aether Android build
 
-Built 2026-09-06T04:26:30Z.
+Current builds in this directory:
 
 | file | what it is |
 |---|---|
-| `aether-1.0.0-release.apk` | **install this one.** minified + resource-shrunk, signed with the Aether release key. 736K |
-| `aether-1.0.0-debug.apk` | debug build, `com.aether.app.debug` package id so it can sit alongside release. 4.5M |
-| `aether-1.0.0-release-mapping.txt` | R8 mapping — keep it, or crash reports from this build cannot be deobfuscated. |
-
-## Signatures (verified with apksigner 36.0.0)
-
-| | release | debug |
-|---|---|---|
-| scheme | APK Signature Scheme **v2** | v2 |
-| certificate | `CN=Aether, OU=Aether, O=Aether, L=Port Harcourt, ST=Rivers, C=NG` | `C=US, O=Android, CN=Android Debug` |
-| SHA-256 | `a4b7b616712902c7a7223633b0e0fc47f605086b9fd58894d16c693756b97f04` | `f7e99544ea9547215c26348ca4dcb3ca1e97c8247d37d0f08664f7073a8d47ae` |
+| `aether-2.7.0-debug.apk` | **Built 2026-09-16** (session: security cleanup + browser recovery). versionCode 46, minSdk 26, targetSdk 37, debug-signed (`com.aether.app.debug`). Credential-free by construction: the whole APK scans clean for OFF-key / beacon-topic / KGAT / webhook-token patterns, template asset is byte-identical to the repo asset with `{{...}}` placeholders intact, and the browser-recovery agent code is verified present inside. 4,018,880 bytes, sha256 `9af462af0540cb3dcc4e995b2f02c0e2a38be0cea0f533a8cce6afacc92071f0`. |
+| `aether-2.6.0-release.apk` | Previous release (2026-09-15/16 handoff). versionCode 45. Still the last RELEASE-signed build: the release keystore is gitignored and was never in the repo, so a release rebuild requires it (see below). 802,664 bytes. |
 
 ## Toolchain
 
 JDK 21.0.12.1 (Temurin) · Gradle 9.7.1 · AGP 9.4.0 · Build Tools 36.0.0 ·
-compileSdk 37 · targetSdk 37 · minSdk 26.
+compileSdk 37 · targetSdk 37 · minSdk 26 — restored by
+`bash scripts/setup-android-toolchain.sh`, built with
+`TOOLCHAIN=~/.cache/toolchain bash scripts/build-apk.sh`.
 
-## Install
+## Credentials and the APK
 
-    adb install aether-1.0.0-release.apk
+The APK optionally reads `assets/aether-credentials.dat`, produced by
+`bash scripts/bake-credentials.sh` from the **gitignored**
+`android/credentials.properties` (see `.gitignore` lines 43–45). The bake
+pipeline was verified end-to-end on 2026-09-16 with DUMMY values: the
+`.dat` packages into the APK and XOR-decodes back to exactly the input
+config. Two honest caveats:
 
-First launch asks for the server URL and the control token
-(`AETHER_CONTROL_TOKEN` from the server). Both must be filled in: the URL has
-to be `https://` and the token at least 16 characters, matching what
-`requireControlAuth()` enforces server-side.
+1. The XOR+Base64 step is **obfuscation, not encryption** — the mask is a
+   public constant in the script, so anyone holding an APK with a baked
+   `.dat` can extract its credentials. A baked APK must be treated as
+   containing those credentials in cleartext.
+2. The build in this directory is intentionally **credential-free**: it
+   uses the server-side session-pickup path. Baking real engine
+   credentials is a deliberate act for a private build, done by the owner
+   on their machine — never commit the `.properties` or the `.dat`.
 
-## Rebuild
+## Release signing
 
-    ./scripts/build-apk.sh            # debug + release, copies into apk/
-
-Signing material lives in `keystore/` and is **gitignored**. Lose the password
-and the app can only be reinstalled, never updated.
+`scripts/build-apk.sh` produces a release build automatically when
+`keystore/aether-release.jks` and its password file exist (both gitignored).
+Without them it builds debug-only, as the 2.7.0 build here.

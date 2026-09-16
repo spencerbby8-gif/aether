@@ -13,6 +13,7 @@ weak signal, because a model can describe a page it never saw.
 
 Usage: python3 scripts/proofs/live-crawl-check.py <tunnel-url>
 """
+import os
 import json
 import re
 import ssl
@@ -21,7 +22,7 @@ import time
 import urllib.request
 
 CTX = ssl.create_default_context()
-KEY = 'REMOVED_ENGINE_OFF_KEY'
+KEY = os.environ["ENGINE_OFF_KEY"]
 SITE = 'https://quotes.toscrape.com'
 
 passed = failed = 0

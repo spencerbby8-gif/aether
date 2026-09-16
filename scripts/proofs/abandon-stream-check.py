@@ -25,6 +25,7 @@ it climbs without bound.
 
 Usage: python3 scripts/proofs/abandon-stream-check.py <tunnel-url>
 """
+import os
 import json
 import sys
 import time
@@ -44,7 +45,7 @@ def request(url, prompt, abandon_after=None, timeout=300):
     req = urllib.request.Request(
         url + "/api/chat", data=body,
         headers={"Content-Type": "application/json",
-                 "X-Engine-Key": "REMOVED_ENGINE_OFF_KEY"})
+                 "X-Engine-Key": os.environ["ENGINE_OFF_KEY"]})
     t0 = time.time()
     first = None
     n = 0

@@ -11,13 +11,14 @@ the tables -- that is the only evidence this script is meant to produce.
 
 Usage: python3 -u scripts/proofs/latency-profile.py <tunnel-url> [label]
 """
+import os
 import json
 import ssl
 import sys
 import time
 import urllib.request
 
-OFF_KEY = "REMOVED_ENGINE_OFF_KEY"
+OFF_KEY = os.environ["ENGINE_OFF_KEY"]
 CTX = ssl.create_default_context()
 
 TOOLS = ["web_search", "fetch_page", "crawl_site", "run_command",

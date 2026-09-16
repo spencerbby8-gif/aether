@@ -34,7 +34,7 @@ WORK = Path("/tmp/orchestration")
 # Every POST to the kernel is authenticated. Without this the harness gets
 # {"status":"forbidden"} in 0.3s, which reads exactly like a model that
 # refused to call a tool -- the two are worth telling apart.
-ENGINE_KEY = os.environ.get("AETHER_OFF_KEY", "REMOVED_ENGINE_OFF_KEY")
+ENGINE_KEY = os.environ["ENGINE_OFF_KEY"]
 
 PASSED = 0
 FAILED = 0

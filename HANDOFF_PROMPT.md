@@ -21,9 +21,9 @@ Four Kaggle engine accounts (kernel slug is the SAME on all four:
 | C    | dyceelvk      | KGAT_<SLOT_C_KEY — paste in session>      |
 | D    | adaoraodoh    | KGAT_<SLOT_D_KEY — paste in session>      |
 
-- Engine OFF key (header `X-Engine-Key` on every engine POST): `REMOVED_ENGINE_OFF_KEY`
+- Engine OFF key (header `X-Engine-Key` on every engine POST): `<set via ENGINE_OFF_KEY>`
 - Beacon (ntfy topic, engines announce stages/LIVE LINKs here):
-  `https://ntfy.sh/REMOVED_BEACON_TOPIC` — poll with `?poll=1&since=6h`
+  `https://ntfy.sh/<BEACON_TOPIC>` — poll with `?poll=1&since=6h`
 - Wake recipe: `export KAGGLE_USERNAME_D=adaoraodoh KAGGLE_KEY_D=<D key>` (D is
   env-only; A/B/C have committed fallbacks in `scripts/proofs/wake-engines.py`),
   then `python3 -u scripts/proofs/wake-engines.py <slot>`.
