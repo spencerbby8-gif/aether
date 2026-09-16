@@ -143,9 +143,11 @@ the dummy run the tree and APK were restored to the verified clean state.
    does not un-leak. `REMAINING_WORK.md` requires rotating the OFF key,
    webhook.site token and ntfy topic. Per explicit user instruction this session
    kept the existing keys ACTIVE — that is the owner's accepted risk, on record.
-2. **Force-push pending** — the rewritten history is verified locally; pushing
-   needs the GitHub PAT (not stored in this environment). GitHub may serve
-   pre-rewrite objects by direct SHA until its server-side GC.
+2. **Force-push done (2026-09-16)** — verified from a fresh anonymous clone:
+   118 commits, 0 secret hits, single branch `main`. A stale
+   `backup/pre-rewrite-20260916` branch on GitHub still carried the pre-rewrite
+   root commit (16 secret hits) and was deleted. GitHub may serve pre-rewrite
+   objects by direct SHA until its server-side GC.
 3. A pre-scrub safety backup exists at
    `~/aether-PRE-SCRUB-BACKUP-DELETE-ME.bundle` (contains the original history,
    secrets included — delete it once the push is confirmed good).
