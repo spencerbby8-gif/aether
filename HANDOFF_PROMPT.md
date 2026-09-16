@@ -1,4 +1,5 @@
-# AETHER — CONTINUATION PROMPT (paste into the new chat, attach aether-full.bundle + apk/aether-2.6.0-release.apk)
+# AETHER — CONTINUATION PROMPT (paste into the new chat; everything is on GitHub — clone spencerbby8-gif/aether.
+ Do NOT use any old local git bundle: pre-scrub bundles still contain real keys.)
 
 ## 0. FIRST ACTION — restore the repo
 The attached `aether-full.bundle` is a complete git history (verified, ends at
@@ -31,11 +32,15 @@ Four Kaggle engine accounts (kernel slug is the SAME on all four:
   push field `datasetDataSources: ["<user>/aether-engine-cache"]` (camelCase;
   snake_case is silently ignored). If a dataset is ever deleted, rebuild with
   `python3 scripts/push-cache-builder.py <slot>` (~10 min, CPU kernel).
-- GitHub: **SOURCE PUSHED as of 2026-09-15** (commit 52a23af). A follow-up
-  commit 302dae7 (release APK apk/aether-2.6.0-release.apk + this handoff +
-  README) is committed LOCALLY but the push FAILED: the PAT died (HTTP 401)
-  mid-session. Recovery: get a fresh token, then
-  `git push https://x-access-token:<TOKEN>@github.com/spencerbby8-gif/aether.git HEAD:refs/heads/main`.
+- GitHub: **FULLY PUSHED AND VERIFIED as of 2026-09-16.** Repo
+  `https://github.com/spencerbby8-gif/aether`, main = `f8535af` = full source
+  (456 files, 116 commits, scrubbed history) + the release APK
+  `apk/aether-2.6.0-release.apk` (downloaded back from GitHub: byte-identical,
+  sha256 d5038e77…) + this handoff + README. Old remote tip preserved on
+  `backup/pre-rewrite-20260916`. A new session needs NOTHING but
+  `git clone https://github.com/spencerbby8-gif/aether.git` plus the KGAT
+  keys pasted in chat. (The 2026-09-15 PAT died mid-session with HTTP 401;
+  the 2026-09-16 PAT was also pasted in chat — rotate it too.)
   SANDBOX NOTE: git history/config rolled back a 4th time this session;
   recovery that worked: `git fetch <url> +refs/heads/main:refs/remotes/origin/main`
   then `git reset --hard origin/main`, re-add remote, re-set user.name/email. Repo
