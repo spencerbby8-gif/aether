@@ -119,8 +119,13 @@ failed**.
   files inside the APK; the embedded notebook template is byte-consistent with
   the repo asset, all `{{...}}` placeholders intact, and the browser-recovery
   code is verified present in the shipped template.
-- Debug-signed: the release keystore is gitignored and not present in this
-  environment (a release rebuild re-signs under the owner's keystore).
+- Release-signed with a **newly generated key** (the old keystore was lost):
+  `aether-2.7.0-release.apk`, 803,441 bytes, v2 scheme, cert SHA-256
+  `1a007220…d4e93c` — content-verified identically to the debug build
+  (template byte-identical, placeholders intact, 0 secret hits in 350 files,
+  R8 mapping retained). **Honest caveat: new key ≠ old key, so it will not
+  in-place-update over a 2.6.0-release install — uninstall first.** The
+  keystore (gitignored) must be backed up outside this machine.
 
 ### Credential-injection mechanism (verified, DUMMY values only)
 `android/credentials.properties` (gitignored, `.gitignore` L43–45) →
@@ -153,4 +158,5 @@ the dummy run the tree and APK were restored to the verified clean state.
    secrets included — delete it once the push is confirmed good).
 4. `StatusProof` (JVM suite) needs live Kaggle + gitignored credentials — the
    one proof not runnable here.
-5. The 2.7.0 build is debug-signed only (see §4).
+5. The 2.7.0 release is signed by a NEW key (old keystore lost) — signature
+   continuity with 2.6.0 is broken by necessity; see §4.
