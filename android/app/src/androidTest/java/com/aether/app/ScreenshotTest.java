@@ -1,5 +1,6 @@
 package com.aether.app;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -169,6 +170,30 @@ public class ScreenshotTest {
         assertVisible("Plain language for adult, responsible use.");
         device.pressBack();              // settings home
         device.pressBack();              // chat
+
+        // The drawer was opened for Settings. Leaving it open silently covered
+        // the transcript in shots 17-20 for several runs: the assertions read the
+        // accessibility tree, which still contains the covered views, so a green
+        // run proved nothing about what the pixels showed. Close it, then assert
+        // it is closed before anything is captured.
+        scenario.onActivity(activity -> {
+            try {
+                Field drawer = ChatActivity.class.getDeclaredField("drawer");
+                drawer.setAccessible(true);
+                ((androidx.drawerlayout.widget.DrawerLayout) drawer.get(activity)).closeDrawers();
+            } catch (Exception e) { throw new RuntimeException(e); }
+        });
+        device.waitForIdle();
+        boolean[] drawerStillOpen = new boolean[1];
+        scenario.onActivity(activity -> {
+            try {
+                Field drawer = ChatActivity.class.getDeclaredField("drawer");
+                drawer.setAccessible(true);
+                drawerStillOpen[0] = ((androidx.drawerlayout.widget.DrawerLayout) drawer.get(activity))
+                        .isDrawerOpen(androidx.core.view.GravityCompat.START);
+            } catch (Exception e) { throw new RuntimeException(e); }
+        });
+        assertFalse("Drawer is still open over the transcript", drawerStillOpen[0]);
 
         final Object[] fixturePanel = new Object[1];
         scenario.onActivity(activity -> {
