@@ -104,7 +104,7 @@ public class ScreenshotTest {
         assertVisible("Your responsibility with Aether Uncensored");
         assertVisible("You are responsible for reviewing outputs, commands and files");
         shot("05b-uncensored-responsibility");
-        clickText("Cancel");
+        clickText("CANCEL");
         clickText("Personal OpenAI");
         clickText("gpt-4o-mini");
         assertVisible("gpt-4o-mini");
@@ -130,8 +130,7 @@ public class ScreenshotTest {
         shot("09-github-permissions");
         device.pressBack();
         device.pressBack();
-        device.pressBack();
-        device.waitForIdle();;
+        device.waitForIdle();
 
         clickId("settings_btn");
         assertClearOfSystemBars("back_btn", true);
@@ -255,6 +254,7 @@ public class ScreenshotTest {
         device.waitForIdle();
         shot("21-keyboard-open");
         assertClearOfSystemBars("send_btn", false);
+        assertAboveKeyboard(scenario);
         device.pressBack();
         device.waitForIdle();
 
@@ -266,6 +266,20 @@ public class ScreenshotTest {
         scenario.close();
     }
 
+    private void assertAboveKeyboard(ActivityScenario<ChatActivity> scenario) {
+        final int[] imeBottom = {0};
+        scenario.onActivity(activity -> {
+            androidx.core.view.WindowInsetsCompat insets = androidx.core.view.ViewCompat.getRootWindowInsets(activity.getWindow().getDecorView());
+            if (insets != null) imeBottom[0] = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime()).bottom;
+        });
+        UiObject2 send = device.wait(Until.findObject(By.res(PKG + ":id/send_btn")), 5_000);
+        assertNotNull(send);
+        assertTrue("Keyboard was not open during keyboard evidence", imeBottom[0] > 0);
+        assertTrue("Composer is covered by the IME: send bottom=" + send.getVisibleBounds().bottom
+                        + ", ime inset=" + imeBottom[0],
+                send.getVisibleBounds().bottom <= device.getDisplayHeight() - imeBottom[0] + 2);
+    }
+
     private int systemBarHeight(Context context, String name) {
         int resource = context.getResources().getIdentifier(name, "dimen", "android");
         assertTrue("Missing Android system-bar dimension: " + name, resource > 0);
@@ -275,11 +289,22 @@ public class ScreenshotTest {
     private void assertClearOfSystemBars(String id, boolean topEdge) {
         UiObject2 object = device.wait(Until.findObject(By.res(PKG + ":id/" + id)), 6_000);
         assertNotNull("Missing view for system-bar bounds check: " + id, object);
+        boolean clear = false;
+        for (int attempt = 0; attempt < 40 && !clear; attempt++) {
+            object = device.findObject(By.res(PKG + ":id/" + id));
+            if (object != null) {
+                clear = topEdge ? object.getVisibleBounds().top >= statusBarHeight
+                        : object.getVisibleBounds().bottom <= device.getDisplayHeight() - navigationBarHeight;
+            }
+            if (!clear) android.os.SystemClock.sleep(100);
+        }
+        if (!clear) shot("bounds-failure-" + id);
+        assertNotNull("View disappeared during bounds check: " + id, object);
         if (topEdge) {
-            assertTrue(id + " is underneath the status bar",
+            assertTrue(id + " is underneath the status bar after waiting for decor insets",
                     object.getVisibleBounds().top >= statusBarHeight);
         } else {
-            assertTrue(id + " is underneath the navigation bar",
+            assertTrue(id + " is underneath the navigation bar after waiting for decor insets",
                     object.getVisibleBounds().bottom <= device.getDisplayHeight() - navigationBarHeight);
         }
     }
