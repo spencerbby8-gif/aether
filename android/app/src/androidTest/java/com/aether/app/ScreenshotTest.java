@@ -63,8 +63,8 @@ public class ScreenshotTest {
         shot("01-chat-welcome");
 
         clickId("workspace_btn");
-        assertVisible("Workspace");
         shot("02-workspace");
+        assertVisible("Workspace");
         device.pressBack();
         device.waitForIdle();
 
