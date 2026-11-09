@@ -121,13 +121,21 @@ jobs:
             adb logcat -c
             set -o pipefail
             TEST_STATUS=0
-            for TEST_CLASS in com.aether.app.ScreenshotTest com.aether.app.LiveExecutionHandshakeTest com.aether.app.ExhaustiveThemeTest; do
-              set +e
-              adb shell am instrument -w -r -e class "$TEST_CLASS" com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee -a instrumentation.log
-              CLASS_STATUS=$?
-              set -e
-              if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
-            done
+            set +e
+            adb shell am instrument -w -r -e class com.aether.app.ScreenshotTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee -a instrumentation.log
+            CLASS_STATUS=$?
+            set -e
+            if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
+            set +e
+            adb shell am instrument -w -r -e class com.aether.app.LiveExecutionHandshakeTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee -a instrumentation.log
+            CLASS_STATUS=$?
+            set -e
+            if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
+            set +e
+            adb shell am instrument -w -r -e class com.aether.app.ExhaustiveThemeTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee -a instrumentation.log
+            CLASS_STATUS=$?
+            set -e
+            if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
             adb logcat -d -v threadtime > logcat.txt || true
             rm -rf screenshots
             mkdir -p screenshots/live-execution screenshots/theme-audit
