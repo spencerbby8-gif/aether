@@ -72,7 +72,9 @@ public class ScreenshotTest {
         assertVisible("Choose your model");
         assertVisible("Personal OpenAI");
         shot("03-model-picker");
-        device.pressBack();
+        clickText("Personal OpenAI");
+        clickText("gpt-4o-mini");
+        assertVisible("gpt-4o-mini");
 
         clickId("mode_discuss");
         assertVisible("Conversation only · no tools");
@@ -141,6 +143,10 @@ public class ScreenshotTest {
         device.waitForIdle();
         assertVisible("Reading a source");
         shot("12-activity-recorded-fixture");
+        clickId("workspace_btn");
+        clickId("new_chat_btn");
+        assertVisible("welcome to aether,");
+        shot("13-new-chat-welcome");
         writeManifest();
         scenario.close();
     }
@@ -184,7 +190,7 @@ public class ScreenshotTest {
                 + "  \"liveFleetConnectivity\": false,\n"
                 + "  \"personalProvider\": \"local, unverified screenshot fixture; no real key\",\n"
                 + "  \"activityScreenshot\": \"recorded engine-event fixture, not a live turn\",\n"
-                + "  \"screenshots\": 12\n"
+                + "  \"screenshots\": 13\n"
                 + "}";
         try (FileOutputStream out = new FileOutputStream(new File(output, "verification.json"))) {
             out.write(json.getBytes(StandardCharsets.UTF_8));

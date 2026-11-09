@@ -31,10 +31,16 @@ jobs:
           dirname "$SDKMANAGER" >> "$GITHUB_PATH"
           "$SDKMANAGER" --list_installed | head -30
 
-      - name: Set up Gradle 9.7.1
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 9.7.1
+      - name: Install exact Gradle 9.7.1 distribution
+        run: |
+          curl --fail --location --retry 5 --retry-delay 5 --retry-all-errors \
+            -o /tmp/gradle-9.7.1-bin.zip https://downloads.gradle.org/distributions/gradle-9.7.1-bin.zip
+          curl --fail --location --retry 5 --retry-all-errors \
+            -o /tmp/gradle-9.7.1-bin.zip.sha256 https://downloads.gradle.org/distributions/gradle-9.7.1-bin.zip.sha256
+          printf '%s  %s\n' "$(cat /tmp/gradle-9.7.1-bin.zip.sha256)" /tmp/gradle-9.7.1-bin.zip | sha256sum -c -
+          unzip -q /tmp/gradle-9.7.1-bin.zip -d /home/runner/gradle
+          echo /home/runner/gradle/gradle-9.7.1/bin >> "$GITHUB_PATH"
+          gradle --version
 
       - name: Install Android compile components
         run: |
@@ -77,6 +83,7 @@ jobs:
             test -f screenshots/05-settings-home.png
             test -f screenshots/11-privacy-policy.png
             test -f screenshots/12-activity-recorded-fixture.png
+            test -f screenshots/13-new-chat-welcome.png
             test -f screenshots/verification.json
             cat screenshots/verification.json
 
