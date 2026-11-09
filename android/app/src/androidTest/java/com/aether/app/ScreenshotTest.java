@@ -223,11 +223,21 @@ public class ScreenshotTest {
             } catch (Exception e) { throw new RuntimeException(e); }
         });
         assertTrue("Completed command did not fold automatically", folded[0]);
-        // The fixture panel is the activity view containing the command text.
+        // Nothing but the collapsed line is showing yet.
+        assertTrue("Collapsed line did not name the command", device.findObject(By.textContains("Ran a command")) != null);
+        // Tapping the collapsed line re-opens the panel; the summary is the
+        // evidence that the real detail list came back.
         clickText("Ran a command", true);
-        assertVisible("$ pwd");
         assertVisible("TASK SUMMARY");
         shot("18-activity-command-summary");
+        // A finished step's detail sits behind its own row control, so the
+        // command text is reached by expanding that row, not by the panel.
+        UiObject2 row = device.wait(Until.findObject(By.desc("Expand Ran a command")), 6000);
+        assertNotNull("Finished command row has no expander", row);
+        row.click();
+        device.waitForIdle();
+        assertVisible("$ pwd");
+        shot("18b-activity-command-detail");
         device.waitForIdle();
 
         scenario.onActivity(activity -> {
