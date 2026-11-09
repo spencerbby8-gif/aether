@@ -241,7 +241,7 @@ public class ScreenshotTest {
         shot("18-activity-command-summary");
         // A finished step's detail sits behind its own row control, so the
         // command text is reached by expanding that row, not by the panel.
-        UiObject2 row = device.wait(Until.findObject(By.desc("Expand Ran a command")), 6000);
+        UiObject2 row = device.wait(Until.findObject(By.desc("Expand Running a command")), 6000);
         assertNotNull("Finished command row has no expander", row);
         row.click();
         device.waitForIdle();
