@@ -150,13 +150,17 @@ public class ScreenshotTest {
         scenario.close();
     }
 
-    private void openWorkspace() {
+    private void openWorkspace() throws Exception {
         UiObject2 workspace = null;
         // A freshly captured software-rendered frame can occasionally drop the first tap.
         // Retry the real view interaction; never open the drawer through reflection.
         for (int attempt = 0; attempt < 3 && workspace == null; attempt++) {
             clickId("workspace_btn");
             workspace = device.wait(Until.findObject(By.text("Workspace")), 3_000);
+        }
+        if (workspace == null) {
+            shot("workspace-failure");
+            device.dumpWindowHierarchy(new File(output, "workspace-failure-hierarchy.xml"));
         }
         assertNotNull("Workspace drawer did not open after three real taps", workspace);
         device.waitForIdle();
