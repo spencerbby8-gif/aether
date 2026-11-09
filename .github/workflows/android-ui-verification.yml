@@ -61,18 +61,21 @@ jobs:
           key: android-gradle-${{ hashFiles('android/**/*.gradle', 'android/gradle.properties') }}
 
       - name: Cache Android virtual device
+        id: avd-cache
         uses: actions/cache@v4
         with:
           path: ~/.android/avd
-          key: aether-avd-api35-pixel6-v1
+          key: aether-avd-api35-default-pixel6-v2
 
       - name: Run emulator, navigate the app and capture screenshots
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
-          target: google_apis
+          target: default
           profile: pixel_6
+          ram-size: 4096
+          heap-size: 512
           avd-name: aether-ui
           force-avd-creation: false
           disable-animations: true
@@ -114,3 +117,10 @@ jobs:
             android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Preserve the AVD after failed diagnostics too
+        if: always() && steps.avd-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.android/avd
+          key: aether-avd-api35-default-pixel6-v2
