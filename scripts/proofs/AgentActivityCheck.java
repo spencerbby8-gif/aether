@@ -39,6 +39,7 @@ public final class AgentActivityCheck {
         persistenceRoundTrip();
         browserActionsReadAsCleanStates();
         reasoningIsReportedButNeverShown();
+        subSecondWorkIsNotReportedAsZero();
 
         System.out.println("\n" + pass + " passed, " + fail + " failed");
         if (fail > 0) System.exit(1);
@@ -103,6 +104,22 @@ public final class AgentActivityCheck {
                 "\"" + a.summary() + "\"");
         check("the first content token was seen", firstContentAt != null,
                 firstContentAt == null ? "none" : "t+" + firstContentAt + "s");
+    }
+
+    /**
+     * A command that finished in under a second must not read as "0s".
+     * Observed on the emulator: "Ran a command · 0s" after real execution.
+     */
+    static void subSecondWorkIsNotReportedAsZero() throws Exception {
+        AgentActivity a = new AgentActivity();
+        a.feed("\ud83d\ude80 run_command({\"command\": \"printf live-approval-proof\"})".replace("\ud83d\ude80", "\ud83d\udee0"));
+        Thread.sleep(5);   // a real, small, non-zero execution time
+        a.feed("\u21b3 run_command returned 5 chars");
+        a.finish();
+        String summary = a.summary();
+        check("a sub-second step is reported in milliseconds, not 0s",
+                !summary.contains("\u00b7 0s") && (summary.endsWith("ms") || summary.contains("ms")),
+                "\"" + summary + "\"");
     }
 
     /** The kernel streams the model's reasoning as a thinking event. Drop it. */

@@ -238,7 +238,9 @@ public final class AgentActivity {
         if (last != null) append(b, last + (run > 1 ? " \u00d7 " + (run + 1) : ""));
         long total = 0;
         for (Step s : steps) total += s.durationMs;
-        if (total > 0) append(b, (total / 1000) + "s");
+        /* Sub-second work reads as "0s" otherwise, which looks like nothing
+           happened. The row detail already reports milliseconds, so do the same. */
+        if (total > 0) append(b, total < 1000 ? total + "ms" : (total / 1000) + "s");
         return b.toString();
     }
 

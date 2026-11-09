@@ -859,6 +859,8 @@ public class ChatActivity extends AppCompatActivity {
         LinearLayout toolZone;
         TextView content;
         TextView notice;
+        /** True while the shown notice promises a command that has not started. */
+        boolean commandPendingNotice;
         TextView meta;
         /** Answer zone: one text view while streaming, styled segments after. */
         LinearLayout contentZone;
@@ -1045,6 +1047,7 @@ public class ChatActivity extends AppCompatActivity {
             boolean approved = v == approve;
             if (!pending.decide(approved)) return;
             bubble.wrap.removeView(card);
+            bubble.commandPendingNotice = approved;
             pushNotice(bubble, approved ? "Command approved once · waiting for the engine to start it."
                     : "Command denied · it was not executed.");
         };
@@ -1306,6 +1309,20 @@ public class ChatActivity extends AppCompatActivity {
                     .replace("FAILED", "Needs attention")
                     .replace("RUNNING", "In progress");
         }
+    }
+
+    /** True once the panel has a real run_command step, running or finished. */
+    private static boolean mentionsCommand(ActivityPanel panel) {
+        for (AgentActivity.Step step : panel.model.steps()) {
+            if ("run_command".equals(step.tool)) return true;
+        }
+        return false;
+    }
+
+    private void hideNotice(AssistantBubble b) {
+        if (b.notice == null) return;
+        b.notice.setText("");
+        b.notice.setVisibility(View.GONE);
     }
 
     private void openSource(String url) {
@@ -2153,8 +2170,16 @@ public class ChatActivity extends AppCompatActivity {
                                The kernel also streams the model's own reasoning
                                as a thinking event; AgentActivity rejects it and
                                it is dropped here rather than stored. */
-                            if (b.activity.event(t) && b.model != null) {
-                                b.model.toolLines.add(TextNormalizer.normalize(t));
+                            if (b.activity.event(t)) {
+                                /* "Waiting for the engine to start it" is only
+                                   true until the engine reports the command.
+                                   Leaving it there after completion states
+                                   something that is no longer happening. */
+                                if (b.commandPendingNotice && mentionsCommand(b.activity)) {
+                                    b.commandPendingNotice = false;
+                                    hideNotice(b);
+                                }
+                                if (b.model != null) b.model.toolLines.add(TextNormalizer.normalize(t));
                             }
                         });
                     }
