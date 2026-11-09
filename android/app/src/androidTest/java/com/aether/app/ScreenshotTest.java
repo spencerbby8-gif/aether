@@ -89,17 +89,6 @@ public class ScreenshotTest {
             device.waitForIdle();
         }
 
-        ActivityScenario<BackupActivity> backupScenario = ActivityScenario.launch(BackupActivity.class);
-        assertVisible("Backup & restore");
-        assertVisible("Sign in to your Aether account before connecting backup.");
-        shot("04b-backup-signed-out");
-        backupScenario.close();
-        device.waitForIdle();
-        if (device.findObject(By.textContains("RECENT CHATS")) != null) {
-            device.pressBack();
-            device.waitForIdle();
-        }
-
         clickId("model_selector");
         assertVisible("Choose your model");
         assertVisible("Personal OpenAI");
@@ -267,6 +256,14 @@ public class ScreenshotTest {
         assertVisible("welcome to aether,");
         shot("22-new-chat-welcome");
         writeManifest();
+        scenario.close();
+    }
+
+    @Test public void captureBackupSignedOut() {
+        ActivityScenario<BackupActivity> scenario = ActivityScenario.launch(BackupActivity.class);
+        assertVisible("Backup & restore");
+        assertVisible("Sign in to your Aether account before connecting backup.");
+        shot("04b-backup-signed-out");
         scenario.close();
     }
 
