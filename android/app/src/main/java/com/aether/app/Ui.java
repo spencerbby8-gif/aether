@@ -45,11 +45,14 @@ final class Ui {
         final int top = content.getPaddingTop();
         final int right = content.getPaddingRight();
         final int bottom = content.getPaddingBottom();
+        int statusResource = activity.getResources().getIdentifier("status_bar_height", "dimen", "android");
+        final int minimumTop = statusResource > 0
+                ? activity.getResources().getDimensionPixelSize(statusResource) : 0;
         // Listen before AppCompat or DrawerLayout can consume the window insets.
         ViewCompat.setOnApplyWindowInsetsListener(decor, (view, windowInsets) -> {
             Insets bars = windowInsets.getInsets(
                     WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.ime());
-            content.setPadding(left + bars.left, top + bars.top,
+            content.setPadding(left + bars.left, top + Math.max(bars.top, minimumTop),
                     right + bars.right, bottom + bars.bottom);
             return WindowInsetsCompat.CONSUMED;
         });

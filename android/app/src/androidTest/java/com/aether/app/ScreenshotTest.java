@@ -301,7 +301,8 @@ public class ScreenshotTest {
         if (!clear) shot("bounds-failure-" + id);
         assertNotNull("View disappeared during bounds check: " + id, object);
         if (topEdge) {
-            assertTrue(id + " is underneath the status bar after waiting for decor insets",
+            assertTrue(id + " is underneath the status bar after waiting for decor insets: top="
+                            + object.getVisibleBounds().top + ", required=" + statusBarHeight,
                     object.getVisibleBounds().top >= statusBarHeight);
         } else {
             assertTrue(id + " is underneath the navigation bar after waiting for decor insets",
