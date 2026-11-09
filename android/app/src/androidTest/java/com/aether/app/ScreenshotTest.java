@@ -62,8 +62,7 @@ public class ScreenshotTest {
         assertVisible("welcome to aether,");
         shot("01-chat-welcome");
 
-        clickId("workspace_btn");
-        assertVisible("Workspace");
+        openWorkspace();
         shot("02-workspace");
         device.pressBack();
         device.waitForIdle();
@@ -143,12 +142,24 @@ public class ScreenshotTest {
         device.waitForIdle();
         assertVisible("Reading a source");
         shot("12-activity-recorded-fixture");
-        clickId("workspace_btn");
+        openWorkspace();
         clickId("new_chat_btn");
         assertVisible("welcome to aether,");
         shot("13-new-chat-welcome");
         writeManifest();
         scenario.close();
+    }
+
+    private void openWorkspace() {
+        UiObject2 workspace = null;
+        // A freshly captured software-rendered frame can occasionally drop the first tap.
+        // Retry the real view interaction; never open the drawer through reflection.
+        for (int attempt = 0; attempt < 3 && workspace == null; attempt++) {
+            clickId("workspace_btn");
+            workspace = device.wait(Until.findObject(By.text("Workspace")), 3_000);
+        }
+        assertNotNull("Workspace drawer did not open after three real taps", workspace);
+        device.waitForIdle();
     }
 
     private void clickId(String id) {
