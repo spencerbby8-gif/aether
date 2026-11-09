@@ -77,13 +77,13 @@ jobs:
           name: aether-android-apks
           path: apks
 
-      - name: Restore the previously booted Android virtual device
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/avd
-          key: aether-avd-api35-default-pixel6-v2
+      - name: Enable hardware virtualization for the Android emulator
+        run: |
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          ls -l /dev/kvm
 
-      - name: Run the cached emulator and capture real UI evidence
+      - name: Run the accelerated emulator and capture real UI evidence
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -91,7 +91,8 @@ jobs:
           target: default
           profile: pixel_6
           avd-name: aether-ui
-          force-avd-creation: false
+          force-avd-creation: true
+          disable-linux-hw-accel: false
           ram-size: 4096
           heap-size: 512
           disable-animations: true
