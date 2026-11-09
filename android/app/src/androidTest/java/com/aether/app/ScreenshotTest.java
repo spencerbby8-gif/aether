@@ -196,6 +196,11 @@ public class ScreenshotTest {
         device.waitForIdle();
         assertVisible("$ pwd");
         shot("17-activity-command-open");
+        // Same real events, now grouped into phases by the timeline widget:
+        // Gathering (2 steps) then Running commands (1 step).
+        assertVisible("Gathering information");
+        assertVisible("Running commands");
+        shot("17b-agent-timeline");
         scenario.onActivity(activity -> {
             try {
                 Object panel = fixturePanel[0];
@@ -408,7 +413,7 @@ public class ScreenshotTest {
                 + "  \"liveMcp\": false,\n"
                 + "  \"personalProvider\": \"local, unverified screenshot fixture; no real key\",\n"
                 + "  \"activityScreenshot\": \"recorded engine-event and structured-question fixtures, not a live turn\",\n"
-                + "  \"screenshots\": 22\n"
+                + "  \"screenshots\": 23\n"
                 + "}";
         try (FileOutputStream out = new FileOutputStream(new File(output, "verification.json"))) {
             out.write(json.getBytes(StandardCharsets.UTF_8));

@@ -43,6 +43,7 @@ import android.os.Environment;
 import android.provider.MediaStore;
 
 import com.aether.app.core.AgentActivity;
+import com.aether.app.core.AgentRun;
 import com.aether.app.core.AnswerBlocks;
 import com.aether.app.core.Attachment;
 import com.aether.app.core.AttachmentText;
@@ -1184,98 +1185,15 @@ public class ChatActivity extends AppCompatActivity {
 
         private void renderList() {
             list.removeAllViews();
-            if (model.hasReasoning()) {
-                LinearLayout thought = new LinearLayout(ChatActivity.this);
-                thought.setOrientation(LinearLayout.VERTICAL);
-                thought.setBackgroundResource(R.drawable.bg_settings_row);
-                thought.setPadding(Ui.dp(ChatActivity.this, 13), Ui.dp(ChatActivity.this, 10),
-                        Ui.dp(ChatActivity.this, 13), Ui.dp(ChatActivity.this, 10));
-                LinearLayout heading = new LinearLayout(ChatActivity.this);
-                heading.setGravity(Gravity.CENTER_VERTICAL);
-                AgentPulseView thinking = new AgentPulseView(ChatActivity.this);
-                thinking.setRunning(running && AetherPrefs.animations(ChatActivity.this));
-                heading.addView(thinking, new LinearLayout.LayoutParams(
-                        Ui.dp(ChatActivity.this, 28), Ui.dp(ChatActivity.this, 22)));
-                TextView title = Ui.tv(ChatActivity.this,
-                        running ? "Thinking through the task" : "Reasoning phase complete", 12, Ui.PRIMARY);
-                title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-                title.setPadding(Ui.dp(ChatActivity.this, 7), 0, 0, 0);
-                heading.addView(title);
-                thought.addView(heading);
-                TextView privacy = Ui.tv(ChatActivity.this,
-                        "Operational status only · private reasoning is not shown", 11, Ui.DIM);
-                privacy.setPadding(Ui.dp(ChatActivity.this, 35), Ui.dp(ChatActivity.this, 4), 0, 0);
-                thought.addView(privacy);
-                LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                tp.topMargin = Ui.dp(ChatActivity.this, 5);
-                list.addView(thought, tp);
-            }
-            for (int index = 0; index < model.steps().size(); index++) {
-                AgentActivity.Step st = model.steps().get(index);
-                LinearLayout row = new LinearLayout(ChatActivity.this);
-                row.setOrientation(LinearLayout.VERTICAL);
-                row.setBackgroundResource(R.drawable.bg_settings_row);
-                row.setPadding(Ui.dp(ChatActivity.this, 13), Ui.dp(ChatActivity.this, 10),
-                        Ui.dp(ChatActivity.this, 13), Ui.dp(ChatActivity.this, 10));
-                LinearLayout top = new LinearLayout(ChatActivity.this);
-                top.setGravity(Gravity.CENTER_VERTICAL);
-                TextView state = Ui.tv(ChatActivity.this, st.done ? "✓" : "◌", 14,
-                        st.done ? Ui.OK : Ui.ACCENT);
-                top.addView(state);
-                TextView name = Ui.tv(ChatActivity.this, iconFor(st.tool) + "  "
-                        + (st.done ? st.past : st.label), 12, Ui.PRIMARY);
-                name.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-                name.setPadding(Ui.dp(ChatActivity.this, 9), 0, 0, 0);
-                top.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                if (st.done && st.durationMs > 0) {
-                    top.addView(Ui.meta(ChatActivity.this, st.durationMs < 1000
-                            ? st.durationMs + "ms" : (st.durationMs / 1000) + "s"));
-                }
-                boolean hasDetails = !st.detail.isEmpty() || st.chars > 0
-                        || (st.source != null && !st.source.isEmpty());
-                boolean showDetails = hasDetails && detailIndex == index;
-                if (hasDetails) {
-                    TextView chevron = Ui.meta(ChatActivity.this, showDetails ? "⌃" : "⌄");
-                    chevron.setPadding(Ui.dp(ChatActivity.this, 10), 0, 0, 0);
-                    top.addView(chevron);
-                    final int selected = index;
-                    top.setOnClickListener(v -> {
-                        detailIndex = detailIndex == selected ? -1 : selected;
-                        render();
-                    });
-                    top.setContentDescription((showDetails ? "Collapse " : "Expand ") + st.label);
-                }
-                row.addView(top);
-                LinearLayout details = new LinearLayout(ChatActivity.this);
-                details.setOrientation(LinearLayout.VERTICAL);
-                details.setVisibility(showDetails ? View.VISIBLE : View.GONE);
-                if (!st.detail.isEmpty()) {
-                    TextView detail = Ui.tv(ChatActivity.this,
-                            "run_command".equals(st.tool) ? "$ " + st.detail : st.detail, 12, Ui.DIM);
-                    if ("run_command".equals(st.tool)) detail.setTypeface(Ui.mono(ChatActivity.this));
-                    detail.setPadding(Ui.dp(ChatActivity.this, 23), Ui.dp(ChatActivity.this, 7), 0, 0);
-                    detail.setTextIsSelectable(true);
-                    details.addView(detail);
-                }
-                if (st.chars > 0) {
-                    TextView returned = Ui.meta(ChatActivity.this, "Returned " + st.chars + " characters");
-                    returned.setPadding(Ui.dp(ChatActivity.this, 23), Ui.dp(ChatActivity.this, 5), 0, 0);
-                    details.addView(returned);
-                }
-                if (st.source != null && !st.source.isEmpty()) {
-                    TextView site = Ui.tv(ChatActivity.this, "↗  " + st.source, 11, Ui.ACCENT);
-                    site.setPadding(Ui.dp(ChatActivity.this, 23), Ui.dp(ChatActivity.this, 7), 0, 0);
-                    site.setMaxLines(2);
-                    site.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
-                    site.setOnClickListener(v -> openSource(st.source));
-                    details.addView(site);
-                }
-                row.addView(details);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                lp.topMargin = Ui.dp(ChatActivity.this, 5);
-                list.addView(row, lp);
+            // Grouped, layered, and driven only by steps the engine reported.
+            java.util.List<AgentRun.Phase> phases = AgentRun.of(model.steps(), model.hasReasoning(), running);
+            if (!phases.isEmpty()) {
+                AgentTimelineView timeline = new AgentTimelineView(ChatActivity.this,
+                        running && AetherPrefs.animations(ChatActivity.this),
+                        url -> openSource(url));
+                timeline.bind(phases, running);
+                list.addView(timeline, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             }
             if (report != null && !report.isEmpty()) {
                 TextView heading = Ui.tv(ChatActivity.this, "TASK SUMMARY", 10, Ui.DIM);

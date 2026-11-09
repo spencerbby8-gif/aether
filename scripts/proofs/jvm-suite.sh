@@ -43,7 +43,7 @@ mkdir -p "$OUT"
 # covered by gradle :app:compileDebugJavaWithJavac instead.
 SRC="$REPO/android/app/src/main/java/com/aether/app"
 javac -encoding UTF-8 -nowarn -cp "$JSON_JAR" -d "$OUT" \
-  "$SRC/EngineCore.java" "$SRC/EngineRouter.java" "$SRC/ByokClient.java" "$SRC/WarmupCoordinator.java" "$SRC/WorkspaceClient.java" "$SRC/DriveErrors.java" \
+  "$SRC/EngineCore.java" "$SRC/EngineRouter.java" "$SRC/ByokClient.java" "$SRC/WarmupCoordinator.java" "$SRC/WorkspaceClient.java" "$SRC/DriveErrors.java" "$SRC/core/AgentRun.java" \
   $(find "$SRC/core" -name '*.java') \
   $(find "$REPO/scripts/proofs" -name '*.java') 2>&1 | grep -E "error:" && {
     echo "COMPILE FAILED"; exit 1; }
@@ -79,6 +79,7 @@ PROOFS=(
   "WorkspaceClientProof|"
   "BackupMergeProof|"
   "DriveBrokerErrorsProof|"
+  "TaskTimelineGroupingProof|"
 )
 
 fails=0
