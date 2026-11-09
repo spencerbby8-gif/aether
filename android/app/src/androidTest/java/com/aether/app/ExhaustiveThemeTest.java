@@ -208,9 +208,47 @@ public class ExhaustiveThemeTest {
         new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().textContains(text));
     }
     private void shot(String name) {
-        device.waitForIdle(); File file = new File(output, prefix + "-" + name + ".png");
-        assertTrue("Screenshot failed " + name, device.takeScreenshot(file));
-        assertTrue("Blank screenshot " + name, file.length() > 5000);
+        settle();
+        File file = new File(output, prefix + "-" + name + ".png");
+        android.graphics.Bitmap frame = InstrumentationRegistry.getInstrumentation()
+                .getUiAutomation().takeScreenshot();
+        assertNotNull("Screenshot failed " + name, frame);
+        assertTrue("Blank screenshot " + name + " (only " + distinctColors(frame) + " colours)",
+                distinctColors(frame) >= 24);
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(file)) {
+            assertTrue("Could not encode " + name, frame.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out));
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+        assertTrue("Empty screenshot " + name, file.length() > 5000);
+    }
+
+    /**
+     * Wait for the screen to actually have content. ActivityScenario reports
+     * RESUMED before the first frame is drawn; capturing there produced a
+     * completely blank light-theme Settings page once.
+     */
+    private void settle() {
+        for (int i = 0; i < 25; i++) {
+            if (device.findObject(By.clazz("android.widget.TextView")) != null) break;
+            android.os.SystemClock.sleep(200);
+        }
+        device.waitForIdle();
+        android.os.SystemClock.sleep(350);
+        device.waitForIdle();
+    }
+
+    /** Coarse colour count: a blank or single-tone frame scores 1-2. */
+    private static int distinctColors(android.graphics.Bitmap frame) {
+        java.util.HashSet<Integer> seen = new java.util.HashSet<>();
+        int stride = Math.max(4, Math.min(frame.getWidth(), frame.getHeight()) / 64);
+        for (int y = 0; y < frame.getHeight(); y += stride) {
+            for (int x = 0; x < frame.getWidth(); x += stride) {
+                seen.add(frame.getPixel(x, y));
+                if (seen.size() > 512) return seen.size();
+            }
+        }
+        return seen.size();
     }
     private static String slug(String text) { return text.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-"); }
 }
