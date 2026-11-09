@@ -204,7 +204,9 @@ public class ScreenshotTest {
                 event.invoke(panel, "↳ run_command returned 24 chars");
                 Field report = panel.getClass().getDeclaredField("report"); report.setAccessible(true);
                 report.set(panel, "Status: Finished\n3 steps · workspace checkpoint saved");
-                Method render = panel.getClass().getDeclaredMethod("render"); render.setAccessible(true); render.invoke(panel);
+                // The turn has to end before the collapsed line reports what
+                // happened; while it runs the same card correctly says "Thinking".
+                Method finish = panel.getClass().getDeclaredMethod("finish"); finish.setAccessible(true); finish.invoke(panel);
             } catch (Exception e) { throw new RuntimeException(e); }
         });
         device.waitForIdle();
@@ -226,12 +228,6 @@ public class ScreenshotTest {
         assertVisible("$ pwd");
         assertVisible("TASK SUMMARY");
         shot("18-activity-command-summary");
-        scenario.onActivity(activity -> {
-            try {
-                Object panel = fixturePanel[0];
-                Method finish = panel.getClass().getDeclaredMethod("finish"); finish.setAccessible(true); finish.invoke(panel);
-            } catch (Exception e) { throw new RuntimeException(e); }
-        });
         device.waitForIdle();
 
         scenario.onActivity(activity -> {
