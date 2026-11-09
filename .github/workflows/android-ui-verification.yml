@@ -51,7 +51,7 @@ jobs:
         working-directory: android
         run: |
           test ! -f app/src/main/assets/aether-credentials.dat
-          gradle --no-daemon clean :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest
+          /home/runner/gradle/gradle-9.7.1/bin/gradle --no-daemon clean :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest
         env:
           GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8'
 
@@ -73,11 +73,17 @@ jobs:
             adb shell input keyevent 82
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb logcat -c
             set -o pipefail
+            set +e
             adb shell am instrument -w -r -e class com.aether.app.ScreenshotTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee instrumentation.log
+            TEST_STATUS=$?
+            set -e
+            adb logcat -d -v threadtime > logcat.txt || true
             rm -rf screenshots
             mkdir -p screenshots
-            adb pull /sdcard/Android/data/com.aether.app.debug/files/screenshots/. screenshots/
+            adb pull /sdcard/Android/data/com.aether.app.debug/files/screenshots/. screenshots/ || true
+            if [ "$TEST_STATUS" -ne 0 ]; then exit "$TEST_STATUS"; fi
             test -f screenshots/01-chat-welcome.png
             test -f screenshots/03-model-picker.png
             test -f screenshots/05-settings-home.png
@@ -95,6 +101,7 @@ jobs:
           path: |
             screenshots/
             instrumentation.log
+            logcat.txt
             android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: warn
           retention-days: 7
