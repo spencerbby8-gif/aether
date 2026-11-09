@@ -62,7 +62,7 @@ jobs:
 
   screenshots:
     needs: build
-    runs-on: macos-15-intel
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Set up Java 21 for Android SDK tools
@@ -77,7 +77,13 @@ jobs:
           name: aether-android-apks
           path: apks
 
-      - name: Run hardware-accelerated emulator and capture real UI evidence
+      - name: Restore the previously booted Android virtual device
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/avd
+          key: aether-avd-api35-default-pixel6-v2
+
+      - name: Run the cached emulator and capture real UI evidence
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -85,10 +91,11 @@ jobs:
           target: default
           profile: pixel_6
           avd-name: aether-ui
+          force-avd-creation: false
           ram-size: 4096
           heap-size: 512
           disable-animations: true
-          emulator-options: -no-window -gpu host -noaudio -no-boot-anim
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics
           script: |
             adb wait-for-device
             adb shell input keyevent 82
