@@ -4,11 +4,15 @@ import android.content.Context;
 import android.graphics.Typeface;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 /**
  * Tiny view helpers, in the spirit of the reference app's Ui class but with
@@ -30,6 +34,21 @@ final class Ui {
     static int dp(Context c, float v) {
         return Math.round(TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP, v, c.getResources().getDisplayMetrics()));
+    }
+
+    /** Keep interactive content out of edge-to-edge status/navigation bars. */
+    static void applySystemBars(View root) {
+        final int left = root.getPaddingLeft();
+        final int top = root.getPaddingTop();
+        final int right = root.getPaddingRight();
+        final int bottom = root.getPaddingBottom();
+        ViewCompat.setOnApplyWindowInsetsListener(root, (view, windowInsets) -> {
+            Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+            view.setPadding(left + bars.left, top + bars.top,
+                    right + bars.right, bottom + bars.bottom);
+            return windowInsets;
+        });
+        ViewCompat.requestApplyInsets(root);
     }
 
     static TextView tv(Context c, String text, float sp, int colorRes) {

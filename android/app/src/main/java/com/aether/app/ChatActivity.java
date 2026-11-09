@@ -189,6 +189,7 @@ public class ChatActivity extends AppCompatActivity {
         setContentView(R.layout.activity_chat);
 
         drawer = findViewById(R.id.drawer);
+        Ui.applySystemBars(drawer);
         msgList = findViewById(R.id.msg_list);
         scroll = findViewById(R.id.chat_scroll);
         input = findViewById(R.id.input);

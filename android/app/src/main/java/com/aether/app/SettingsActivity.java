@@ -94,6 +94,7 @@ public class SettingsActivity extends AppCompatActivity {
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
+        Ui.applySystemBars(findViewById(android.R.id.content));
         store = new ByokStore(this);
         content = findViewById(R.id.settings_content);
         screenTitle = findViewById(R.id.settings_title);
