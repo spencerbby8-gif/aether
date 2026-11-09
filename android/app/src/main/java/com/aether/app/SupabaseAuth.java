@@ -22,6 +22,13 @@ public final class SupabaseAuth {
     public static final String PROJECT_URL = "https://jvuqxazndloiekikzrnb.supabase.co";
     public static final String PUBLISHABLE_KEY = "sb_publishable_cusqr6nSrtwed1VQTJTG_Q_BlVvrdFp";
     public static final String REDIRECT = "aether://auth/callback";
+    /**
+     * Public identifier of the Google *web* client. Not a secret: it only names
+     * the client whose secret the Edge Function holds. Required so the server
+     * auth code we hand off can be exchanged for a refresh token.
+     */
+    public static final String GOOGLE_WEB_CLIENT_ID =
+            "218060312044-c5o5kddbet9v2n4qo3mhp4uorolrrge5.apps.googleusercontent.com";
     private static final String SESSION_KEY = "supabase_session_v1";
     private static final String VERIFIER_KEY = "supabase_pkce_verifier_v1";
 
@@ -35,12 +42,6 @@ public final class SupabaseAuth {
         secure = new SecureStore(this.context);
     }
 
-    public String driveToken() {
-        try { return secure.get("google_drive_token"); } catch (Exception e) { return ""; }
-    }
-
-    public void clearDriveToken() { secure.remove("google_drive_token"); }
-
     public Session session() {
         try {
             String value = secure.get(SESSION_KEY);
@@ -51,16 +52,14 @@ public final class SupabaseAuth {
     public void saveSession(JSONObject value) throws Exception {
         Session session = Session.from(value);
         secure.put(SESSION_KEY, session.toJson().toString());
-        if (!session.providerToken.isEmpty()) secure.put("google_drive_token", session.providerToken);
     }
 
     public void signOut(Callback callback) {
         Session current = session();
-        if (current == null) { secure.remove(SESSION_KEY); secure.remove("google_drive_token"); callback.onResult(true, "Signed out"); return; }
+        if (current == null) { secure.remove(SESSION_KEY); callback.onResult(true, "Signed out"); return; }
         new Thread(() -> {
             request("POST", "/auth/v1/logout", null, current.accessToken, response -> {
                 secure.remove(SESSION_KEY);
-                secure.remove("google_drive_token");
                 callback.onResult(true, "Signed out on this device");
             });
         }, "aether-sign-out").start();
@@ -113,8 +112,11 @@ public final class SupabaseAuth {
         byte[] digest = MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII));
         String challenge = Base64.encodeToString(digest, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
         String url = PROJECT_URL + "/auth/v1/authorize?provider=google&redirect_to=" + enc(REDIRECT)
-                + "&flow_type=pkce&code_challenge=" + enc(challenge) + "&code_challenge_method=s256"
-                + (driveBackup ? "&scopes=" + enc("https://www.googleapis.com/auth/drive.appdata") : "");
+                + "&flow_type=pkce&code_challenge=" + enc(challenge) + "&code_challenge_method=s256";
+        // Supabase cannot forward access_type=offline to Google, so a Drive scope
+        // requested here would only ever yield a one-hour token. Drive backup
+        // therefore authorizes separately through Google Identity Services
+        // (see DriveAuthorizer); this call only establishes the account session.
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         context.startActivity(intent);

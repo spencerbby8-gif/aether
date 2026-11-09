@@ -1,6 +1,7 @@
 package com.aether.app;
 
 import android.content.Intent;
+import android.content.IntentSender;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
@@ -12,6 +13,9 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.IntentSenderRequest;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -27,12 +31,30 @@ import java.util.Map;
 public final class BackupActivity extends AppCompatActivity {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private SupabaseAuth auth;
-    private TextView state, latest, backup, restore, connect;
+    private TextView state, latest, backup, restore, connect, disconnect;
     private String latestId = "";
     private boolean busy;
+    /** True once the server confirms a stored refresh token for this account. */
+    private boolean linked;
+    private ActivityResultLauncher<IntentSenderRequest> consent;
+
+    /** Google Identity returns consent here when the sheet has to be shown. */
+    private final DriveAuthorizer.Result consentResult = new DriveAuthorizer.Result() {
+        @Override public void onServerAuthCode(String code) { exchange(code); }
+        @Override public void onConsentRequired(IntentSender sender) {
+            consent.launch(new IntentSenderRequest.Builder(sender).build());
+        }
+        @Override public void onError(String message) { ui.post(() -> { busy = false; state.setText(message); }); }
+    };
 
     @Override protected void onCreate(@Nullable Bundle saved) {
         super.onCreate(saved);
+        consent = registerForActivityResult(new ActivityResultContracts.StartIntentSenderForResult(), result -> {
+            if (result.getResultCode() != RESULT_OK || result.getData() == null) {
+                busy = false; state.setText("Google Drive connection was cancelled."); return;
+            }
+            DriveAuthorizer.afterConsent(this, result.getData(), consentResult);
+        });
         auth = new SupabaseAuth(this);
         LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(Ui.dp(this, 22), Ui.dp(this, 16), Ui.dp(this, 22), Ui.dp(this, 16));
@@ -45,10 +67,11 @@ public final class BackupActivity extends AppCompatActivity {
         TextView intro = Ui.tv(this, "Keep your chats and non-secret preferences in your own Google Drive’s private app-data folder. Restore merges sessions and never overwrites a newer local chat.", 14, Ui.DIM); root.addView(intro);
         state = Ui.tv(this, "", 13, Ui.DIM); state.setPadding(0, Ui.dp(this, 20), 0, Ui.dp(this, 12)); root.addView(state);
         connect = action("Connect Google Drive", v -> connect()); root.addView(connect);
+        disconnect = action("Disconnect Google Drive", v -> disconnect()); root.addView(disconnect);
         backup = action("Back up now", v -> backup()); root.addView(backup);
         restore = action("Restore latest backup", v -> restore()); root.addView(restore);
         latest = Ui.tv(this, "No backup checked yet.", 12, Ui.DIM); latest.setPadding(0, Ui.dp(this, 18), 0, 0); root.addView(latest);
-        TextView privacy = Ui.tv(this, "Included: chat transcripts and ordinary app preferences.\n\nExcluded: Supabase sessions, Google tokens, personal-provider keys, GitHub/MCP tokens and connector secrets.\n\nDrive backup authorization is separate from the optional Drive Agent connector. Google OAuth must be configured in Supabase before connection can succeed.", 12, Ui.DIM);
+        TextView privacy = Ui.tv(this, "Included: chat transcripts and ordinary app preferences.\n\nExcluded: Supabase sessions, Google tokens, personal-provider keys, GitHub/MCP tokens and connector secrets.\n\nBackup access is a lasting, server-brokered Google grant limited to this app's private folder. The app itself never stores a Google refresh token, and the Drive Agent connector is a separate authorization.", 12, Ui.DIM);
         privacy.setPadding(0, Ui.dp(this, 30), 0, 0); root.addView(privacy);
     }
 
@@ -63,23 +86,66 @@ public final class BackupActivity extends AppCompatActivity {
     private void refresh() {
         if (auth.session() == null) {
             state.setText("Sign in to your Aether account before connecting backup.");
-            backup.setEnabled(false); restore.setEnabled(false); backup.setAlpha(.45f); restore.setAlpha(.45f); return;
+            setEnabled(false); return;
         }
-        String token = auth.driveToken();
-        state.setText(token.isEmpty() ? "Signed in · Drive backup is not connected" : "Signed in · Google Drive backup is connected");
-        connect.setText(token.isEmpty() ? "Connect Google Drive" : "Reconnect Google Drive");
-        backup.setEnabled(!token.isEmpty()); restore.setEnabled(!token.isEmpty());
-        backup.setAlpha(token.isEmpty() ? .45f : 1f); restore.setAlpha(token.isEmpty() ? .45f : 1f);
-        if (!token.isEmpty() && latestId.isEmpty()) checkLatest();
+        if (!DriveTokenBroker.available(this)) {
+            // Honest state on devices without Google Play services: no silent failure.
+            state.setText("Google Play services is required to connect Google Drive backup on this device.");
+            setEnabled(false); return;
+        }
+        state.setText("Checking Google Drive…");
+        DriveTokenBroker.access(this, (token, error) -> ui.post(() -> {
+            linked = token != null;
+            if (linked) {
+                state.setText("Signed in · Google Drive backup is connected");
+                connect.setText("Reconnect Google Drive");
+                setEnabled(true);
+                if (latestId.isEmpty()) checkLatest();
+            } else {
+                state.setText(error == null ? "Google Drive backup is not connected." : error);
+                connect.setText("Connect Google Drive");
+                setEnabled(false);
+            }
+        }));
     }
 
+    private void setEnabled(boolean enabled) {
+        backup.setEnabled(enabled); restore.setEnabled(enabled); disconnect.setEnabled(linked);
+        backup.setAlpha(enabled ? 1f : .45f); restore.setAlpha(enabled ? 1f : .45f);
+        disconnect.setAlpha(linked ? 1f : .45f);
+    }
+
+    /** Starts Google's own consent sheet, asking for offline access to app data only. */
     private void connect() {
         if (auth.session() == null) { startActivity(new Intent(this, AuthActivity.class)); return; }
-        Intent intent = new Intent(this, AuthActivity.class); intent.putExtra("drive_backup", true); startActivity(intent);
+        if (busy) return;
+        busy = true; state.setText("Opening Google Drive consent…");
+        DriveAuthorizer.authorize(this, consentResult);
+    }
+
+    /** Hands the one-time code to the server, which keeps the refresh token. */
+    private void exchange(String code) {
+        state.setText("Finishing Google Drive connection…");
+        DriveTokenBroker.connect(this, code, (token, error) -> ui.post(() -> {
+            busy = false;
+            if (token != null) { linked = true; state.setText("Signed in · Google Drive backup is connected"); connect.setText("Reconnect Google Drive"); setEnabled(true); latestId = ""; checkLatest(); }
+            else state.setText(error);
+        }));
+    }
+
+    private void disconnect() {
+        if (busy || !linked) return;
+        busy = true; state.setText("Revoking Google Drive access…");
+        DriveTokenBroker.disconnect(this, (ok, message) -> ui.post(() -> {
+            busy = false; linked = false; latestId = "";
+            state.setText(message); connect.setText("Connect Google Drive"); setEnabled(false);
+        }));
     }
 
     private void checkLatest() {
-        DriveBackupClient.latest(auth.driveToken(), (ok, value) -> ui.post(() -> {
+        DriveTokenBroker.access(this, (token, tokenError) -> {
+        if (token == null) { ui.post(() -> latest.setText(tokenError)); return; }
+        DriveBackupClient.latest(token, (ok, value) -> ui.post(() -> {
             if (!ok) { latest.setText(value); return; }
             try {
                 JSONArray files = new JSONObject(value).optJSONArray("files");
@@ -88,10 +154,11 @@ public final class BackupActivity extends AppCompatActivity {
                 latest.setText("Latest backup · " + file.optString("modifiedTime", "time unavailable") + " · " + file.optString("size", "?") + " bytes");
             } catch (Exception e) { latest.setText("Could not read the Drive backup list."); }
         }));
+        });
     }
 
     private void backup() {
-        if (busy || auth.driveToken().isEmpty()) return;
+        if (busy || !linked) return;
         busy = true; state.setText("Creating local backup snapshot…");
         new Thread(() -> {
             try {
@@ -106,10 +173,14 @@ public final class BackupActivity extends AppCompatActivity {
                 byte[] bytes = snapshot.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
                 String checksum = checksum(bytes);
                 snapshot.put("checksum_sha256", checksum);
-                DriveBackupClient.upload(auth.driveToken(), snapshot.toString(), (ok, value) -> ui.post(() -> {
-                    busy = false; state.setText(ok ? "Backup complete · " + snapshot.optJSONArray("chats").length() + " chats · SHA-256 recorded" : value);
-                    if (ok) { latestId = ""; checkLatest(); }
-                }));
+                // No token means no upload: a Drive problem is reported as a failed backup.
+                DriveTokenBroker.access(this, (token, tokenError) -> {
+                    if (token == null) { ui.post(() -> { busy = false; state.setText(tokenError); }); return; }
+                    DriveBackupClient.upload(token, snapshot.toString(), (ok, value) -> ui.post(() -> {
+                        busy = false; state.setText(ok ? "Backup complete · " + snapshot.optJSONArray("chats").length() + " chats · SHA-256 recorded" : value);
+                        if (ok) { latestId = ""; checkLatest(); }
+                    }));
+                });
             } catch (Exception e) { ui.post(() -> { busy = false; state.setText("Could not create the local backup snapshot."); }); }
         }, "aether-backup-snapshot").start();
     }
@@ -132,7 +203,9 @@ public final class BackupActivity extends AppCompatActivity {
     private void restore() {
         if (busy || latestId.isEmpty()) { if (latestId.isEmpty()) checkLatest(); return; }
         busy = true; state.setText("Downloading and validating backup…");
-        DriveBackupClient.download(auth.driveToken(), latestId, (ok, value) -> new Thread(() -> {
+        DriveTokenBroker.access(this, (token, tokenError) -> {
+        if (token == null) { ui.post(() -> { busy = false; state.setText(tokenError); }); return; }
+        DriveBackupClient.download(token, latestId, (ok, value) -> new Thread(() -> {
             if (!ok) { ui.post(() -> { busy = false; state.setText(value); }); return; }
             try {
                 JSONObject snapshot = new JSONObject(value); JSONArray chats = snapshot.getJSONArray("chats");
@@ -149,6 +222,7 @@ public final class BackupActivity extends AppCompatActivity {
                 ui.post(() -> { busy = false; state.setText("Restore complete · " + imported + " newer chats and preferences merged"); });
             } catch (Exception e) { ui.post(() -> { busy = false; state.setText("Restore refused: the backup is damaged or uses an unsupported schema."); }); }
         }, "aether-backup-restore").start());
+        });
     }
 
     private void restorePreferences(JSONObject values) {
