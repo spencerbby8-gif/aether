@@ -1,5 +1,6 @@
 package com.aether.app;
 
+import android.app.Activity;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.util.TypedValue;
@@ -37,18 +38,21 @@ final class Ui {
     }
 
     /** Keep interactive content out of edge-to-edge status/navigation bars. */
-    static void applySystemBars(View root) {
-        final int left = root.getPaddingLeft();
-        final int top = root.getPaddingTop();
-        final int right = root.getPaddingRight();
-        final int bottom = root.getPaddingBottom();
-        ViewCompat.setOnApplyWindowInsetsListener(root, (view, windowInsets) -> {
+    static void applySystemBars(Activity activity) {
+        final View content = activity.findViewById(android.R.id.content);
+        final View decor = activity.getWindow().getDecorView();
+        final int left = content.getPaddingLeft();
+        final int top = content.getPaddingTop();
+        final int right = content.getPaddingRight();
+        final int bottom = content.getPaddingBottom();
+        // Listen before AppCompat or DrawerLayout can consume the window insets.
+        ViewCompat.setOnApplyWindowInsetsListener(decor, (view, windowInsets) -> {
             Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
-            view.setPadding(left + bars.left, top + bars.top,
+            content.setPadding(left + bars.left, top + bars.top,
                     right + bars.right, bottom + bars.bottom);
-            return windowInsets;
+            return WindowInsetsCompat.CONSUMED;
         });
-        ViewCompat.requestApplyInsets(root);
+        ViewCompat.requestApplyInsets(decor);
     }
 
     static TextView tv(Context c, String text, float sp, int colorRes) {

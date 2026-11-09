@@ -187,9 +187,9 @@ public class ChatActivity extends AppCompatActivity {
         AetherPrefs.applyTheme(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
+        Ui.applySystemBars(this);
 
         drawer = findViewById(R.id.drawer);
-        Ui.applySystemBars(drawer);
         msgList = findViewById(R.id.msg_list);
         scroll = findViewById(R.id.chat_scroll);
         input = findViewById(R.id.input);

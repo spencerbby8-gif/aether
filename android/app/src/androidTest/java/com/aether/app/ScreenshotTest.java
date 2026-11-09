@@ -32,10 +32,14 @@ public class ScreenshotTest {
     private static final String PKG = "com.aether.app.debug";
     private UiDevice device;
     private File output;
+    private int statusBarHeight;
+    private int navigationBarHeight;
 
     @Before public void setUp() throws Exception {
         device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        statusBarHeight = systemBarHeight(context, "status_bar_height");
+        navigationBarHeight = systemBarHeight(context, "navigation_bar_height");
         output = new File(context.getExternalFilesDir(null), "screenshots");
         assertTrue(output.exists() || output.mkdirs());
         AetherPrefs.warmOnLaunch(context, false);       // isolate UI evidence from Kaggle
@@ -60,6 +64,8 @@ public class ScreenshotTest {
         ActivityScenario<ChatActivity> scenario = ActivityScenario.launch(ChatActivity.class);
         scenario.onActivity(activity -> { });
         assertVisible("welcome to aether,");
+        assertClearOfSystemBars("workspace_btn", true);
+        assertClearOfSystemBars("send_btn", false);
         shot("01-chat-welcome");
 
         openWorkspace();
@@ -80,6 +86,7 @@ public class ScreenshotTest {
         shot("04-discussion-composer");
 
         clickId("settings_btn");
+        assertClearOfSystemBars("back_btn", true);
         assertVisible("Make Aether work the way you do.");
         shot("05-settings-home");
 
@@ -148,6 +155,24 @@ public class ScreenshotTest {
         shot("13-new-chat-welcome");
         writeManifest();
         scenario.close();
+    }
+
+    private int systemBarHeight(Context context, String name) {
+        int resource = context.getResources().getIdentifier(name, "dimen", "android");
+        assertTrue("Missing Android system-bar dimension: " + name, resource > 0);
+        return context.getResources().getDimensionPixelSize(resource);
+    }
+
+    private void assertClearOfSystemBars(String id, boolean topEdge) {
+        UiObject2 object = device.wait(Until.findObject(By.res(PKG + ":id/" + id)), 6_000);
+        assertNotNull("Missing view for system-bar bounds check: " + id, object);
+        if (topEdge) {
+            assertTrue(id + " is underneath the status bar",
+                    object.getVisibleBounds().top >= statusBarHeight);
+        } else {
+            assertTrue(id + " is underneath the navigation bar",
+                    object.getVisibleBounds().bottom <= device.getDisplayHeight() - navigationBarHeight);
+        }
     }
 
     private void openWorkspace() throws Exception {
