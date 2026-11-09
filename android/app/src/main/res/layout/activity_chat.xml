@@ -54,7 +54,7 @@
                     android:importantForAccessibility="no" />
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:layout_marginTop="20dp" android:gravity="center"
-                    android:text="Welcome to Aether,\nwhat are we doing today?"
+                    android:text="welcome to aether,\nwhat are we doing today?"
                     android:textColor="@color/aether_fg" android:textSize="30sp"
                     android:textStyle="bold" android:lineSpacingExtra="3dp" />
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content"

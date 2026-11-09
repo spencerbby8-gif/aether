@@ -26,8 +26,10 @@ jobs:
       - name: Confirm preinstalled Android SDK
         run: |
           printf 'Android SDK: %s\n' "$ANDROID_HOME"
-          command -v sdkmanager
-          sdkmanager --list_installed | head -30
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          test -n "$SDKMANAGER"
+          dirname "$SDKMANAGER" >> "$GITHUB_PATH"
+          "$SDKMANAGER" --list_installed | head -30
 
       - name: Set up Gradle 9.7.1
         uses: gradle/actions/setup-gradle@v4

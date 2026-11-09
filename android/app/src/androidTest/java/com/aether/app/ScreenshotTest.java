@@ -59,7 +59,7 @@ public class ScreenshotTest {
     @Test public void captureAetherProduct() throws Exception {
         ActivityScenario<ChatActivity> scenario = ActivityScenario.launch(ChatActivity.class);
         scenario.onActivity(activity -> { });
-        assertVisible("Welcome to Aether,");
+        assertVisible("welcome to aether,");
         shot("01-chat-welcome");
 
         clickId("workspace_btn");
@@ -114,6 +114,7 @@ public class ScreenshotTest {
         assertVisible("PRIVACY POLICY");
         shot("11-privacy-policy");
         device.pressBack();              // legal list
+        assertVisible("Plain language for adult, responsible use.");
         device.pressBack();              // settings home
         device.pressBack();              // chat
 

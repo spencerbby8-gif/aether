@@ -64,6 +64,7 @@ public class SettingsActivity extends AppCompatActivity {
     private LinearLayout homeRows;
     private EditText search;
     private String section = "home";
+    private String documentParent = "legal";
     private final ExecutorService bg = Executors.newCachedThreadPool();
     private ActivityResultLauncher<String> exportChats;
     private ActivityResultLauncher<String> exportConcern;
@@ -118,7 +119,9 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void navigateBack() {
-        if (!"home".equals(section)) showHome(); else finish();
+        if ("document".equals(section)) showSection(documentParent);
+        else if (!"home".equals(section)) showHome();
+        else finish();
     }
 
     private void showHome() {
@@ -366,13 +369,14 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void showDocument(String title, String text) {
+        if (!"document".equals(section)) documentParent = section;
         section = "document";
         LinearLayout b = openSection(title, "Aether · November 2026");
         TextView body = Ui.tv(this, text, 15, Ui.PRIMARY);
         body.setLineSpacing(Ui.dp(this, 6), 1f);
         body.setTextIsSelectable(true);
         b.addView(body, matchParams(8));
-        action(b, "Back to Legal & Policies", "", this::showLegal);
+        action(b, "Back", "Return to the previous settings screen", () -> showSection(documentParent));
     }
 
     // ---------------------------------------------------------- controls

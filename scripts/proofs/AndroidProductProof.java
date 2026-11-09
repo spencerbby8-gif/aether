@@ -33,7 +33,7 @@ public final class AndroidProductProof {
                 && settingsXml.contains("settings_content"), "navigation host present");
         check("workspace and settings are separate header destinations", chatXml.contains("workspace_btn")
                 && chatXml.contains("settings_btn") && chatXml.contains("ic_workspace"), "top-right actions");
-        check("the large welcome belongs to every empty chat", chatXml.contains("Welcome to Aether,\\nwhat are we doing today?")
+        check("the large welcome belongs to every empty chat", chatXml.contains("welcome to aether,\\nwhat are we doing today?")
                 && chat.contains("showEmptyState()") && chat.contains("welcome_panel"), "welcome panel");
         check("the taller composer contains model and discussion controls", chatXml.contains("minHeight=\"74dp\"")
                 && chatXml.contains("model_selector") && chatXml.contains("mode_agent")
