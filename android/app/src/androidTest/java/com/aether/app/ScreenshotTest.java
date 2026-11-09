@@ -95,6 +95,10 @@ public class ScreenshotTest {
         shot("04b-backup-signed-out");
         backupScenario.close();
         device.waitForIdle();
+        if (device.findObject(By.textContains("RECENT CHATS")) != null) {
+            device.pressBack();
+            device.waitForIdle();
+        }
 
         clickId("model_selector");
         assertVisible("Choose your model");

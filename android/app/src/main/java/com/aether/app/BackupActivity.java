@@ -62,12 +62,14 @@ public final class BackupActivity extends AppCompatActivity {
 
     private void refresh() {
         if (auth.session() == null) {
-            state.setText("Sign in to your Aether account before connecting backup."); backup.setEnabled(false); restore.setEnabled(false); return;
+            state.setText("Sign in to your Aether account before connecting backup.");
+            backup.setEnabled(false); restore.setEnabled(false); backup.setAlpha(.45f); restore.setAlpha(.45f); return;
         }
         String token = auth.driveToken();
         state.setText(token.isEmpty() ? "Signed in · Drive backup is not connected" : "Signed in · Google Drive backup is connected");
         connect.setText(token.isEmpty() ? "Connect Google Drive" : "Reconnect Google Drive");
         backup.setEnabled(!token.isEmpty()); restore.setEnabled(!token.isEmpty());
+        backup.setAlpha(token.isEmpty() ? .45f : 1f); restore.setAlpha(token.isEmpty() ? .45f : 1f);
         if (!token.isEmpty() && latestId.isEmpty()) checkLatest();
     }
 
