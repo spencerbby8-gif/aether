@@ -77,6 +77,14 @@ jobs:
           name: aether-android-apks
           path: apks
 
+      - name: Verify and flatten the downloaded APK paths
+        run: |
+          find apks -type f -printf '%P\n' | sort
+          test -f apks/debug/app-debug.apk
+          test -f apks/androidTest/debug/app-debug-androidTest.apk
+          mv apks/debug/app-debug.apk apks/app-debug.apk
+          mv apks/androidTest/debug/app-debug-androidTest.apk apks/app-debug-androidTest.apk
+
       - name: Enable hardware virtualization for the Android emulator
         run: |
           test -e /dev/kvm
