@@ -31,15 +31,9 @@ jobs:
           dirname "$SDKMANAGER" >> "$GITHUB_PATH"
           "$SDKMANAGER" --list_installed | head -30
 
-      - name: Install exact Gradle 9.7.1 distribution
+      - name: Confirm hosted Gradle
         run: |
-          curl --fail --location --retry 5 --retry-delay 5 --retry-all-errors \
-            -o /tmp/gradle-9.7.1-bin.zip https://downloads.gradle.org/distributions/gradle-9.7.1-bin.zip
-          curl --fail --location --retry 5 --retry-all-errors \
-            -o /tmp/gradle-9.7.1-bin.zip.sha256 https://downloads.gradle.org/distributions/gradle-9.7.1-bin.zip.sha256
-          printf '%s  %s\n' "$(cat /tmp/gradle-9.7.1-bin.zip.sha256)" /tmp/gradle-9.7.1-bin.zip | sha256sum -c -
-          unzip -q /tmp/gradle-9.7.1-bin.zip -d /home/runner/gradle
-          echo /home/runner/gradle/gradle-9.7.1/bin >> "$GITHUB_PATH"
+          command -v gradle
           gradle --version
 
       - name: Install Android compile components
@@ -51,12 +45,26 @@ jobs:
         working-directory: android
         run: |
           test ! -f app/src/main/assets/aether-credentials.dat
-          /home/runner/gradle/gradle-9.7.1/bin/gradle --no-daemon clean :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest
+          gradle --no-daemon clean :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest
         env:
           GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8'
 
       - name: Verify engine source integrity
         run: node scripts/verify-engine-source.mjs
+
+      - name: Cache Android dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-gradle-${{ hashFiles('android/**/*.gradle', 'android/gradle.properties') }}
+
+      - name: Cache Android virtual device
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/avd
+          key: aether-avd-api35-pixel6-v1
 
       - name: Run emulator, navigate the app and capture screenshots
         uses: reactivecircus/android-emulator-runner@v2
@@ -66,6 +74,7 @@ jobs:
           target: google_apis
           profile: pixel_6
           avd-name: aether-ui
+          force-avd-creation: false
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: |
