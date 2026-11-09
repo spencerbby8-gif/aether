@@ -107,10 +107,14 @@ public class ScreenshotTest {
         shot("06-discussion-composer");
         clickId("mode_agent");
         clickId("attach_btn");
-        assertVisible("Connectors & MCP");
-        assertVisible("Auto-run Agent commands");
+        assertVisible("Upload an image");
+        assertVisible("Attach a file");
+        assertTrue("Plus menu exposes uploads only", device.findObject(By.textContains("Connectors & MCP")) == null
+                && device.findObject(By.textContains("Auto-run Agent commands")) == null);
         shot("07-agent-plus-menu");
-        clickText("Connectors & MCP");
+        device.pressBack();
+        openHistory();
+        clickId("drawer_connectors_btn");
         assertVisible("GitHub");
         shot("08-connector-catalog");
         scrollTo("Custom MCP server");
@@ -124,8 +128,8 @@ public class ScreenshotTest {
         device.pressBack();
         device.pressBack();
         device.waitForIdle();
-
-        clickId("settings_btn");
+        openHistory();
+        clickId("drawer_settings_btn");
         assertClearOfSystemBars("back_btn", true);
         assertVisible("Make Aether work the way you do.");
         shot("10-settings-home");

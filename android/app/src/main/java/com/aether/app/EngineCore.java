@@ -857,6 +857,10 @@ public final class EngineCore {
         /** Structured mid-task choices; never parsed out of model prose. */
         default void onQuestions(JSONObject questions) { }
         default void onNotice(String notice) { }
+        /** A real command is blocked in the engine until this callback returns
+            after posting the user's decision with respondApproval(). */
+        default void onApproval(JSONObject approval) { }
+        default void onApprovalResult(JSONObject result) { }
     }
 
     /**
@@ -1250,6 +1254,13 @@ public final class EngineCore {
                     JSONObject questions = o.optJSONObject("questions");
                     if (questions != null) listener.onQuestions(questions);
 
+                    JSONObject approval = o.optJSONObject("approval");
+                    if (approval != null && !approval.optBoolean("waiting", false)) {
+                        listener.onApproval(approval);
+                    }
+                    JSONObject approvalResult = o.optJSONObject("approval_result");
+                    if (approvalResult != null) listener.onApprovalResult(approvalResult);
+
                     JSONObject msg = o.optJSONObject("message");
                     if (msg != null) {
                         String thinking = msg.optString("thinking", "");
@@ -1275,6 +1286,70 @@ public final class EngineCore {
             fire(listener, fired, false, describeStreamFailure(e, System.currentTimeMillis() - t0));
         } finally {
             if (handle != null) handle.disarm();
+            if (c != null) c.disconnect();
+        }
+    }
+
+    /** Resolve one blocked manual command. The approval id binds the decision
+        to the exact command and chat session; unknown/expired ids are rejected. */
+    public static boolean respondApproval(String url, String offKey, String id,
+                                          String session, boolean approved) {
+        HttpURLConnection c = null;
+        try {
+            JSONObject body = new JSONObject().put("id", id)
+                    .put("session", session == null || session.isEmpty() ? "default" : session)
+                    .put("approved", approved);
+            c = open("POST", join(url, "/api/approval"), 15_000, 20_000);
+            c.setRequestProperty("Content-Type", "application/json");
+            c.setRequestProperty("Accept", "application/json");
+            c.setRequestProperty("X-Engine-Key", offKey);
+            c.setDoOutput(true);
+            byte[] out = body.toString().getBytes(StandardCharsets.UTF_8);
+            c.setFixedLengthStreamingMode(out.length);
+            try (OutputStream os = c.getOutputStream()) { os.write(out); }
+            int status = c.getResponseCode();
+            return status >= 200 && status < 300;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
+    /** Copy the original attachment into the authenticated chat workspace.
+        Images can then be passed to the model by read_image; this is a real
+        byte upload, not a prompt pretending that a local file was seen. */
+    public static String uploadAttachment(String url, String offKey, String session,
+                                          String id, String name, String mime,
+                                          boolean sentToEngine, byte[] bytes) {
+        HttpURLConnection c = null;
+        try {
+            JSONObject body = new JSONObject().put("id", id).put("name", name)
+                    .put("mime", mime).put("sentToEngine", sentToEngine)
+                    .put("session", session == null || session.isEmpty() ? "default" : session)
+                    .put("data", java.util.Base64.getEncoder().encodeToString(bytes));
+            c = open("POST", join(url, "/api/upload"), 20_000, 90_000);
+            c.setRequestProperty("Content-Type", "application/json");
+            c.setRequestProperty("Accept", "application/json");
+            c.setRequestProperty("X-Engine-Key", offKey);
+            c.setDoOutput(true);
+            byte[] out = body.toString().getBytes(StandardCharsets.UTF_8);
+            c.setFixedLengthStreamingMode(out.length);
+            try (OutputStream os = c.getOutputStream()) { os.write(out); }
+            int status = c.getResponseCode();
+            if (status >= 200 && status < 300) return null;
+            java.io.InputStream in = c.getErrorStream();
+            String detail = "";
+            if (in != null) {
+                java.io.ByteArrayOutputStream errorBody = new java.io.ByteArrayOutputStream();
+                byte[] buffer = new byte[2048]; int count;
+                while ((count = in.read(buffer)) > 0 && errorBody.size() < 8192) errorBody.write(buffer, 0, count);
+                detail = new String(errorBody.toByteArray(), StandardCharsets.UTF_8);
+            }
+            return "upload failed (HTTP " + status + ")" + (detail.isEmpty() ? "" : ": " + detail);
+        } catch (Exception e) {
+            return "upload failed: " + String.valueOf(e.getMessage());
+        } finally {
             if (c != null) c.disconnect();
         }
     }

@@ -52,6 +52,22 @@ public final class ChatStore {
     }
 
     /** Directory for copies of picked files, beside the transcripts. */
+    public String relativeAttachmentPath(File file) {
+        String root = dir.getParentFile().getAbsolutePath() + File.separator;
+        String path = file.getAbsolutePath();
+        return path.startsWith(root) ? path.substring(root.length()) : null;
+    }
+
+    public File attachmentFile(String relative) {
+        if (relative == null || relative.isEmpty()) return null;
+        File root = dir.getParentFile();
+        try {
+            File file = new File(root, relative).getCanonicalFile();
+            String prefix = root.getCanonicalPath() + File.separator;
+            return file.getPath().startsWith(prefix) ? file : null;
+        } catch (IOException e) { return null; }
+    }
+
     public File attachmentDir() {
         File f = new File(dir.getParentFile(), "attachments");
         if (!f.exists()) f.mkdirs();

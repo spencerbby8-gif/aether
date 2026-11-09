@@ -40,13 +40,21 @@ public final class AuthActivity extends AppCompatActivity {
         TextView back = Ui.tv(this, "‹  Back", 15, Ui.DIM); back.setGravity(Gravity.CENTER_VERTICAL);
         back.setOnClickListener(v -> finish()); root.addView(back, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(this, 48)));
+        android.widget.ImageView brand = new android.widget.ImageView(this);
+        brand.setImageResource(R.mipmap.ic_launcher);
+        brand.setBackgroundResource(R.drawable.bg_icon_tile);
+        brand.setPadding(Ui.dp(this, 10), Ui.dp(this, 10), Ui.dp(this, 10), Ui.dp(this, 10));
+        root.addView(brand, new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 64)));
         TextView title = Ui.tv(this, "Your Aether account", 30, Ui.PRIMARY);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        title.setPadding(0, Ui.dp(this, 42), 0, Ui.dp(this, 10)); root.addView(title);
+        title.setPadding(0, Ui.dp(this, 24), 0, Ui.dp(this, 10)); root.addView(title);
         TextView intro = Ui.tv(this, "Sign in to synchronize your chats and keep account-linked app backups. Chat remains available without an account.", 14, Ui.DIM);
         root.addView(intro);
 
         TextView google = button(driveBackup ? "Connect Google Drive backup" : "Continue with Google", false);
+        google.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_google, 0, 0, 0);
+        google.setCompoundDrawablePadding(Ui.dp(this, 12));
+        google.setPadding(Ui.dp(this, 18), 0, Ui.dp(this, 18), 0);
         google.setOnClickListener(v -> {
             if (busy) return;
             busy = true; status("Opening secure Google sign-in…");
@@ -87,7 +95,7 @@ public final class AuthActivity extends AppCompatActivity {
     }
 
     private TextView button(String text, boolean accent) {
-        TextView button = Ui.tv(this, text, 14, accent ? R.color.aether_fg : Ui.PRIMARY);
+        TextView button = Ui.tv(this, text, 14, accent ? R.color.aether_on_accent : Ui.PRIMARY);
         button.setGravity(Gravity.CENTER); button.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         button.setBackgroundResource(accent ? R.drawable.bg_pill_accent : R.drawable.bg_settings_row); return button;
     }

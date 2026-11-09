@@ -29,6 +29,9 @@ func_src = src[i:j]
 h_i = src.index('def has_user_query')
 h_j = src.index('def agent_stream')
 helpers = src[h_i:h_j]
+a_i = src.index('_APPROVALS =')
+a_j = src.index('def t_web_search', a_i)
+approval_helpers = src[a_i:a_j]
 
 ok = fail = 0
 
@@ -162,6 +165,7 @@ def make_env(script):
         '_session_dir': lambda session: '/tmp', '_publish_archives': lambda *a, **k: None, '_checkpoint_workspace': lambda *a, **k: None,
     }
     exec(helpers, ns)
+    exec(approval_helpers, ns)
     exec(func_src, ns)
     return ns, calls
 
@@ -605,6 +609,54 @@ chk("ask_user emits both structured questions without executing a tool",
 chk("the model loop stops instead of fabricating answers",
     len(PAYLOADS) == 1 and 'must wait' not in q_raw, 'model calls=%d' % len(PAYLOADS))
 chk("the question turn still terminates cleanly", '"done": true' in q_raw, 'terminal event present')
+
+print("== manual commands pause for a real approval decision ==")
+
+def approval_run(approved):
+    TOOL_CALLS_SEEN[:] = []
+    PAYLOADS[:] = []
+    ns_a, _ = make_env([step_tools(tc('run_command', command='printf approved')), step_text('finished')])
+    executed = []
+    ns_a['EXEC']['run_command'] = lambda **kwargs: executed.append(kwargs) or 'command output'
+    handler = FakeHandler()
+    thread = threading.Thread(target=lambda: ns_a['agent_stream'](handler, {
+        'auto_run_commands': False,
+        'messages': [{'role':'user','content':'run the command'}]}))
+    thread.start()
+    approval = None
+    for _ in range(100):
+        for line in handler.wfile.buf.getvalue().decode('utf-8','replace').splitlines():
+            if line.startswith('{'):
+                try:
+                    event = json.loads(line)
+                    if event.get('approval'): approval = event['approval']
+                except Exception: pass
+        if approval: break
+        time.sleep(.02)
+    if approval:
+        ns_a['_approval_decide'](approval['id'], approved, approval['session'])
+    thread.join(timeout=10)
+    raw = handler.wfile.buf.getvalue().decode('utf-8','replace')
+    return ns_a, executed, approval, raw, thread
+
+ns_a, executed, approval, raw, thread = approval_run(True)
+chk('manual approval event contains the exact command before execution',
+    approval is not None and approval.get('command') == 'printf approved', str(approval))
+chk('approval resumes the same command and it executes exactly once',
+    len(executed) == 1 and executed[0].get('command') == 'printf approved' and not thread.is_alive(),
+    'executions=%d' % len(executed))
+chk('manual mode keeps run_command in the model schema',
+    bool(PAYLOADS) and any((t.get('function') or {}).get('name') == 'run_command'
+                          for t in PAYLOADS[0].get('tools', [])), 'schema retained')
+chk('tool start is emitted only after approval', raw.find('"approval_result"') < raw.find('\\ud83d\\udee0'),
+    'approval precedes tool start')
+
+ns_d, denied, approval_d, raw_d, thread_d = approval_run(False)
+chk('denial emits a truthful result and never creates a subprocess call',
+    not denied and 'DENIED BY USER' in raw_d and not thread_d.is_alive(),
+    'executions=%d' % len(denied))
+chk('denied commands have no tool-start event', '\\ud83d\\udee0' not in raw_d,
+    'no execution banner fabricated')
 
 print("\n%d passed, %d failed" % (ok, fail))
 raise SystemExit(0 if fail == 0 else 1)

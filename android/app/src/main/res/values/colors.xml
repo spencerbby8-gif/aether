@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="aether_on_accent">#FFFFFFFF</color>
     <color name="aether_bg">#F5F7FB</color><color name="aether_surface">#FFFFFF</color>
     <color name="aether_card">#FFFFFF</color><color name="aether_field">#F0F3F8</color>
     <color name="aether_field_border">#D5DDEA</color><color name="aether_bubble_in">#FFFFFF</color>
     <color name="aether_bubble_out">#DCEAFF</color><color name="aether_tool_bg">#E9F1FF</color>
     <color name="aether_fg">#142033</color><color name="aether_muted">#58677C</color>
-    <color name="aether_dim">#758297</color><color name="aether_accent">#2563EB</color>
+    <color name="aether_code_bg">#EDF2F8</color><color name="aether_code_border">#D5DDEA</color><color name="aether_source_bg">#F0F4FA</color><color name="aether_dim">#626F84</color><color name="aether_accent">#2563EB</color>
     <color name="aether_accent_deep">#1D4ED8</color><color name="aether_ok">#168A54</color>
     <color name="aether_warn">#9A5B00</color><color name="aether_error">#C43D4B</color>
     <color name="aether_ghost_border">#1A2563EB</color><color name="ic_launcher_background">#0B0D12</color>

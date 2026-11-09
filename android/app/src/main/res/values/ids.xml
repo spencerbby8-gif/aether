@@ -1,8 +1,1 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <item name="status" type="id" />
-    <item name="wake" type="id" />
-    <item name="off" type="id" />
-    <item name="engine_dot" type="id" />
-    <item name="engine_line" type="id" />
-</resources>
+<resources><item name="settings_search" type="id" /></resources>

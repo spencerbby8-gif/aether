@@ -64,6 +64,7 @@ PROOFS=(
   "AndroidProductProof"
   "AnswerBlocksCheck"
   "AgentActivityCheck|$FIXTURE"
+  "CommandApprovalProof"
   "StatusProof|$REPO/android/credentials.properties $REPO/android/app/src/main/assets/aether-notebook-template.json"
   "PushRefusalProof|"
   "EngineLabelsProof|"

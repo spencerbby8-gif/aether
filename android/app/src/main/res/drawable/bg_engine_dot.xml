@@ -2,6 +2,6 @@
 <!-- The engine state indicator. Drawn white and tinted at runtime from the
      measured phase, so there is exactly one source of truth for the colour. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
-    <solid android:color="#FFFFFFFF" />
+    <solid android:color="@color/aether_on_accent" />
     <size android:width="9dp" android:height="9dp" />
 </shape>

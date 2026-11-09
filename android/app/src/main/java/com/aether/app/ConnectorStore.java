@@ -14,9 +14,11 @@ public final class ConnectorStore {
     private static final String PREFS = "aether_connectors_v1";
     private final SharedPreferences prefs;
     private final SecureStore secure;
+    private final Context appContext;
 
     public ConnectorStore(Context context) {
         Context app = context.getApplicationContext();
+        appContext = app;
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         secure = new SecureStore(app);
     }
@@ -53,7 +55,7 @@ public final class ConnectorStore {
     public synchronized void delete(String id) {
         List<Connector> kept = new ArrayList<>();
         for (Connector item : list()) if (!item.id.equals(id)) kept.add(item);
-        write(kept); secure.remove(secretKey(id));
+        write(kept); secure.remove(secretKey(id)); secure.remove("connector_refresh_" + id);
     }
 
     /** Decrypted only while constructing an authenticated Agent engine request. */
@@ -61,6 +63,11 @@ public final class ConnectorStore {
         JSONArray out = new JSONArray();
         for (Connector item : list()) {
             if (!item.enabled) continue;
+            if (item.oauth && item.expiresAt > 0 && item.expiresAt < System.currentTimeMillis() + 60_000) {
+                ConnectorOAuth.refreshBlocking(appContext, item);
+                item = find(item.id);
+                if (item == null || !item.enabled) continue;
+            }
             try {
                 JSONObject value = item.toJson();
                 value.put("token", secure.get(secretKey(item.id)));
@@ -88,19 +95,26 @@ public final class ConnectorStore {
         public boolean enabled;
         public boolean read = true, write, execute;
         public String repository = "";
+        public boolean oauth;
+        public String oauthClientId = "", tokenEndpoint = "";
+        public long expiresAt;
 
         JSONObject toJson() {
             try {
                 return new JSONObject().put("id", id).put("name", name).put("url", url)
                         .put("enabled", enabled).put("read", read).put("write", write)
-                        .put("execute", execute).put("repository", repository);
+                        .put("execute", execute).put("repository", repository)
+                        .put("oauth", oauth).put("oauthClientId", oauthClientId)
+                        .put("tokenEndpoint", tokenEndpoint).put("expiresAt", expiresAt);
             } catch (Exception e) { return new JSONObject(); }
         }
         static Connector from(JSONObject value) {
             Connector c = new Connector(); c.id = value.optString("id"); c.name = value.optString("name");
             c.url = value.optString("url"); c.enabled = value.optBoolean("enabled");
             c.read = value.optBoolean("read", true); c.write = value.optBoolean("write");
-            c.execute = value.optBoolean("execute"); c.repository = value.optString("repository"); return c;
+            c.execute = value.optBoolean("execute"); c.repository = value.optString("repository");
+            c.oauth = value.optBoolean("oauth"); c.oauthClientId = value.optString("oauthClientId");
+            c.tokenEndpoint = value.optString("tokenEndpoint"); c.expiresAt = value.optLong("expiresAt"); return c;
         }
         public Connector copy() { return from(toJson()); }
     }

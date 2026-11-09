@@ -120,14 +120,20 @@ jobs:
             adb install -r apks/app-debug-androidTest.apk
             adb logcat -c
             set -o pipefail
-            set +e
-            adb shell am instrument -w -r -e class com.aether.app.ScreenshotTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee instrumentation.log
-            TEST_STATUS=$?
-            set -e
+            TEST_STATUS=0
+            for TEST_CLASS in com.aether.app.ScreenshotTest com.aether.app.LiveExecutionHandshakeTest com.aether.app.ExhaustiveThemeTest; do
+              set +e
+              adb shell am instrument -w -r -e class "$TEST_CLASS" com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee -a instrumentation.log
+              CLASS_STATUS=$?
+              set -e
+              if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
+            done
             adb logcat -d -v threadtime > logcat.txt || true
             rm -rf screenshots
-            mkdir -p screenshots
+            mkdir -p screenshots/live-execution screenshots/theme-audit
             adb pull /sdcard/Android/data/com.aether.app.debug/files/screenshots/. screenshots/ || true
+            adb pull /sdcard/Android/data/com.aether.app.debug/files/live-execution/. screenshots/live-execution/ || true
+            adb pull /sdcard/Android/data/com.aether.app.debug/files/theme-audit/. screenshots/theme-audit/ || true
             if [ "$TEST_STATUS" -ne 0 ]; then exit "$TEST_STATUS"; fi
             test -f screenshots/01-chat-welcome.png
             test -f screenshots/05-model-picker.png
@@ -139,6 +145,11 @@ jobs:
             test -f screenshots/22-new-chat-welcome.png
             test -f screenshots/verification.json
             cat screenshots/verification.json
+            test -f screenshots/live-execution/light-manual-command-before-execution.png
+            test -f screenshots/live-execution/light-command-folded-after-completion.png
+            test -f screenshots/theme-audit/light-settings-home.png
+            test -f screenshots/theme-audit/midnight-settings-home.png
+            test "$(find screenshots/theme-audit -name '*.png' | wc -l)" -ge 100
 
       - name: Upload visual evidence
         if: always()

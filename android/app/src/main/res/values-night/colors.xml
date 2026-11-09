@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="aether_on_accent">#FF07101D</color>
     <color name="aether_bg">#0B0D12</color>
     <color name="aether_surface">#12151D</color>
     <color name="aether_card">#151A24</color>
@@ -10,7 +11,7 @@
     <color name="aether_tool_bg">#12203A</color>
     <color name="aether_fg">#EAF0F8</color>
     <color name="aether_muted">#8B95A7</color>
-    <color name="aether_dim">#6B7484</color>
+    <color name="aether_code_bg">#0B0F14</color><color name="aether_code_border">#1E252E</color><color name="aether_source_bg">#121821</color><color name="aether_dim">#7D889B</color>
     <color name="aether_accent">#6EA8FF</color>
     <color name="aether_accent_deep">#2F6FDB</color>
     <color name="aether_ok">#54D98C</color>

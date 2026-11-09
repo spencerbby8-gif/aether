@@ -1,0 +1,8 @@
+{
+  "client_id": "https://REPLACE-WITH-YOUR-HTTPS-HOST/oauth/aether-mcp-client.json",
+  "client_name": "Aether Android",
+  "redirect_uris": ["aether://connector/callback"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none"
+}

@@ -79,13 +79,13 @@ public class SettingsActivity extends AppCompatActivity {
 
     private final List<Destination> destinations = Arrays.asList(
             new Destination("general", "EXPERIENCE", R.drawable.ic_tune, "General", "Startup, keyboard and feedback"),
-            new Destination("conversation", "EXPERIENCE", R.drawable.ic_chat, "Conversation & Agent", "Discussion, response style and instructions"),
+            new Destination("conversation", "EXPERIENCE", R.drawable.ic_chat, "Conversation & Agent", "Discussion, command approval and instructions"),
             new Destination("appearance", "EXPERIENCE", R.drawable.ic_palette, "Appearance", "Theme, text size and motion"),
             new Destination("models", "MODELS", R.drawable.ic_agent, "Models", "Default model and generation controls"),
             new Destination("providers", "MODELS", R.drawable.ic_provider, "Personal Providers", "Your providers, models and encrypted keys"),
             new Destination("activity", "ACTIVITY & DATA", R.drawable.ic_workspace, "Chat & Activity", "Research timeline, sources and history"),
             new Destination("network", "ACTIVITY & DATA", R.drawable.ic_speed, "Network & Performance", "Launch readiness and streaming"),
-            new Destination("storage", "ACTIVITY & DATA", R.drawable.ic_database, "Storage & Data", "Export, storage and deletion"),
+            new Destination("storage", "ACTIVITY & DATA", R.drawable.ic_database, "Storage & Data", "Backup, restore, export and deletion"),
             new Destination("privacy", "TRUST", R.drawable.ic_shield, "Privacy & Security", "Local data, keys and external services"),
             new Destination("legal", "TRUST", R.drawable.ic_legal, "Legal & Policies", "Disclaimer, terms and content responsibility"),
             new Destination("about", "TRUST", R.drawable.ic_info, "About Aether", "Version, capabilities and notices")
@@ -137,6 +137,7 @@ public class SettingsActivity extends AppCompatActivity {
         body.addView(hero);
         body.addView(subtitle("Choose a category. Every option has its own space."));
         search = input("Search settings", "");
+        search.setId(R.id.settings_search);
         search.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_search, 0, 0, 0);
         search.setCompoundDrawablePadding(Ui.dp(this, 10));
         body.addView(search, matchParams(16));
@@ -258,6 +259,9 @@ public class SettingsActivity extends AppCompatActivity {
                 new String[]{"Agent", "Discussion"}, value -> AetherPrefs.discussion(this, "Discussion".equals(value)));
         choice(b, "Response style", AetherPrefs.responseStyle(this), new String[]{"Concise", "Balanced", "Detailed"}, value -> AetherPrefs.responseStyle(this, value));
         b.addView(infoCard("Agent can research, browse, run commands and create files. Discussion focuses on the conversation and requests no tools. You can switch modes in the composer at any time."));
+        b.addView(groupLabel("COMMAND EXECUTION"));
+        toggle(b, "Auto-run Agent commands", "Off shows the exact command and waits for Approve once or Deny. On executes without an approval prompt.", AetherPrefs.autoRunCommands(this), value -> AetherPrefs.autoRunCommands(this, value));
+        action(b, "Connectors & MCP", "Manage remote tools and connection permissions", () -> ConnectorSheet.show(this, () -> { }));
         b.addView(groupLabel("CUSTOM INSTRUCTIONS"));
         ByokClient.ChatOptions options = AgentSettings.load(this);
         instructions = input("Example: answer plainly and state assumptions", options.instructions);
@@ -336,6 +340,7 @@ public class SettingsActivity extends AppCompatActivity {
     private void showStorage() {
         LinearLayout b = openSection("Storage & Data", "Your conversations stay under your control.");
         b.addView(heroCard(readableSize(folderSize(getFilesDir())), "Used by Aether's private app storage, including chats and attachments."));
+        action(b, "Backup & Restore", "Encrypted account session and Google Drive app-data backup", () -> startActivity(new android.content.Intent(this, BackupActivity.class)));
         action(b, "Export chats", "Create a JSON document without personal provider keys", () -> exportChats.launch("aether-chats.json"));
         action(b, "Clear chat history", "Delete every local chat and copied attachment", this::confirmClearHistory);
         b.addView(infoCard("Exports contain conversation content and local task details. They never include personal provider API keys. Review an export before sharing it."));

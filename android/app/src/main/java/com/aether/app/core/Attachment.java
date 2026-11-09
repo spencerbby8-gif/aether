@@ -25,6 +25,8 @@ public final class Attachment {
     public final String name;
     public final long size;
     public final String mime;
+    /** App-private copy of the original file, or null before persistence succeeds. */
+    public final String localPath;
     /** Extracted text, or null when the file is binary. */
     public final String text;
     /** True when the text above was folded into the prompt sent to the engine. */
@@ -32,15 +34,25 @@ public final class Attachment {
 
     public Attachment(String id, String name, long size, String mime,
                       String text, boolean sentToEngine) {
+        this(id, name, size, mime, text, sentToEngine, null);
+    }
+
+    public Attachment(String id, String name, long size, String mime,
+                      String text, boolean sentToEngine, String localPath) {
         this.id = id;
         this.name = name == null ? "file" : name;
         this.size = size;
         this.mime = mime == null ? "application/octet-stream" : mime;
         this.text = text;
         this.sentToEngine = sentToEngine;
+        this.localPath = localPath;
     }
 
     public boolean hasText() { return text != null && !text.isEmpty(); }
+    public boolean isImage() { return mime != null && mime.startsWith("image/"); }
+    public String storedPath() {
+        return localPath == null || localPath.isEmpty() ? "attachments/" + id : localPath;
+    }
 
     public JSONObject toJson() throws JSONException {
         JSONObject o = new JSONObject();
@@ -49,6 +61,7 @@ public final class Attachment {
         o.put("size", size);
         o.put("mime", mime);
         o.put("sentToEngine", sentToEngine);
+        if (localPath != null) o.put("localPath", localPath);
         if (text != null) o.put("text", text);
         return o;
     }
@@ -60,7 +73,8 @@ public final class Attachment {
                 o.optLong("size", 0),
                 o.optString("mime", "application/octet-stream"),
                 o.has("text") && !o.isNull("text") ? o.optString("text") : null,
-                o.optBoolean("sentToEngine", false));
+                o.optBoolean("sentToEngine", false),
+                o.has("localPath") && !o.isNull("localPath") ? o.optString("localPath") : null);
     }
 
     static JSONArray arrayToJson(java.util.List<Attachment> list) throws JSONException {

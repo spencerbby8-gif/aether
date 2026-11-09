@@ -166,6 +166,7 @@ public class ChatActivity extends AppCompatActivity {
        read timeout is deliberately longer than any silence the engine may
        produce, so a flag alone would not interrupt it. */
     private final EngineCore.TurnHandle turn = new EngineCore.TurnHandle();
+    private volatile PendingCommandApproval pendingApproval;
 
     /**
      * The engine that answered last. Consecutive messages reuse it instead of
@@ -235,8 +236,11 @@ public class ChatActivity extends AppCompatActivity {
         FleetWarmup.addListener(warmupListener);
         FleetWarmup.warmAll(getApplicationContext());
         findViewById(R.id.account_btn).setOnClickListener(v -> showAccount());
+        findViewById(R.id.drawer_connectors_btn).setOnClickListener(v -> {
+            drawer.closeDrawers();
+            ConnectorSheet.show(this, this::refreshChip);
+        });
         findViewById(R.id.drawer_settings_btn).setOnClickListener(v -> openSettings());
-        findViewById(R.id.settings_btn).setOnClickListener(v -> openSettings());
         findViewById(R.id.workspace_btn).setOnClickListener(v -> {
             Intent workspace = new Intent(this, WorkspaceActivity.class);
             workspace.putExtra("engine", cachedUrl);
@@ -270,6 +274,7 @@ public class ChatActivity extends AppCompatActivity {
 
         sendBtn.setOnClickListener(v -> onSend());
         stopBtn.setOnClickListener(v -> {
+            resolvePendingApproval(false);
             if (cancelFlag != null) cancelFlag[0] = true;
             turn.cancel();
         });
@@ -325,6 +330,7 @@ public class ChatActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        resolvePendingApproval(false);
         super.onDestroy();
         bg.shutdownNow();
         pollExec.shutdownNow();
@@ -334,7 +340,6 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void showComposerMenu() {
-        if (discussionMode) return;
         android.app.Dialog dialog = new android.app.Dialog(this);
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         LinearLayout menu = new LinearLayout(this); menu.setOrientation(LinearLayout.VERTICAL);
@@ -343,20 +348,15 @@ public class ChatActivity extends AppCompatActivity {
         View handle = new View(this); handle.setBackgroundResource(R.drawable.bg_pill_ghost);
         LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(Ui.dp(this, 42), Ui.dp(this, 4));
         hp.gravity = Gravity.CENTER_HORIZONTAL; hp.bottomMargin = Ui.dp(this, 16); menu.addView(handle, hp);
-        TextView title = Ui.tv(this, "Add to your task", 24, Ui.PRIMARY); title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        TextView title = Ui.tv(this, "Upload", 24, Ui.PRIMARY); title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         menu.addView(title, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 52)));
         TextView attach = Ui.tv(this, "Attach a file", 15, Ui.PRIMARY);
         attach.setGravity(Gravity.CENTER_VERTICAL); attach.setOnClickListener(v -> { dialog.dismiss(); pickFile.launch("*/*"); }); menu.addView(attach,
                 new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 54)));
-        TextView connectors = Ui.tv(this, "Connectors & MCP", 15, Ui.PRIMARY);
-        connectors.setGravity(Gravity.CENTER_VERTICAL); connectors.setOnClickListener(v -> { dialog.dismiss(); ConnectorSheet.show(this, this::refreshChip); });
-        menu.addView(connectors, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 54)));
-        android.widget.CheckBox auto = new android.widget.CheckBox(this);
-        auto.setText("Auto-run Agent commands"); auto.setTextSize(14); auto.setTextColor(getColor(Ui.PRIMARY)); auto.setChecked(AetherPrefs.autoRunCommands(this));
-        auto.setOnCheckedChangeListener((button, checked) -> AetherPrefs.autoRunCommands(this, checked));
-        menu.addView(auto, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 54)));
-        TextView note = Ui.tv(this, "Agent only · Commands are always shown in the activity trace. Disable auto-run to remove shell execution from the next request.", 11, Ui.DIM);
-        menu.addView(note);
+        TextView image = Ui.tv(this, "Upload an image", 15, Ui.PRIMARY);
+        image.setGravity(Gravity.CENTER_VERTICAL);
+        image.setOnClickListener(v -> { dialog.dismiss(); pickFile.launch("image/*"); });
+        menu.addView(image, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 54)));
         dialog.setContentView(menu);
         android.view.Window window = dialog.getWindow();
         if (window != null) {
@@ -380,6 +380,7 @@ public class ChatActivity extends AppCompatActivity {
             /* The current request's mode is immutable. Stop its stream first and
                restart the same user goal once, on the newly selected route. */
             modeRestartRequested = true;
+            resolvePendingApproval(false);
             if (cancelFlag != null) cancelFlag[0] = true;
             turn.cancel();
             toast("Mode changed · stopping this request; completed tool effects remain. Continuing in "
@@ -387,7 +388,7 @@ public class ChatActivity extends AppCompatActivity {
         }
         discussionMode = discussion;
         AetherPrefs.discussion(this, discussionMode);
-        findViewById(R.id.attach_btn).setVisibility(discussionMode ? View.GONE : View.VISIBLE);
+        findViewById(R.id.attach_btn).setVisibility(View.VISIBLE);
         modeAgent.setBackgroundResource(discussion ? 0 : R.drawable.bg_segment_active);
         modeDiscuss.setBackgroundResource(discussion ? R.drawable.bg_segment_active : 0);
         modeAgent.setTextColor(getColor(discussion ? R.color.aether_muted : R.color.aether_fg));
@@ -878,6 +879,7 @@ public class ChatActivity extends AppCompatActivity {
         /** Model message this bubble is filling, so it can be persisted. */
         ChatMessage model;
         String session = "default";
+        List<Attachment> attachments = new ArrayList<>();
     }
 
     private AssistantBubble addAssistantBubble() {
@@ -952,6 +954,105 @@ public class ChatActivity extends AppCompatActivity {
         return b;
     }
 
+    private static final class PendingCommandApproval {
+        final String id;
+        final java.util.concurrent.CountDownLatch decided = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicBoolean choice = new java.util.concurrent.atomic.AtomicBoolean();
+        volatile boolean approved;
+        PendingCommandApproval(String id) { this.id = id; }
+        boolean decide(boolean value) {
+            if (!choice.compareAndSet(false, true)) return false;
+            approved = value;
+            decided.countDown();
+            return true;
+        }
+    }
+
+    private void resolvePendingApproval(boolean approved) {
+        PendingCommandApproval pending = pendingApproval;
+        if (pending != null) pending.decide(approved);
+    }
+
+    /** Runs on the streaming thread. The engine has not started the subprocess;
+        it remains blocked until this method posts the exact request's decision. */
+    private void awaitCommandApproval(AssistantBubble bubble, org.json.JSONObject request,
+                                      String engineUrl) {
+        String id = request.optString("id", "");
+        String command = request.optString("command", "");
+        if (id.isEmpty() || command.trim().isEmpty()) return;
+        PendingCommandApproval pending = new PendingCommandApproval(id);
+        pendingApproval = pending;
+        ui.post(() -> showCommandApproval(bubble, request, pending));
+        boolean approved = false;
+        try {
+            boolean decided = pending.decided.await(610, java.util.concurrent.TimeUnit.SECONDS);
+            approved = decided && pending.approved && (cancelFlag == null || !cancelFlag[0]);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        boolean delivered = EngineCore.respondApproval(engineUrl, cfg.offKey, id,
+                request.optString("session", bubble.session), approved);
+        if (!delivered) {
+            ui.post(() -> pushNotice(bubble, "The command decision could not be delivered. The command was not approved by this device."));
+        }
+        if (pendingApproval == pending) pendingApproval = null;
+    }
+
+    private void showCommandApproval(AssistantBubble bubble, org.json.JSONObject request,
+                                     PendingCommandApproval pending) {
+        if (isDestroyed() || bubble.wrap == null) return;
+        final LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_card);
+        card.setPadding(Ui.dp(this, 16), Ui.dp(this, 14), Ui.dp(this, 16), Ui.dp(this, 14));
+        TextView eyebrow = Ui.tv(this, "COMMAND APPROVAL REQUIRED", 10, Ui.WARN);
+        eyebrow.setLetterSpacing(.08f);
+        card.addView(eyebrow);
+        TextView title = Ui.tv(this, "Aether wants to run this command", 17, Ui.PRIMARY);
+        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        title.setPadding(0, Ui.dp(this, 8), 0, Ui.dp(this, 8));
+        card.addView(title);
+        TextView command = Ui.tv(this, request.optString("command"), 12, Ui.PRIMARY);
+        command.setTypeface(Ui.mono(this));
+        command.setBackgroundResource(R.drawable.bg_code);
+        command.setPadding(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10));
+        command.setTextIsSelectable(true);
+        card.addView(command);
+        TextView explanation = Ui.tv(this,
+                "Nothing has run yet. Approve executes this command once in this chat’s workspace. Deny returns control to the Agent without executing it.",
+                11, Ui.DIM);
+        explanation.setPadding(0, Ui.dp(this, 10), 0, Ui.dp(this, 6));
+        card.addView(explanation);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.END);
+        TextView deny = Ui.tv(this, "Deny", 13, Ui.PRIMARY);
+        deny.setGravity(Gravity.CENTER);
+        deny.setBackgroundResource(R.drawable.bg_pill_ghost);
+        TextView approve = Ui.tv(this, "Approve once", 13, R.color.aether_on_accent);
+        approve.setGravity(Gravity.CENTER);
+        approve.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        approve.setBackgroundResource(R.drawable.bg_pill_accent);
+        actions.addView(deny, new LinearLayout.LayoutParams(Ui.dp(this, 88), Ui.dp(this, 46)));
+        LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(Ui.dp(this, 132), Ui.dp(this, 46));
+        ap.leftMargin = Ui.dp(this, 8);
+        actions.addView(approve, ap);
+        card.addView(actions);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cp.bottomMargin = Ui.dp(this, 8);
+        bubble.wrap.addView(card, 0, cp);
+        View.OnClickListener decision = v -> {
+            boolean approved = v == approve;
+            if (!pending.decide(approved)) return;
+            bubble.wrap.removeView(card);
+            pushNotice(bubble, approved ? "Command approved once · waiting for the engine to start it."
+                    : "Command denied · it was not executed.");
+        };
+        deny.setOnClickListener(decision);
+        approve.setOnClickListener(decision);
+        scrollBottom();
+    }
+
     /**
      * The compact activity strip above an answer.
      *
@@ -1010,11 +1111,20 @@ public class ChatActivity extends AppCompatActivity {
         }
 
         boolean event(String raw) {
+            AgentActivity.Step wasOpen = model.open();
             if (!model.feed(raw)) return false;
             running = true;
             AgentActivity.Step open = model.open();
-            detailIndex = open == null ? -1 : model.steps().indexOf(open);
-            if ((model.hasSteps() || model.hasReasoning()) && AetherPrefs.showActivity(ChatActivity.this)) expanded = true;
+            if (open != null) {
+                detailIndex = model.steps().indexOf(open);
+                if (AetherPrefs.showActivity(ChatActivity.this)) expanded = true;
+            } else {
+                detailIndex = -1;
+                // A finished command folds immediately. The next real action
+                // opens its own banner instead of leaving old output expanded.
+                if (wasOpen != null) expanded = false;
+                else if (model.hasReasoning() && AetherPrefs.showActivity(ChatActivity.this)) expanded = true;
+            }
             card.setVisibility(AetherPrefs.showActivity(ChatActivity.this) ? View.VISIBLE : View.GONE);
             pulseView.setRunning(AetherPrefs.animations(ChatActivity.this));
             render();
@@ -1651,6 +1761,8 @@ public class ChatActivity extends AppCompatActivity {
                     new String(bytes, java.nio.charset.StandardCharsets.UTF_8)));
             text = prep.text;
             inline = prep.sentToEngine;
+        } else if (mime != null && mime.startsWith("image/")) {
+            inline = true; // Original bytes are uploaded before the model turn.
         } else if (AttachmentText.isUnsupportedBinary(mime, name)) {
             /* The file cannot be read, so say so in the prompt itself. Without
                this the model received an attachment with no text and no reason,
@@ -1661,7 +1773,8 @@ public class ChatActivity extends AppCompatActivity {
         java.io.File stored = store.storeAttachment(current.id, bytes, name);
         Attachment a = new Attachment(
                 stored != null ? stored.getName() : ChatStore.newId(),
-                name, size, mime, text, inline);
+                name, size, mime, text, inline,
+                stored == null ? null : store.relativeAttachmentPath(stored));
         staged.add(a);
         renderStaged();
     }
@@ -1693,6 +1806,7 @@ public class ChatActivity extends AppCompatActivity {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.topMargin = Ui.dp(this, 4);
 
+            if (a.isImage()) addAttachmentThumbnail(row, a);
             TextView label = Ui.tv(this, attachmentLabel(a), 11,
                     a.sentToEngine ? Ui.PRIMARY : Ui.DIM);
             label.setMaxLines(2);
@@ -1714,6 +1828,38 @@ public class ChatActivity extends AppCompatActivity {
             row.addView(x);
             attachRow.addView(row, lp);
         }
+    }
+
+    private void addAttachmentThumbnail(LinearLayout row, Attachment a) {
+        ImageView image = new ImageView(this);
+        image.setTag(a.id);
+        image.setContentDescription("Preview of " + a.name);
+        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image.setBackgroundResource(R.drawable.bg_tool);
+        int side = Ui.dp(this, 54);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(side, side);
+        lp.rightMargin = Ui.dp(this, 10);
+        row.addView(image, lp);
+        storeExec.execute(() -> {
+            final android.graphics.Bitmap bitmap = decodeAttachment(a, side * 2);
+            if (bitmap != null) ui.post(() -> {
+                if (a.id.equals(image.getTag())) image.setImageBitmap(bitmap);
+            });
+        });
+    }
+
+    private android.graphics.Bitmap decodeAttachment(Attachment a, int maxSide) {
+        if (a == null || a.storedPath() == null) return null;
+        java.io.File file = store.attachmentFile(a.storedPath());
+        if (file == null) return null;
+        android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        android.graphics.BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+        int sample = 1;
+        while (bounds.outWidth > maxSide * sample * 2 || bounds.outHeight > maxSide * sample * 2) sample *= 2;
+        android.graphics.BitmapFactory.Options options = new android.graphics.BitmapFactory.Options();
+        options.inSampleSize = sample;
+        return android.graphics.BitmapFactory.decodeFile(file.getAbsolutePath(), options);
     }
 
     // ----------------------------------------------------------------- send
@@ -1771,6 +1917,7 @@ public class ChatActivity extends AppCompatActivity {
         final AssistantBubble b = addAssistantBubble();
         ChatMessage model = new ChatMessage(ChatMessage.ROLE_ASSISTANT);
         b.model = model;
+        b.attachments = userMsg.attachments;
         b.session = current.id;
         current.messages.add(model);
         attachMessageActions(b.contentZone, model);
@@ -1930,17 +2077,40 @@ public class ChatActivity extends AppCompatActivity {
         return out;
     }
 
-    /** The engine has no upload endpoint, so readable attachments ride in the prompt. */
+    /** Readable text is inlined; original files and image bytes are uploaded
+        into this chat's confined workspace before streaming begins. */
     private String composeWire(String prompt, List<Attachment> attachments) {
         if (attachments == null || attachments.isEmpty()) return prompt;
         StringBuilder sb = new StringBuilder(prompt);
         for (Attachment a : attachments) {
-            if (!a.hasText()) continue;
-            sb.append("\n\n--- attached file: ").append(a.name)
-              .append(" (").append(a.mime).append(", ").append(a.size).append(" bytes) ---\n")
-              .append(a.text);
+            if (a.isImage()) {
+                sb.append("\n\n--- uploaded image: ").append(a.name)
+                  .append(" ---\nWorkspace path: .attachments/").append(a.id)
+                  .append("\nCall read_image with this path before describing or extracting visual content. Never guess from the filename.");
+            } else if (a.hasText()) {
+                sb.append("\n\n--- attached file: ").append(a.name)
+                  .append(" (").append(a.mime).append(", ").append(a.size).append(" bytes) ---\n")
+                  .append(a.text);
+            }
         }
         return sb.toString();
+    }
+
+    private String uploadAttachments(String url, String session, List<Attachment> attachments) {
+        if (attachments == null) return null;
+        for (Attachment a : attachments) {
+            java.io.File file = store.attachmentFile(a.storedPath());
+            if (file == null || !file.isFile()) return a.name + ": the local attachment copy is missing";
+            try {
+                byte[] data = java.nio.file.Files.readAllBytes(file.toPath());
+                String failure = EngineCore.uploadAttachment(url, cfg.offKey, session, a.id,
+                        a.name, a.mime, a.sentToEngine, data);
+                if (failure != null) return a.name + ": " + failure;
+            } catch (Exception e) {
+                return a.name + ": could not read the saved attachment";
+            }
+        }
+        return null;
     }
 
     private void markError(ChatMessage m, String note) {
@@ -1968,6 +2138,11 @@ public class ChatActivity extends AppCompatActivity {
         final boolean[] ok = new boolean[] {false};
         final String[] err = new String[] {null};
         final AtomicBoolean recorded = new AtomicBoolean(false);
+        String uploadFailure = uploadAttachments(url, b.session, b.attachments);
+        if (uploadFailure != null) {
+            finalizeTurn(b, prompt, false, uploadFailure, System.currentTimeMillis() - t0);
+            return;
+        }
 
         EngineCore.chatStream(url, cfg.offKey, history, wire,
                 discussion ? AetherPrefs.discussionInstructions(this) : AetherPrefs.instructions(this),
@@ -1989,6 +2164,9 @@ public class ChatActivity extends AppCompatActivity {
                     }
                     @Override public void onQuestions(org.json.JSONObject questions) {
                         ui.post(() -> showAgentQuestions(questions));
+                    }
+                    @Override public void onApproval(org.json.JSONObject approval) {
+                        awaitCommandApproval(b, approval, url);
                     }
                     @Override public void onNotice(String notice) {
                         ui.post(() -> pushNotice(b, notice));
