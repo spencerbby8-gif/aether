@@ -45,3 +45,39 @@ Use a real test Google account and mailbox:
 7. Sign out and verify both the Supabase session and cached Drive token are removed from the device.
 
 The source implements these routes and the local merge/checksum logic, but no real mailbox, Google account, OAuth callback, or Drive backup/restore has been completed in this workspace yet. Those remain external-account evidence gates, not features to infer from a successful APK build.
+
+## Verified live state (2026-11-06)
+
+Google is now enabled on the project and the redirect handshake is real:
+
+```
+GET /auth/v1/authorize?provider=google&redirect_to=aether://auth/callback&flow_type=pkce&code_challenge=...&code_challenge_method=s256
+→ HTTP 302 https://accounts.google.com/o/oauth2/v2/auth
+   client_id=218060312044-...apps.googleusercontent.com
+   redirect_uri=https://jvuqxazndloiekikzrnb.supabase.co/auth/v1/callback
+   response_type=code&scope=email profile
+```
+
+- Client ID/secret are stored in Supabase only. The APK still carries nothing but the publishable key.
+- `site_url` and `uri_allow_list` are both `aether://auth/callback`.
+- Requesting Backup scope forwards correctly: adding `&scopes=https://www.googleapis.com/auth/drive.appdata`
+  yields `scope=email profile https://www.googleapis.com/auth/drive.appdata` in the Google URL.
+
+### Known limitation: Drive tokens cannot be refreshed
+
+Google only issues a **refresh token** when the authorization request carries `access_type=offline`.
+Supabase's `/authorize` does not merge `query_params` into the provider URL — it forwards them as a literal
+`query_params={"access_type":"offline"}` parameter, which Google ignores (verified live). Consequences:
+
+- `provider_token` for Drive lasts about an hour, and `provider_refresh_token` is never issued.
+- Aether stores only `provider_token`, so Drive backup works for roughly an hour per connect and then needs
+  the user to reconnect. Backup is therefore **not** durable yet.
+- Real fixes, in order of preference: (1) obtain Google Drive access through Google Identity Services in the
+  app with a server-side code exchange that sends `access_type=offline`; (2) keep Drive backup session-length
+  and say so in the UI. Do not describe Drive backup as reliable before one of these lands.
+
+### Secret hygiene
+
+Reading the project's auth config through the Supabase Management API returns the Google client secret in
+plaintext. Rotate the client secret in Google Cloud (Credentials → the Web client → reset secret), paste the
+new value into Supabase, and keep it out of chat, logs and the repository. The app never needs it.
