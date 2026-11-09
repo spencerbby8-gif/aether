@@ -150,7 +150,7 @@ public class TaskRecordProof {
         full.complete();
         String fr = full.finalReport();
         for (String section : new String[]{"Task:", "State: COMPLETED", "Steps", "Verified",
-                "Files", "Commands run", "Results", "Errors", "Still open", "Engine: B"}) {
+                "Files", "Commands run", "Results", "Errors", "Still open", "Model: Aether Uncensored"}) {
             chk("report contains " + section, fr.contains(section), section);
         }
         chk("report records both exit codes",
@@ -252,7 +252,7 @@ public class TaskRecordProof {
                 warm.contains("after " + "Fuel prices rose by 12% last ".trim().length()
                         + " characters"), firstLine(warm, "mid-answer"));
         chk("the takeover is recorded on the task",
-                !carryTask.results.isEmpty() && carryTask.results.toString().contains("continuing on engine C"),
+                !carryTask.results.isEmpty() && carryTask.results.toString().contains("continuing with automatic fallback"),
                 String.valueOf(carryTask.results));
         chk("whitespace-only partial counts as nothing",
                 !carryTask.continuationPrompt("x", "   \n  ", "b").contains("mid-answer"), "");

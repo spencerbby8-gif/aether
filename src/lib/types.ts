@@ -89,16 +89,35 @@ export interface Project {
  */
 export type ProviderId = "auto" | "a" | "b" | "c" | "d";
 
+export type ModelSelection =
+  | { kind: "aether" }
+  | { kind: "byok"; connectionId: string; model: string };
+
 export interface Settings {
+  /** Legacy internal routing value. Public Aether chat always uses auto. */
   provider: ProviderId;
+  model: ModelSelection;
   streaming: boolean;
   reduceMotion: boolean;
+  compactMode: boolean;
+  sendOnEnter: boolean;
+  systemPrompt: string;
+  temperature: number;
+  maxTokens: number;
+  requestTimeoutMs: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   provider: "auto",
+  model: { kind: "aether" },
   streaming: true,
   reduceMotion: false,
+  compactMode: false,
+  sendOnEnter: true,
+  systemPrompt: "",
+  temperature: 0.7,
+  maxTokens: 2048,
+  requestTimeoutMs: 60_000,
 };
 
 /** Routing slots, in failover order. Single source for validation below. */

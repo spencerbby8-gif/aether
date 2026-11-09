@@ -116,8 +116,8 @@ export function EmptyState({ onSuggest }: { onSuggest: (text: string) => void })
           What should we build today?
         </h1>
         <p className="mt-2.5 max-w-[36ch] text-[13px] leading-relaxed text-fog-400 sm:mt-3 sm:max-w-md sm:text-sm">
-          Aether pairs this workspace with a two-engine GPU fleet — it plans, executes commands,
-          searches the web and renders media. Everything stays on this device.
+          Aether Uncensored can plan, execute commands, search the web and render media.
+          Workspace data stays on this device; chat requests use your selected provider.
         </p>
 
         <div className="mt-6 grid w-full max-w-lg grid-cols-1 gap-2 sm:mt-9 sm:grid-cols-2 sm:gap-2.5">

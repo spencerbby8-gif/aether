@@ -411,3 +411,11 @@
 .hljs-strong {
   font-weight: 700;
 }
+
+[data-density="compact"] .message-row {
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+}
+[data-density="compact"] .composer-frame {
+  margin-bottom: -0.2rem;
+}

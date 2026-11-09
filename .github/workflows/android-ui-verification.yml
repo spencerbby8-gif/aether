@@ -1,0 +1,88 @@
+name: Android UI verification
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'android/ui-verification-*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out verification branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle 9.7.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 9.7.1
+
+      - name: Install Android compile components
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
+
+      - name: Clean full Android build
+        working-directory: android
+        run: |
+          test ! -f app/src/main/assets/aether-credentials.dat
+          gradle --no-daemon clean :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest
+        env:
+          GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8'
+
+      - name: Verify engine source integrity
+        run: node scripts/verify-engine-source.mjs
+
+      - name: Run emulator, navigate the app and capture screenshots
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          avd-name: aether-ui
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            adb wait-for-device
+            adb shell input keyevent 82
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            set -o pipefail
+            adb shell am instrument -w -r -e class com.aether.app.ScreenshotTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee instrumentation.log
+            rm -rf screenshots
+            mkdir -p screenshots
+            adb pull /sdcard/Android/data/com.aether.app.debug/files/screenshots/. screenshots/
+            test -f screenshots/01-chat-welcome.png
+            test -f screenshots/03-model-picker.png
+            test -f screenshots/05-settings-home.png
+            test -f screenshots/11-privacy-policy.png
+            test -f screenshots/12-activity-recorded-fixture.png
+            test -f screenshots/verification.json
+            cat screenshots/verification.json
+
+      - name: Upload visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-android-ui-evidence
+          path: |
+            screenshots/
+            instrumentation.log
+            android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

@@ -459,7 +459,7 @@ public final class TaskRecord {
         }
 
         if (engine != null && !engine.isEmpty()) {
-            sb.append("\nEngine: ").append(engine.toUpperCase(Locale.ROOT)).append('\n');
+            sb.append("\nModel: ").append(EngineLabels.publicModel(engine)).append('\n');
         }
         return sb.toString().trim();
     }
@@ -567,8 +567,7 @@ public final class TaskRecord {
               .append(" characters. Continue from exactly where it stopped. Do not ")
               .append("repeat or restate what is already written below.]\n\n")
               .append(partial.trim());
-            recordResult(n + " chars already streamed; continuing on engine "
-                    + (to == null ? "?" : to.toUpperCase(java.util.Locale.ROOT)));
+            recordResult(n + " chars already streamed; continuing with automatic fallback");
         }
         return sb.toString();
     }

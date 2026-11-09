@@ -1,21 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="aether_bg">#0B0D12</color>
-    <color name="aether_surface">#12151D</color>
-    <color name="aether_card">#151A24</color>
-    <color name="aether_field">#10141B</color>
-    <color name="aether_field_border">#2A3140</color>
-    <color name="aether_bubble_in">#1B2130</color>
-    <color name="aether_bubble_out">#1E3250</color>
-    <color name="aether_tool_bg">#12203A</color>
-    <color name="aether_fg">#EAF0F8</color>
-    <color name="aether_muted">#8B95A7</color>
-    <color name="aether_dim">#6B7484</color>
-    <color name="aether_accent">#6EA8FF</color>
-    <color name="aether_accent_deep">#2F6FDB</color>
-    <color name="aether_ok">#54D98C</color>
-    <color name="aether_warn">#FFC46B</color>
-    <color name="aether_error">#FF7A7A</color>
-    <color name="aether_ghost_border">#3DFFFFFF</color>
-    <color name="ic_launcher_background">#0B0D12</color>
+    <color name="aether_bg">#F5F7FB</color><color name="aether_surface">#FFFFFF</color>
+    <color name="aether_card">#FFFFFF</color><color name="aether_field">#F0F3F8</color>
+    <color name="aether_field_border">#D5DDEA</color><color name="aether_bubble_in">#FFFFFF</color>
+    <color name="aether_bubble_out">#DCEAFF</color><color name="aether_tool_bg">#E9F1FF</color>
+    <color name="aether_fg">#142033</color><color name="aether_muted">#58677C</color>
+    <color name="aether_dim">#758297</color><color name="aether_accent">#2563EB</color>
+    <color name="aether_accent_deep">#1D4ED8</color><color name="aether_ok">#168A54</color>
+    <color name="aether_warn">#9A5B00</color><color name="aether_error">#C43D4B</color>
+    <color name="aether_ghost_border">#1A2563EB</color><color name="ic_launcher_background">#0B0D12</color>
+    <color name="aether_sheet">#FFFFFF</color>
+    <color name="aether_icon_start">#E3EDFF</color><color name="aether_icon_end">#D5E4FF</color>
+    <color name="aether_hero_start">#E4EDFF</color><color name="aether_hero_end">#F5F8FF</color>
+    <color name="aether_composer_start">#FFFFFF</color><color name="aether_composer_end">#F7F9FD</color>
+    <color name="aether_selected_start">#DCEAFF</color><color name="aether_selected_end">#EDF3FF</color>
+    <color name="aether_segment_active">#D8E7FF</color><color name="aether_segment_track">#EDF1F7</color>
+    <color name="aether_welcome_start">#E7F0FF</color><color name="aether_welcome_center">#F5F7FB</color>
+    <color name="aether_activity_start">#EAF2FF</color><color name="aether_activity_end">#F5F8FD</color>
 </resources>

@@ -23,6 +23,8 @@ import { DEFAULT_SETTINGS } from "@/lib/types";
 import { isModKey } from "@/lib/hooks";
 import { toast, truncate, uid } from "@/lib/utils";
 import { runEngineChat } from "@/providers/engine-chat";
+import { runByokChat } from "@/providers/byok-chat";
+import { ByokStore } from "@/storage/ByokStore";
 import {
   ConversationStore,
   FileStore,
@@ -131,6 +133,8 @@ export function useAether(online: boolean) {
   const activeIdRef = useRef<string | null>(null);
   const projectFilterRef = useRef<string | null>(null);
   const settingsRef = useRef(settings);
+  const settingsWriteQueue = useRef<Promise<void>>(Promise.resolve());
+  const settingsRevision = useRef(0);
   const onlineRef = useRef(online);
   const lastPersistRef = useRef(0);
 
@@ -323,24 +327,58 @@ export function useAether(online: boolean) {
           outcome = {
             status: "error",
             text: "",
-            error: "Offline — the engine fleet cannot be reached. Reconnect and retry.",
+            error: "You appear to be offline. Reconnect and retry.",
           };
         } else {
-          const result = await runEngineChat({
-            turns,
-            signal: controller.signal,
-            streaming,
-            mode: settingsRef.current.provider,
-            onEvent,
-          });
-          outcome = {
-            status: result.status,
-            text: result.text,
-            model: "Qwen3.8-27B-Uncensored (IQ4_XS)",
-            error: result.error,
-            attachments: result.attachments,
-            thinking: result.thinking,
-          };
+          const current = settingsRef.current;
+          const selection = current.model;
+          if (selection.kind === "byok") {
+            const connection = await ByokStore.get(selection.connectionId);
+            if (!connection || !connection.enabled || !connection.apiKey) {
+              outcome = {
+                status: "error",
+                text: "",
+                error: "The selected personal provider is unavailable. Choose another model or reconnect it in Settings.",
+              };
+            } else {
+              const result = await runByokChat({
+                turns,
+                signal: controller.signal,
+                connection,
+                model: selection.model || connection.defaultModel,
+                instructions: current.systemPrompt,
+                temperature: current.temperature,
+                maxTokens: current.maxTokens,
+                timeoutMs: current.requestTimeoutMs,
+                streaming,
+                onEvent,
+              });
+              outcome = {
+                status: result.status,
+                text: result.text,
+                model: `${connection.name} · ${selection.model || connection.defaultModel}`,
+                error: result.error,
+                attachments: result.attachments,
+              };
+            }
+          } else {
+            const result = await runEngineChat({
+              turns,
+              signal: controller.signal,
+              streaming,
+              mode: "auto",
+              instructions: current.systemPrompt,
+              onEvent,
+            });
+            outcome = {
+              status: result.status,
+              text: result.text,
+              model: "Aether Uncensored",
+              error: result.error,
+              attachments: result.attachments,
+              thinking: result.thinking,
+            };
+          }
         }
       } catch (error) {
         /* Any unexpected failure still lands in a terminal state. */
@@ -820,8 +858,26 @@ export function useAether(online: boolean) {
   /* ---------------- settings & data ---------------- */
 
   const updateSettings = useCallback(async (patch: Partial<Settings>) => {
-    const next = await SettingsStore.update(patch);
-    setSettings(next);
+    /* Keep controlled inputs responsive while serialising IndexedDB writes so
+       rapid edits cannot overwrite one another out of order. */
+    const optimistic = { ...settingsRef.current, ...patch };
+    settingsRef.current = optimistic;
+    setSettings(optimistic);
+    const revision = ++settingsRevision.current;
+    const write = async () => {
+      try {
+        const next = await SettingsStore.update(patch);
+        if (settingsRevision.current === revision) {
+          settingsRef.current = next;
+          setSettings(next);
+        }
+      } catch (error) {
+        toast(error instanceof Error ? error.message : "Could not save Settings.");
+      }
+    };
+    const operation = settingsWriteQueue.current.then(write, write);
+    settingsWriteQueue.current = operation;
+    await operation;
   }, []);
 
   const exportData = useCallback(async () => {
@@ -830,11 +886,15 @@ export function useAether(online: boolean) {
   }, []);
 
   const wipeData = useCallback(async () => {
+    await settingsWriteQueue.current;
+    settingsRevision.current += 1;
     abortRef.current?.abort();
     runtimeRef.current?.cancel();
     runtimeRef.current = null;
     mediaEngine.cancelAll();
     await wipeWorkspace();
+    settingsRef.current = { ...DEFAULT_SETTINGS };
+    setSettings({ ...DEFAULT_SETTINGS });
     setConversations([]);
     setProjects([]);
     setMessages([]);

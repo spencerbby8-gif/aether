@@ -17,7 +17,7 @@ nb = json.load(open(TPL))
 src = nb['cells'][4]['source']
 i = src.index('def history_window')
 j = src.index('def agent_stream')
-ns = {}
+ns = {'GEN_DIR': '/tmp/aether-proof-generated', 'notify': lambda *a, **k: None}
 exec(src[i:j], ns)
 hw = ns['history_window']
 

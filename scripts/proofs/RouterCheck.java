@@ -23,6 +23,7 @@ public final class RouterCheck {
         SlotState aLive = new SlotState("a", true, "https://a.example", null, 200);
         SlotState bLive = new SlotState("b", true, "https://b.example", null, 200);
         SlotState cLive = new SlotState("c", true, "https://c.example", null, 200);
+        SlotState dLive = new SlotState("d", true, "https://d.example", null, 200);
         SlotState aDown = new SlotState("a", false, null, "kernel off", 503);
         SlotState bDown = new SlotState("b", false, null, "tunnel 530", 530);
         SlotState cDown = new SlotState("c", false, null, "never woken", 503);
@@ -46,6 +47,21 @@ public final class RouterCheck {
         check("AUTO with nothing live refuses and names every engine",
                 !d.ok() && d.reason.contains("A:") && d.reason.contains("B:")
                         && d.reason.contains("C:"), d);
+
+        d = EngineRouter.route("AUTO", Arrays.asList(aDown, bDown, cDown, dLive));
+        check("AUTO walks past three dead slots and uses D", d.ok() && "d".equals(d.slot), d);
+
+        java.util.Set<String> attempted = new java.util.HashSet<>(Arrays.asList("a", "b", "c"));
+        d = EngineRouter.failoverFrom("a", Arrays.asList(aLive, bLive, cLive, dLive), attempted);
+        check("failover skips every attempted slot and reaches D", d.ok() && "d".equals(d.slot), d);
+        attempted.add("d");
+        d = EngineRouter.failoverFrom("a", Arrays.asList(aLive, bLive, cLive, dLive), attempted);
+        check("failover stops after the whole four-slot chain was attempted", !d.ok(), d);
+
+        String publicError = EngineRouter.publicError("Engine B failed; failover from b to c; A→B→C→D");
+        check("public errors hide slots and fallback hops",
+                !publicError.matches(".*(?i)engine [a-d].*") && !publicError.contains("A→B")
+                        && publicError.contains("Aether Uncensored"), d);
 
         // manual pin: that engine only, never a silent hop
         d = EngineRouter.route("b", allLive);

@@ -64,9 +64,11 @@ export function Sidebar({ aether, online, onClose, onSearch, onSettings }: Sideb
     setProjectName("");
   };
 
-  const statusLabel = !online
-    ? "Offline · engines unreachable"
-    : `Engine fleet · routing ${settings.provider === "auto" ? "AUTO" : settings.provider.toUpperCase()}`;
+  const statusLabel = settings.model.kind === "byok"
+    ? "Personal provider selected"
+    : online
+      ? "Aether Uncensored · automatic"
+      : "Aether Uncensored · offline";
 
   return (
     <div className="flex h-full flex-col bg-ink-950">

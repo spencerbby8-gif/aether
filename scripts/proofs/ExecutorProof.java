@@ -13,7 +13,9 @@ import java.util.concurrent.atomic.*;
  * This cannot be reproduced by constructing the Activity on a JVM (Android
  * classes), so it reproduces the exact scheduling instead: same executor types,
  * same infinite loop, same task submission order. Part 3 then verifies the
- * shipped source and artifact no longer have the shared executor.
+ * shipped source no longer has the shared executor. Settings no longer owns
+ * fleet power controls at all, so its final section checks the replacement
+ * provider actions and Chat's separate polling/turn executors.
  *
  *   java -cp /tmp/ex ExecutorProof
  */
@@ -108,24 +110,26 @@ public final class ExecutorProof {
         actionExec.shutdownNow();
 
         // ------------------------------------- 3. the shipped code and APK
-        section("the shipped source no longer shares one executor");
+        section("the shipped Settings and chat use non-blocking executors");
         String src = read("android/app/src/main/java/com/aether/app/SettingsActivity.java");
-        check("no shared 'bg' executor remains",
-                !src.contains("bg.execute") && !src.contains("ExecutorService bg"),
-                "bg references: " + (src.contains("bg.execute") ? "present" : "none"));
-        check("polling has its own executor", src.contains("pollExec.execute(() -> pollLoop"),
-                count(src, "pollExec.execute") + " poll submissions");
-        check("every action goes to the action pool",
-                count(src, "actionExec.execute") >= 4,
-                count(src, "actionExec.execute")
-                        + " actions (wake, shutdown, shutdown all, diagnostics)");
-        check("the poll loop is the only thing on the poll thread",
-                count(src, "pollExec.execute") == 2,
-                count(src, "pollExec.execute") + " poll submissions (onResume, checkNow)");
-        check("both executors are shut down on destroy",
-                src.contains("pollExec.shutdownNow()") && src.contains("actionExec.shutdownNow()"),
+        String chat = read("android/app/src/main/java/com/aether/app/ChatActivity.java");
+        String layout = read("android/app/src/main/res/layout/activity_settings.xml");
+        check("Settings has no blocking fleet poll loop",
+                !src.contains("pollLoop(") && !src.contains("pollExec"), "on-demand provider actions only");
+        check("the removed wake and shutdown controls stay removed",
+                !src.contains("wakeOne") && !src.contains("shutdownAll")
+                        && !layout.contains("engine_rows") && !layout.contains("routing_rows"),
+                "unified model and BYOK Settings");
+        check("provider testing and persistence run off the UI thread",
+                count(src, "bg.execute") >= 2, count(src, "bg.execute") + " async provider operations");
+        check("the Settings executor is shut down on destroy",
+                src.contains("bg.shutdownNow()"), "onDestroy");
+        check("chat polling and turn work still use separate executors",
+                chat.contains("pollExec.execute") && chat.contains("bg.execute"),
+                "status polling cannot block a provider request or fleet turn");
+        check("chat shuts down both executors on destroy",
+                chat.contains("pollExec.shutdownNow()") && chat.contains("bg.shutdownNow()"),
                 "onDestroy");
-        check("worker threads are daemons", src.contains("setDaemon(true)"), "thread factory");
 
         System.out.println("\nEXECUTOR PROOF  " + pass + " passed, " + fail + " failed");
         if (fail > 0) System.exit(1);

@@ -35,7 +35,7 @@ final class Ui {
     static TextView tv(Context c, String text, float sp, int colorRes) {
         TextView t = new TextView(c);
         t.setText(text);
-        t.setTextSize(sp);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp * AetherPrefs.textScale(c));
         t.setTextColor(ContextCompat.getColor(c, colorRes));
         t.setLineSpacing(dp(c, 2), 1f);
         return t;

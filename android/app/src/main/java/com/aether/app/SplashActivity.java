@@ -38,8 +38,11 @@ public class SplashActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        AetherPrefs.applyTheme(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_splash);
+        // Begin real route preparation during the opening frame, never on the UI thread.
+        FleetWarmup.warmAll(getApplicationContext());
 
         if (animationsDisabled()) {
             go();

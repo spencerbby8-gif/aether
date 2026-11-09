@@ -39,6 +39,11 @@ public class EngineLabelsProof {
     }
 
     public static void main(String[] a) {
+        chk("public labels hide internal fleet slots",
+                "Aether Uncensored".equals(EngineLabels.publicModel("d")), EngineLabels.publicModel("d"));
+        chk("personal provider reports expose only the chosen model",
+                "Personal provider · gpt-test".equals(EngineLabels.publicModel("byok:id:gpt-test")),
+                EngineLabels.publicModel("byok:id:gpt-test"));
         long now = System.currentTimeMillis();
 
         EngineCore.EngineState live = EngineCore.classify("b", 200, models(),

@@ -3,6 +3,7 @@ package com.aether.app;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * A/B/C routing.
@@ -168,15 +169,31 @@ public final class EngineRouter {
      * request fails. Wraps around, so pinning C still fails over to A.
      */
     public static Decision failoverFrom(String currentSlot, List<SlotState> states) {
+        return failoverFrom(currentSlot, states, null);
+    }
+
+    /** Fail over to a healthy slot not already attempted in this turn. */
+    public static Decision failoverFrom(String currentSlot, List<SlotState> states, Set<String> attempted) {
         String from = norm(currentSlot);
         for (String slot : ORDER) {
-            if (slot.equals(from)) continue;
+            if (slot.equals(from) || (attempted != null && attempted.contains(slot))) continue;
             SlotState s = find(states, slot);
             if (s != null && s.live) {
                 return new Decision(s.slot, s.url,
                         "failover from " + from.toUpperCase(Locale.ROOT), true);
             }
         }
-        return new Decision(null, null, "no other engine is live", false);
+        return new Decision(null, null, "no untried engine is live", false);
+    }
+
+    /** User-facing errors name the unified model, never an internal fleet hop. */
+    public static String publicError(String message) {
+        if (message == null || message.trim().isEmpty()) return "Aether Uncensored request failed.";
+        return message
+                .replaceAll("(?i)\\bfailover from\\s+[a-d]\\b", "automatic fallback within Aether Uncensored")
+                .replaceAll("\\b[A-D](?:\\s*→\\s*[A-D]){1,3}\\b", "automatic fallback")
+                .replaceAll("\\bEngine\\s+[A-D]\\b", "Aether Uncensored")
+                .replaceAll("(?i)\\b(?:slot|engine)\\s*[:=]?\\s*[a-d]\\b", "Aether Uncensored")
+                .replaceAll("\\s*\\(manual routing — no silent switch\\)", "");
     }
 }

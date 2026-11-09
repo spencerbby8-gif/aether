@@ -10,6 +10,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.AlphaAnimation;
@@ -23,11 +25,13 @@ import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.drawerlayout.widget.DrawerLayout;
+import androidx.core.view.GravityCompat;
 
 import android.content.ContentValues;
 import android.graphics.Bitmap;
@@ -110,12 +114,20 @@ public class ChatActivity extends AppCompatActivity {
     private ImageButton sendBtn;
     private ImageButton stopBtn;
     private TextView chip;
+    private View modelSelector;
+    private TextView modelName;
     private TextView headerSub;
     private View emptyView;
+    private View welcomePanel;
+    private TextView modeAgent;
+    private TextView modeDiscuss;
+    private TextView modeNote;
+    private boolean discussionMode;
     private LinearLayout sessionList;
     private LinearLayout attachRow;
 
     private Credentials.Config cfg;
+    private ByokStore byokStore;
     private ChatStore store;
     private ChatSession current;
 
@@ -168,9 +180,11 @@ public class ChatActivity extends AppCompatActivity {
     private final List<EngineRouter.SlotState> lastStates = new ArrayList<>();
 
     private ActivityResultLauncher<String> pickFile;
+    private final FleetWarmup.Listener warmupListener = () -> ui.post(this::refreshChip);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        AetherPrefs.applyTheme(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
 
@@ -181,7 +195,13 @@ public class ChatActivity extends AppCompatActivity {
         sendBtn = findViewById(R.id.send_btn);
         stopBtn = findViewById(R.id.stop_btn);
         chip = findViewById(R.id.engine_chip);
+        modelSelector = findViewById(R.id.model_selector);
+        modelName = findViewById(R.id.model_name);
         headerSub = findViewById(R.id.header_sub);
+        welcomePanel = findViewById(R.id.welcome_panel);
+        modeAgent = findViewById(R.id.mode_agent);
+        modeDiscuss = findViewById(R.id.mode_discuss);
+        modeNote = findViewById(R.id.composer_mode_note);
         sessionList = findViewById(R.id.session_list);
         attachRow = findViewById(R.id.attach_row);
 
@@ -191,17 +211,47 @@ public class ChatActivity extends AppCompatActivity {
         store = new ChatStore(new java.io.File(getFilesDir(), "chats"));
 
         cfg = Credentials.load(this);
-        if (cfg == null || cfg.engines.isEmpty()) {
-            showErrorGlobal("This build has no engine credentials baked in.");
-            return;
-        }
-        headerSub.setText("chat, tools, search, commands");
+        byokStore = new ByokStore(this);
+        /* A BYOK-only installation must still open Settings and chat. Fleet
+           credentials are required only when Aether Uncensored is selected. */
+        getSharedPreferences("aether_console", MODE_PRIVATE).edit()
+                .putString("mode", EngineRouter.AUTO).apply();
+        headerSub.setText("Your private workspace");
+        discussionMode = AetherPrefs.discussion(this);
 
         chip.setOnClickListener(v -> openSettings());
+        modelSelector.setOnClickListener(v -> showModelSelector());
+        modeAgent.setOnClickListener(v -> setDiscussionMode(false));
+        modeDiscuss.setOnClickListener(v -> setDiscussionMode(true));
+        setDiscussionMode(discussionMode);
+        updateModelSelector();
+        FleetWarmup.addListener(warmupListener);
+        FleetWarmup.warmAll(getApplicationContext());
         findViewById(R.id.settings_btn).setOnClickListener(v -> openSettings());
+        findViewById(R.id.workspace_btn).setOnClickListener(v -> {
+            refreshDrawer();
+            drawer.openDrawer(GravityCompat.START);
+        });
+        findViewById(R.id.suggest_research).setOnClickListener(v -> {
+            setDiscussionMode(false);
+            input.setText("Research ");
+            input.setSelection(input.length());
+            input.requestFocus();
+        });
+        findViewById(R.id.suggest_create).setOnClickListener(v -> {
+            setDiscussionMode(false);
+            input.setText("Help me create ");
+            input.setSelection(input.length());
+            input.requestFocus();
+        });
+        findViewById(R.id.suggest_discuss).setOnClickListener(v -> {
+            setDiscussionMode(true);
+            input.setHint("What’s on your mind?");
+            input.requestFocus();
+        });
         findViewById(R.id.menu_btn).setOnClickListener(v -> {
             refreshDrawer();
-            drawer.openDrawer(Gravity.START);
+            drawer.openDrawer(GravityCompat.START);
         });
         findViewById(R.id.new_chat_btn).setOnClickListener(v -> newChat());
         findViewById(R.id.attach_btn).setOnClickListener(v -> pickFile.launch("*/*"));
@@ -213,16 +263,42 @@ public class ChatActivity extends AppCompatActivity {
         });
 
         input.setOnEditorActionListener((v, actionId, event) -> {
-            onSend();
-            return true;
+            if (AetherPrefs.sendOnEnter(this)) { onSend(); return true; }
+            return false;
+        });
+        input.setOnKeyListener((v, keyCode, event) -> {
+            if (AetherPrefs.sendOnEnter(this) && keyCode == KeyEvent.KEYCODE_ENTER
+                    && event.getAction() == KeyEvent.ACTION_DOWN && !event.isShiftPressed()) {
+                onSend(); return true;
+            }
+            return false;
         });
 
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override public void handleOnBackPressed() {
+                if (drawer != null && drawer.isDrawerOpen(GravityCompat.START)) {
+                    drawer.closeDrawer(GravityCompat.START);
+                } else {
+                    setEnabled(false);
+                    getOnBackPressedDispatcher().onBackPressed();
+                }
+            }
+        });
         showEmptyState();
+        maybeShowDisclaimer();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        updateModelSelector();
+        if (current != null && current.updatedAt <= AetherPrefs.historyReset(this)) {
+            current = null;
+            msgList.removeAllViews();
+            headerSub.setText("Your private workspace");
+            showEmptyState();
+        }
+        AetherPrefs.clearHistoryReset(this);
         refreshChip();
     }
 
@@ -240,40 +316,109 @@ public class ChatActivity extends AppCompatActivity {
         pollExec.shutdownNow();
         storeExec.shutdownNow();
         mediaExec.shutdownNow();
+        FleetWarmup.removeListener(warmupListener);
     }
 
     private void openSettings() {
         startActivity(new Intent(this, SettingsActivity.class));
     }
 
+    private void setDiscussionMode(boolean discussion) {
+        discussionMode = discussion;
+        modeAgent.setBackgroundResource(discussion ? 0 : R.drawable.bg_segment_active);
+        modeDiscuss.setBackgroundResource(discussion ? R.drawable.bg_segment_active : 0);
+        modeAgent.setTextColor(getColor(discussion ? R.color.aether_muted : R.color.aether_fg));
+        modeDiscuss.setTextColor(getColor(discussion ? R.color.aether_fg : R.color.aether_muted));
+        modeNote.setText(discussion ? "Conversation only · no tools" : "Research, create and take action");
+        if (!discussion) input.setHint("Message Aether…");
+    }
+
+    private void maybeShowDisclaimer() {
+        if (AetherPrefs.disclaimerSeen(this)) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Before you begin")
+                .setMessage("Aether is for adults. It can be wrong, unexpected or offensive. Verify important information, review commands and files before using them, and follow the law and third-party rights.")
+                .setCancelable(false)
+                .setNegativeButton("Read policies", (d, w) -> {
+                    Intent intent = new Intent(this, SettingsActivity.class);
+                    intent.putExtra("section", "legal");
+                    startActivity(intent);
+                })
+                .setPositiveButton("I understand", (d, w) -> AetherPrefs.markDisclaimerSeen(this))
+                .show();
+    }
+
     // ----------------------------------------------------------- status chip
 
+    private void updateModelSelector() {
+        if (modelName == null) return;
+        String label = ModelPrefs.AETHER_LABEL;
+        if (ModelPrefs.BYOK.equals(ModelPrefs.kind(this))) {
+            ByokClient.Connection c = byokStore.find(ModelPrefs.connectionId(this));
+            if (c != null) {
+                String model = ModelPrefs.model(this);
+                label = c.name + " · " + (model.isEmpty() ? c.defaultModel : model);
+            } else {
+                label = "Personal provider unavailable";
+            }
+        }
+        modelName.setText(label);
+        modelSelector.setContentDescription("Choose model. Current: " + label);
+    }
+
+    private void showModelSelector() {
+        ModelPickerDialog.show(this, byokStore, () -> {
+            updateModelSelector();
+            refreshChip();
+        });
+    }
+
     private void refreshChip() {
+        if (ModelPrefs.BYOK.equals(ModelPrefs.kind(this))) {
+            chip.setText("● personal provider");
+            chip.setTextColor(getColor(R.color.aether_muted));
+            return;
+        }
+        EngineRouter.Decision warmReady = FleetWarmup.readyDecision();
+        if (warmReady != null) {
+            remember(warmReady.slot, warmReady.url);
+            chip.setText("● Ready");
+            chip.setTextColor(getColor(R.color.aether_ok));
+            return;
+        }
+        if (FleetWarmup.isRunning()) {
+            chip.setText("◌ Getting ready · " + FleetWarmup.readyCount() + " of " + FleetWarmup.totalCount());
+            chip.setTextColor(getColor(R.color.aether_warn));
+            return;
+        }
+        if (cfg == null || cfg.engines.isEmpty()) {
+            chip.setText("○ Unavailable");
+            chip.setTextColor(getColor(R.color.aether_muted));
+            return;
+        }
         pollExec.execute(() -> {
-            if (cfg == null) return;
             List<EngineRouter.SlotState> states = pollStates();
-            EngineRouter.Decision d = EngineRouter.route(mode(), states);
+            EngineRouter.Decision d = EngineRouter.route(EngineRouter.AUTO, states);
             ui.post(() -> {
                 synchronized (lastStates) { lastStates.clear(); lastStates.addAll(states); }
                 if (d.ok()) {
-                    chip.setText("● " + d.slot.toUpperCase()
-                            + (EngineRouter.isAuto(mode()) ? " · auto" : ""));
+                    chip.setText("● Ready");
                     chip.setTextColor(getColor(R.color.aether_ok));
                 } else {
-                    String any = null;
-                    for (EngineRouter.SlotState s : states) {
-                        if (s.reason != null && s.reason.startsWith("booting")) { any = s.slot; break; }
+                    boolean waking = false;
+                    for (EngineRouter.SlotState state : states) {
+                        if (state.reason != null && state.reason.startsWith("booting")) { waking = true; break; }
                     }
-                    chip.setText(any != null ? "◌ " + any.toUpperCase() + " waking" : "○ off");
-                    chip.setTextColor(getColor(any != null ? R.color.aether_warn : R.color.aether_muted));
+                    chip.setText(waking ? "◌ Waking" : "○ Off");
+                    chip.setTextColor(getColor(waking ? R.color.aether_warn : R.color.aether_muted));
                 }
             });
         });
     }
 
     private String mode() {
-        return getSharedPreferences("aether_console", MODE_PRIVATE)
-                .getString("mode", EngineRouter.AUTO);
+        /* Individual fleet pinning is intentionally no longer a public choice. */
+        return EngineRouter.AUTO;
     }
 
     private List<EngineRouter.SlotState> pollStates() {
@@ -345,7 +490,7 @@ public class ChatActivity extends AppCompatActivity {
 
             String meta = when(m.updatedAt) + " · " + m.messageCount + " msg"
                     + (m.messageCount == 1 ? "" : "s")
-                    + (m.engine != null ? " · engine " + m.engine.toUpperCase(Locale.ROOT) : "");
+                    + (m.engine != null ? " · " + publicModelLabel(m.engine) : "");
             card.addView(Ui.meta(this, meta));
 
             card.setOnClickListener(v -> openChat(m.id));
@@ -419,7 +564,7 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void openChat(final String id) {
-        drawer.closeDrawer(Gravity.START);
+        drawer.closeDrawer(GravityCompat.START);
         storeExec.execute(() -> {
             final ChatSession s = store.load(id);
             ui.post(() -> {
@@ -432,13 +577,13 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void newChat() {
-        drawer.closeDrawer(Gravity.START);
+        drawer.closeDrawer(GravityCompat.START);
         if (current != null && current.messageCount() > 0) persist();
         current = null;
         staged.clear();
         renderStaged();
         msgList.removeAllViews();
-        headerSub.setText("chat, tools, search, commands");
+        headerSub.setText("Your private workspace");
         showEmptyState();
         input.requestFocus();
     }
@@ -471,14 +616,16 @@ public class ChatActivity extends AppCompatActivity {
                     addSources(b);
                 }
                 if (ChatMessage.STATUS_ERROR.equals(m.status)) {
-                    b.meta.setText("error" + (m.note != null ? " — " + m.note : ""));
+                    String restoredNote = m.engine != null && m.engine.startsWith("byok:")
+                            ? m.note : EngineRouter.publicError(m.note);
+                    b.meta.setText("error" + (restoredNote != null ? " — " + restoredNote : ""));
                     b.meta.setTextColor(getColor(R.color.aether_error));
                     b.meta.setVisibility(View.VISIBLE);
                 } else if (ChatMessage.STATUS_STOPPED.equals(m.status)) {
                     b.meta.setText("stopped" + (m.note != null ? " — " + m.note : ""));
                     b.meta.setVisibility(View.VISIBLE);
                 } else if (m.engine != null || !m.toolLines.isEmpty()) {
-                    b.meta.setText((m.engine != null ? "engine " + m.engine.toUpperCase(Locale.ROOT) : "Aether"));
+                    b.meta.setText(publicModelLabel(m.engine));
                     b.meta.setVisibility(View.VISIBLE);
                 }
                 attachMessageActions(b.contentZone, m);
@@ -491,12 +638,15 @@ public class ChatActivity extends AppCompatActivity {
 
     private void showEmptyState() {
         msgList.removeAllViews();
-        emptyView = Ui.centered(this,
-                "Ask Aether anything.\n\nIt can search the web, crawl pages, run commands "
-                + "and reason out loud.\n\nNo engine is live yet -- it wakes automatically "
-                + "when you send a message, or wake one ahead of time in Settings.",
-                14, Ui.DIM);
-        msgList.addView(emptyView);
+        emptyView = null;
+        if (welcomePanel != null) {
+            welcomePanel.setVisibility(View.VISIBLE);
+            if (AetherPrefs.animations(this)) {
+                welcomePanel.setAlpha(0f);
+                welcomePanel.setTranslationY(Ui.dp(this, 12));
+                welcomePanel.animate().alpha(1f).translationY(0f).setDuration(420).start();
+            }
+        }
     }
 
     private void clearEmpty() {
@@ -504,6 +654,7 @@ public class ChatActivity extends AppCompatActivity {
             msgList.removeView(emptyView);
             emptyView = null;
         }
+        if (welcomePanel != null) welcomePanel.setVisibility(View.GONE);
     }
 
     private void scrollBottom() {
@@ -735,59 +886,58 @@ public class ChatActivity extends AppCompatActivity {
         final LinearLayout card = new LinearLayout(ChatActivity.this);
         final LinearLayout list = new LinearLayout(ChatActivity.this);
         final View dot = new View(ChatActivity.this);
-        final TextView label = Ui.tv(ChatActivity.this, "", 12, Ui.DIM);
-        final TextView chevron = Ui.tv(ChatActivity.this, "", 10, Ui.DIM);
+        final TextView label = Ui.tv(ChatActivity.this, "", 13, Ui.DIM);
+        final TextView chevron = Ui.tv(ChatActivity.this, "", 13, Ui.DIM);
         final AgentActivity model = new AgentActivity();
-        /** How the task ended. Rendered under the steps when expanded. */
         String report;
-        private final AlphaAnimation pulse = new AlphaAnimation(1f, 0.22f);
+        private final AlphaAnimation pulse = new AlphaAnimation(1f, 0.28f);
         private boolean running;
         private boolean expanded;
 
         ActivityPanel() {
             card.setOrientation(LinearLayout.HORIZONTAL);
             card.setGravity(Gravity.CENTER_VERTICAL);
-            card.setBackgroundResource(R.drawable.bg_pill_ghost);
-            int px = Ui.dp(ChatActivity.this, 10), py = Ui.dp(ChatActivity.this, 6);
+            card.setBackgroundResource(R.drawable.bg_activity);
+            int px = Ui.dp(ChatActivity.this, 14), py = Ui.dp(ChatActivity.this, 12);
             card.setPadding(px, py, px, py);
-            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            clp.gravity = Gravity.START;
-            card.setLayoutParams(clp);
+            card.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             card.setVisibility(View.GONE);
 
             LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
-                    Ui.dp(ChatActivity.this, 7), Ui.dp(ChatActivity.this, 7));
-            dlp.rightMargin = Ui.dp(ChatActivity.this, 7);
+                    Ui.dp(ChatActivity.this, 9), Ui.dp(ChatActivity.this, 9));
+            dlp.rightMargin = Ui.dp(ChatActivity.this, 10);
             dot.setBackgroundResource(R.drawable.bg_dot_accent);
             dot.setLayoutParams(dlp);
             card.addView(dot);
-            card.addView(label, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            LinearLayout.LayoutParams chlp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            chlp.leftMargin = Ui.dp(ChatActivity.this, 6);
-            card.addView(chevron, chlp);
+            label.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            label.setMaxLines(2);
+            card.addView(label, new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            chevron.setPadding(Ui.dp(ChatActivity.this, 10), 0, 0, 0);
+            card.addView(chevron);
             card.setOnClickListener(v -> toggle());
 
             list.setOrientation(LinearLayout.VERTICAL);
             list.setVisibility(View.GONE);
             LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            llp.topMargin = Ui.dp(ChatActivity.this, 4);
+            llp.topMargin = Ui.dp(ChatActivity.this, 6);
             list.setLayoutParams(llp);
 
-            pulse.setDuration(760);
+            pulse.setDuration(620);
             pulse.setRepeatCount(AlphaAnimation.INFINITE);
             pulse.setRepeatMode(AlphaAnimation.REVERSE);
         }
 
-        /** One raw engine event. Returns false when it must not be shown. */
         boolean event(String raw) {
             if (!model.feed(raw)) return false;
             running = true;
-            card.setVisibility(View.VISIBLE);
-            if (dot.getAnimation() == null) dot.startAnimation(pulse);
+            if (model.hasSteps() && AetherPrefs.showActivity(ChatActivity.this)) expanded = true;
+            card.setVisibility(AetherPrefs.showActivity(ChatActivity.this) ? View.VISIBLE : View.GONE);
+            if (AetherPrefs.animations(ChatActivity.this) && dot.getAnimation() == null) {
+                dot.startAnimation(pulse);
+            }
             render();
             return true;
         }
@@ -797,70 +947,126 @@ public class ChatActivity extends AppCompatActivity {
         void finish() {
             model.finish();
             running = false;
-            dot.clearAnimation();          // nothing may animate on a finished turn
+            expanded = false;
+            dot.clearAnimation();
+            dot.setAlpha(1f);
             render();
         }
 
         void toggle() {
-            if (!model.hasSteps()) return;
+            if (!model.hasSteps() && (report == null || report.isEmpty())) return;
             expanded = !expanded;
             render();
         }
 
         private void render() {
+            if (!AetherPrefs.showActivity(ChatActivity.this)) {
+                card.setVisibility(View.GONE);
+                list.setVisibility(View.GONE);
+                return;
+            }
             String text;
             if (running) {
                 AgentActivity.Step open = model.open();
                 text = open != null && !open.detail.isEmpty()
-                        ? open.label + " \u00b7 " + open.detail : model.labelNow();
+                        ? open.label + " · " + open.detail : model.labelNow();
             } else {
                 text = model.summary();
+                if (text.isEmpty() && report != null && !report.isEmpty()) text = "View task summary";
             }
             label.setText(text);
             label.setTextColor(getColor(running ? Ui.ACCENT : Ui.DIM));
             boolean detail = model.hasSteps() || (report != null && !report.isEmpty());
-            chevron.setText(detail ? (expanded ? "\u25be" : "\u25b8") : "");
+            chevron.setText(detail ? (expanded ? "⌃" : "⌄") : "");
             chevron.setVisibility(detail ? View.VISIBLE : View.GONE);
             card.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
             boolean show = expanded && detail;
             list.setVisibility(show ? View.VISIBLE : View.GONE);
-            if (show) renderList();
+            if (show) {
+                renderList();
+                if (AetherPrefs.animations(ChatActivity.this) && list.getAlpha() < 1f) {
+                    list.animate().alpha(1f).translationY(0f).setDuration(180).start();
+                }
+            }
         }
 
         private void renderList() {
             list.removeAllViews();
             for (AgentActivity.Step st : model.steps()) {
-                StringBuilder line = new StringBuilder(st.done ? "\u2713  " : "\u2022  ");
-                line.append(st.label);
-                if (!st.detail.isEmpty()) line.append(" \u00b7 ").append(st.detail);
+                LinearLayout row = new LinearLayout(ChatActivity.this);
+                row.setOrientation(LinearLayout.VERTICAL);
+                row.setBackgroundResource(R.drawable.bg_settings_row);
+                row.setPadding(Ui.dp(ChatActivity.this, 13), Ui.dp(ChatActivity.this, 10),
+                        Ui.dp(ChatActivity.this, 13), Ui.dp(ChatActivity.this, 10));
+                LinearLayout top = new LinearLayout(ChatActivity.this);
+                top.setGravity(Gravity.CENTER_VERTICAL);
+                TextView state = Ui.tv(ChatActivity.this, st.done ? "✓" : "◌", 14,
+                        st.done ? Ui.OK : Ui.ACCENT);
+                top.addView(state);
+                TextView name = Ui.tv(ChatActivity.this, iconFor(st.tool) + "  " + st.label, 12, Ui.PRIMARY);
+                name.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                name.setPadding(Ui.dp(ChatActivity.this, 9), 0, 0, 0);
+                top.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
                 if (st.done && st.durationMs > 0) {
-                    line.append(" \u00b7 ").append(st.durationMs < 1000
-                            ? st.durationMs + "ms" : (st.durationMs / 1000) + "s");
+                    top.addView(Ui.meta(ChatActivity.this, st.durationMs < 1000
+                            ? st.durationMs + "ms" : (st.durationMs / 1000) + "s"));
                 }
-                TextView row = Ui.tv(ChatActivity.this, line.toString(), 11, Ui.DIM);
+                row.addView(top);
+                if (!st.detail.isEmpty()) {
+                    TextView detail = Ui.tv(ChatActivity.this, st.detail, 12, Ui.DIM);
+                    detail.setPadding(Ui.dp(ChatActivity.this, 23), Ui.dp(ChatActivity.this, 4), 0, 0);
+                    row.addView(detail);
+                }
+                if (st.source != null && !st.source.isEmpty()) {
+                    TextView site = Ui.tv(ChatActivity.this, "↗  " + st.source, 11, Ui.ACCENT);
+                    site.setPadding(Ui.dp(ChatActivity.this, 23), Ui.dp(ChatActivity.this, 7), 0, 0);
+                    site.setMaxLines(2);
+                    site.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+                    site.setOnClickListener(v -> openSource(st.source));
+                    row.addView(site);
+                }
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                lp.topMargin = Ui.dp(ChatActivity.this, 2);
-                lp.leftMargin = Ui.dp(ChatActivity.this, 12);
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp.topMargin = Ui.dp(ChatActivity.this, 5);
                 list.addView(row, lp);
             }
-            /* How the task actually ended: what was done, what was verified,
-               what failed and what is left. This is the report the user is owed
-               at the end of a task, kept in the same collapsible strip as the
-               steps so it never competes with the answer. */
             if (report != null && !report.isEmpty()) {
-                for (String line : report.split("\n")) {
-                    if (line.trim().isEmpty()) continue;
-                    TextView rr = Ui.tv(ChatActivity.this, line.trim(), 11, Ui.DIM);
-                    LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT);
-                    rlp.topMargin = Ui.dp(ChatActivity.this, 2);
-                    rlp.leftMargin = Ui.dp(ChatActivity.this, 12);
-                    list.addView(rr, rlp);
+                TextView heading = Ui.tv(ChatActivity.this, "TASK SUMMARY", 10, Ui.DIM);
+                heading.setLetterSpacing(.1f);
+                heading.setPadding(Ui.dp(ChatActivity.this, 4), Ui.dp(ChatActivity.this, 14), 0,
+                        Ui.dp(ChatActivity.this, 5));
+                list.addView(heading);
+                for (String rawLine : report.split("\n")) {
+                    if (rawLine.trim().isEmpty()) continue;
+                    TextView rr = Ui.tv(ChatActivity.this, humanReportLine(rawLine.trim()), 11, Ui.DIM);
+                    rr.setPadding(Ui.dp(ChatActivity.this, 12), Ui.dp(ChatActivity.this, 2), 0, 0);
+                    list.addView(rr);
                 }
             }
         }
+
+        private String iconFor(String tool) {
+            if ("web_search".equals(tool)) return "⌕";
+            if ("fetch_page".equals(tool) || "crawl_site".equals(tool) || "browser".equals(tool)) return "↗";
+            if ("run_command".equals(tool)) return "›";
+            if ("generate_image".equals(tool) || "generate_voice".equals(tool)) return "✦";
+            return "•";
+        }
+
+        private String humanReportLine(String line) {
+            return line.replace("State: COMPLETED", "Status: Finished")
+                    .replace("State: FAILED", "Status: Needs attention")
+                    .replace("State: CANCELLED", "Status: Stopped")
+                    .replace("EXECUTING", "In progress")
+                    .replace("NOT FINISHED.", "Not finished.")
+                    .replace("FAILED", "Needs attention")
+                    .replace("RUNNING", "In progress");
+        }
+    }
+
+    private void openSource(String url) {
+        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); }
+        catch (Exception e) { toast("No app is available to open this source."); }
     }
 
     /** A notice from the app rather than the agent -- an engine waking, say. */
@@ -970,19 +1176,18 @@ public class ChatActivity extends AppCompatActivity {
         for (final String u : urls) {
             if (n++ >= 4) break;
             String host = AgentActivity.host(u);
-            TextView row = Ui.tv(this, "\u2197  " + host, 11, Ui.ACCENT);
-            row.setBackgroundResource(R.drawable.bg_source);
-            row.setPadding(Ui.dp(this, 10), Ui.dp(this, 6), Ui.dp(this, 10), Ui.dp(this, 6));
-            row.setOnClickListener(v -> {
-                try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(u))); }
-                catch (Exception ignored) { }
-            });
+            TextView row = Ui.tv(this, "↗  " + host + "\n" + u, 11, Ui.ACCENT);
+            row.setBackgroundResource(R.drawable.bg_settings_row);
+            row.setPadding(Ui.dp(this, 13), Ui.dp(this, 10), Ui.dp(this, 13), Ui.dp(this, 10));
+            row.setMaxLines(3);
+            row.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+            row.setOnClickListener(v -> openSource(u));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.topMargin = Ui.dp(this, 4);
             b.sources.addView(row, lp);
         }
-        b.sources.setVisibility(View.VISIBLE);
+        b.sources.setVisibility(AetherPrefs.expandSources(this) ? View.VISIBLE : View.GONE);
     }
 
     // ------------------------------------------------- generated media
@@ -1446,65 +1651,98 @@ public class ChatActivity extends AppCompatActivity {
         final List<EngineCore.Msg> history = historyFor(userMsg, model);
 
         bg.execute(() -> {
-            /* Reuse the engine that just answered unless it has gone stale. */
-            EngineRouter.Decision d = cachedDecision();
-            if (d == null) d = EngineRouter.route(mode(), pollStates());
-
-            if (!d.ok()) {
-                /* Nothing live: wake the routed candidate rather than failing. */
-                String slot = EngineRouter.isAuto(mode()) ? "a" : EngineRouter.canonical(mode());
-                EngineCore.Engine e = cfg.bySlot(slot);
-                if (e == null) {
-                    ui.post(() -> { setStreaming(false); markError(model, "no engines configured");
-                        onError("No engines are configured.", prompt); persist(); });
-                    return;
-                }
-                ui.post(() -> pushNotice(b, "Engine " + e.slot.toUpperCase(Locale.ROOT)
-                        + " is off \u2014 waking it now. This takes a few minutes; your message"
-                        + " will send once it is live."));
-                /* Release whatever is still running for this engine first.
-                   Kaggle leaves the previous version alive, and a second live
-                   session is what makes the next push come back refused. */
-                EngineCore.releasePrevious(e, cfg.offKey, cfg.beaconTopic,
-                        cfg.beaconSecret, 3600, 20_000);
+            if (ModelPrefs.BYOK.equals(ModelPrefs.kind(this))) {
+                final String connectionId = ModelPrefs.connectionId(this);
                 try {
-                    EngineCore.kernelPush(e, Credentials.renderNotebook(
-                            Credentials.notebookTemplate(ChatActivity.this), cfg, e.slot),
-                            EngineCore.KERNEL_TITLE, true, 120_000);
-                } catch (Exception ex) {
-                    ui.post(() -> { setStreaming(false);
-                        markError(model, ex.getMessage());
-                        onError("Could not wake engine " + e.slot.toUpperCase() + ": "
-                                + ex.getMessage(), prompt); persist(); });
-                    return;
+                    ByokClient.Connection connection = byokStore.withKey(connectionId);
+                    if (connection == null || !connection.enabled) {
+                        throw new Exception("The selected personal provider is unavailable. Choose another model or reconnect it in Settings.");
+                    }
+                    final String selectedModel = ModelPrefs.model(this).isEmpty()
+                            ? connection.defaultModel : ModelPrefs.model(this);
+                    model.engine = "byok:" + connection.id + ":" + selectedModel;
+                    streamByok(connection, selectedModel, wire, prompt, b, history, discussionMode);
+                } catch (Exception e) {
+                    final String message = e.getMessage() == null
+                            ? "The selected personal provider is unavailable." : e.getMessage();
+                    ui.post(() -> {
+                        setStreaming(false);
+                        markError(model, message);
+                        onError(message, prompt);
+                        persist();
+                    });
                 }
-                /* Wait for it to become live, then stream. */
-                String url = null;
-                for (int i = 0; i < 150 && url == null; i++) {
-                    try { Thread.sleep(4000); } catch (InterruptedException ie) { return; }
-                    try {
-                        url = EngineCore.currentLinkFor(cfg.beaconTopic, cfg.beaconSecret,
-                                e.slot, 20 * 60, 20_000);
-                    } catch (Exception ignored) { }
-                    ui.post(this::refreshChip);
-                }
-                if (url == null) {
-                    ui.post(() -> { setStreaming(false);
-                        markError(model, "engine did not come live in time");
-                        onError("Engine " + e.slot.toUpperCase()
-                                + " did not come live in time. Try again shortly.", prompt); persist(); });
-                    return;
-                }
-                model.engine = e.slot;
-                remember(e.slot, url);
-                streamWithFailover(url, wire, prompt, b, true, history);
                 return;
             }
 
-            model.engine = d.slot;
-            remember(d.slot, d.url);
-            streamWithFailover(d.url, wire, prompt, b, true, history);
+            if (cfg == null || cfg.engines.isEmpty()) {
+                ui.post(() -> {
+                    setStreaming(false);
+                    markError(model, "fleet credentials are not configured in this build");
+                    onError("Aether Uncensored is not configured in this build. Add a personal provider in Settings or install a fleet-enabled build.", prompt);
+                    persist();
+                });
+                return;
+            }
+
+            /* Reuse the last fleet URL briefly, but always within AUTO routing. */
+            EngineRouter.Decision d = FleetWarmup.readyDecision();
+            if (d == null) d = cachedDecision();
+            if (d == null) d = EngineRouter.route(EngineRouter.AUTO, pollStates());
+            if (d.ok()) {
+                model.engine = d.slot;
+                remember(d.slot, d.url);
+                List<String> attempted = new ArrayList<>();
+                attempted.add(d.slot);
+                streamWithFailover(d.url, wire, prompt, b, attempted, history, discussionMode);
+                return;
+            }
+
+            /* Nothing is live yet. All configured routes are already waking in
+               parallel; wait on that shared work instead of pushing a duplicate. */
+            FleetWarmup.isRunning();
+            FleetWarmup.warmAll(getApplicationContext());
+            EngineRouter.Decision warmed = FleetWarmup.awaitReady(10 * 60_000L);
+            if (warmed != null) {
+                model.engine = warmed.slot;
+                remember(warmed.slot, warmed.url);
+                List<String> attempted = new ArrayList<>();
+                attempted.add(warmed.slot);
+                streamWithFailover(warmed.url, wire, prompt, b, attempted, history, discussionMode);
+                return;
+            }
+
+            final String failure = "No built-in route became ready. Check your connection and quota, then try again.";
+            ui.post(() -> {
+                setStreaming(false);
+                markError(model, failure);
+                onError(failure, prompt);
+                persist();
+            });
         });
+    }
+
+    /** One direct personal-provider turn. Cross-provider failover is not implicit. */
+    private void streamByok(ByokClient.Connection connection, String selectedModel,
+                            String wire, String prompt, AssistantBubble b,
+                            List<EngineCore.Msg> history, boolean discussion) {
+        final boolean[] cancel = new boolean[] {false};
+        cancelFlag = cancel;
+        b.reqShape = describeRequest(history, wire);
+        final long started = System.currentTimeMillis();
+        ByokClient.ChatOptions options = AgentSettings.load(this);
+        options.instructions = discussion ? AetherPrefs.discussionInstructions(this) : AetherPrefs.instructions(this);
+        ByokClient.chat(connection, selectedModel, history, wire, options, cancel,
+                new EngineCore.ChatListener() {
+                    @Override public void onThinking(String text) { }
+                    @Override public void onContent(String text) {
+                        b.raw.append(text);
+                        ui.post(() -> renderAnswer(b, false));
+                    }
+                    @Override public void onDone(boolean ok, String error) {
+                        finalizeTurn(b, prompt, ok, error, System.currentTimeMillis() - started);
+                    }
+                }, turn);
     }
 
     /** The cached engine, if it was live recently and the mode has not changed. */
@@ -1526,6 +1764,7 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void forget() {
+        if (cachedSlot != null) FleetWarmup.invalidate(cachedSlot);
         cachedUrl = null;
         cachedSlot = null;
         cachedAt = 0L;
@@ -1581,8 +1820,8 @@ public class ChatActivity extends AppCompatActivity {
      * retried on another slot rather than reported as an error.
      */
     private void streamWithFailover(final String url, final String wire, final String prompt,
-                                    final AssistantBubble b, final boolean allowFailover,
-                                    final List<EngineCore.Msg> history) {
+                                    final AssistantBubble b, final List<String> attempted,
+                                    final List<EngineCore.Msg> history, final boolean discussion) {
         final boolean[] cancel = new boolean[] {false};
         cancelFlag = cancel;
         /* Captured here because history and wire are only in scope in this
@@ -1593,8 +1832,9 @@ public class ChatActivity extends AppCompatActivity {
         final String[] err = new String[] {null};
         final AtomicBoolean recorded = new AtomicBoolean(false);
 
-        EngineCore.chatStream(url, cfg.offKey, history, wire, "", cancel,
-                new EngineCore.ChatListener() {
+        EngineCore.chatStream(url, cfg.offKey, history, wire,
+                discussion ? AetherPrefs.discussionInstructions(this) : AetherPrefs.instructions(this),
+                discussion, cancel, new EngineCore.ChatListener() {
                     @Override public void onThinking(String t) {
                         ui.post(() -> {
                             /* Only real operational events are shown or saved.
@@ -1636,7 +1876,7 @@ public class ChatActivity extends AppCompatActivity {
         boolean cancelled = "cancelled".equals(err[0]);
 
         /* The engine let go on its own -- the tunnel died or the kernel went
-           away. Try the next engine in A -> B -> C rather than making the user
+           away. Try every untried fleet route in A -> B -> C -> D rather than making the user
            press send again.
 
            This used to require b.raw.length() == 0, so failover only happened
@@ -1645,14 +1885,15 @@ public class ChatActivity extends AppCompatActivity {
            "silently stops after partial work" failure. A partial answer is now
            continued by the next engine rather than abandoned. */
         final int partial = b.raw.length();
-        if (!ok[0] && !cancelled && !userStopped && allowFailover) {
+        if (!ok[0] && !cancelled && !userStopped && attempted.size() < EngineRouter.order().length) {
             final String from = cachedSlot == null ? "?" : cachedSlot;
-            final String reason = err[0];
-            EngineRouter.Decision next = EngineRouter.failoverFrom(from, pollStates());
+            final String reason = EngineRouter.publicError(err[0]);
+            java.util.Set<String> tried = new java.util.HashSet<>(attempted);
+            EngineRouter.Decision next = EngineRouter.failoverFrom(from, pollStates(), tried);
             if (next.ok()) {
-                ui.post(() -> pushNotice(b, "Engine " + from.toUpperCase(Locale.ROOT)
-                        + " dropped (" + reason + ") after " + partial + " chars \u2014 "
-                        + next.slot.toUpperCase(Locale.ROOT) + " is continuing the same task"));
+                ui.post(() -> pushNotice(b, "The fleet connection dropped (" + reason + ") after "
+                        + partial + " chars — " + ModelPrefs.AETHER_LABEL
+                        + " is continuing the same task with automatic fallback."));
                 forget();
                 remember(next.slot, next.url);
                 if (b.model != null) b.model.engine = next.slot;
@@ -1668,7 +1909,8 @@ public class ChatActivity extends AppCompatActivity {
                     carry = current.task.continuationPrompt(
                             wire, b.raw.toString(), next.slot);
                 }
-                streamWithFailover(next.url, carry, prompt, b, false, history);
+                attempted.add(next.slot);
+                streamWithFailover(next.url, carry, prompt, b, attempted, history, discussion);
                 return;
             }
         }
@@ -1729,11 +1971,15 @@ public class ChatActivity extends AppCompatActivity {
                look like it had silently stopped. Whatever the turn really
                produced is recorded here: a stop is CANCELLED, a failure is
                FAILED, and success is only claimed once something was verified. */
+            boolean byokTurn = b.model != null && b.model.engine != null
+                    && b.model.engine.startsWith("byok:");
+            String displayError = byokTurn ? (err == null ? "Provider request failed." : err)
+                    : EngineRouter.publicError(err);
             if (current != null && current.task != null) {
                 TaskTracker.mirror(current.task, b.activity.model);
                 current.task.engine = b.model != null && b.model.engine != null
                         ? b.model.engine : current.engine;
-                TaskTracker.close(current.task, ok, err,
+                TaskTracker.close(current.task, ok, displayError,
                         TextNormalizer.normalize(b.raw.toString()), ms);
                 /* Only worth showing when the task actually did something: a
                    plain chat answer needs no report, and adding one to every
@@ -1754,14 +2000,15 @@ public class ChatActivity extends AppCompatActivity {
                 b.meta.setVisibility(View.VISIBLE);
             } else if (!ok) {
                 forget();     // a failed engine must not be reused next message
-                if (b.model != null) markError(b.model, err);
+                boolean byok = byokTurn;
+                String publicError = displayError;
+                if (b.model != null) markError(b.model, publicError);
                 telemetry("chat FAILED on engine " + engineOf(b) + " after " + (ms / 1000)
                         + "s: " + err + " | sent " + b.reqShape);
-                onError("Engine error: " + err, prompt);
+                onError((byok ? "Provider error: " : ModelPrefs.AETHER_LABEL + " error: ") + publicError, prompt);
             } else {
                 if (b.model != null) b.model.status = ChatMessage.STATUS_OK;
-                String who = b.model != null && b.model.engine != null
-                        ? "engine " + b.model.engine.toUpperCase(Locale.ROOT) : "Aether";
+                String who = publicModelLabel(b.model == null ? null : b.model.engine);
                 b.meta.setText(who + " · " + (ms / 1000) + "s");
                 b.meta.setVisibility(View.VISIBLE);
                 if (!reportedFirstStream) {
@@ -1774,6 +2021,26 @@ public class ChatActivity extends AppCompatActivity {
             persist();
             refreshChip();
         });
+    }
+
+    /** Public transcript metadata; internal slots never cross this boundary. */
+    private String publicModelLabel(String internal) {
+        if (internal == null && ModelPrefs.BYOK.equals(ModelPrefs.kind(this))) {
+            ByokClient.Connection selected = byokStore.find(ModelPrefs.connectionId(this));
+            if (selected != null) {
+                String model = ModelPrefs.model(this);
+                return selected.name + " · " + (model.isEmpty() ? selected.defaultModel : model);
+            }
+        }
+        if (internal != null && internal.startsWith("byok:")) {
+            String[] parts = internal.split(":", 3);
+            if (parts.length == 3) {
+                ByokClient.Connection c = byokStore.find(parts[1]);
+                return (c == null ? "Personal provider" : c.name) + " · " + parts[2];
+            }
+            return "Personal provider";
+        }
+        return ModelPrefs.AETHER_LABEL;
     }
 
     private static String engineOf(AssistantBubble b) {
@@ -1854,8 +2121,7 @@ public class ChatActivity extends AppCompatActivity {
             AssistantBubble b = liveBubble;
             if (b == null || cancelFlag == null) return;
             long secs = (System.currentTimeMillis() - turnStart) / 1000;
-            String who = b.model != null && b.model.engine != null
-                    ? "engine " + b.model.engine.toUpperCase(Locale.ROOT) : "Aether";
+            String who = publicModelLabel(b.model == null ? null : b.model.engine);
             b.meta.setText(who + " · " + secs + "s · streaming…");
             b.meta.setVisibility(View.VISIBLE);
             ui.postDelayed(this, 1000);

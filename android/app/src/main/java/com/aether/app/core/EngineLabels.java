@@ -76,6 +76,15 @@ public final class EngineLabels {
         return sb.toString();
     }
 
+    /** Public model identity; internal fleet slots are deliberately not exposed. */
+    public static String publicModel(String internal) {
+        if (internal != null && internal.startsWith("byok:")) {
+            String[] parts = internal.split(":", 3);
+            return parts.length == 3 ? "Personal provider · " + parts[2] : "Personal provider";
+        }
+        return "Aether Uncensored";
+    }
+
     /**
      * A model id people can read. The engines report a Hugging Face repo path
      * with a quant tag, which is not something to show on a phone screen.

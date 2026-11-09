@@ -43,7 +43,7 @@ mkdir -p "$OUT"
 # covered by gradle :app:compileDebugJavaWithJavac instead.
 SRC="$REPO/android/app/src/main/java/com/aether/app"
 javac -encoding UTF-8 -nowarn -cp "$JSON_JAR" -d "$OUT" \
-  "$SRC/EngineCore.java" "$SRC/EngineRouter.java" \
+  "$SRC/EngineCore.java" "$SRC/EngineRouter.java" "$SRC/ByokClient.java" "$SRC/WarmupCoordinator.java" \
   $(find "$SRC/core" -name '*.java') \
   $(find "$REPO/scripts/proofs" -name '*.java') 2>&1 | grep -E "error:" && {
     echo "COMPILE FAILED"; exit 1; }
@@ -58,6 +58,10 @@ PROOFS=(
   "ExecutorProof"
   "ChatCoreCheck"
   "RouterCheck"
+  "ByokClientProof"
+  "WarmupCoordinatorProof"
+  "DiscussionModeProof"
+  "AndroidProductProof"
   "AnswerBlocksCheck"
   "AgentActivityCheck|$FIXTURE"
   "StatusProof|$REPO/android/credentials.properties $REPO/android/app/src/main/assets/aether-notebook-template.json"

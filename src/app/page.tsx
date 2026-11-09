@@ -59,7 +59,12 @@ export default function AetherWorkspace() {
   const showErrorBanner = aether.lastError !== null && dismissedError !== aether.lastError;
 
   return (
-    <div id="root-shell" className="flex h-dvh overflow-hidden bg-ink-900 text-fog-100">
+    <div
+      id="root-shell"
+      data-motion={aether.settings.reduceMotion ? "reduced" : "full"}
+      data-density={aether.settings.compactMode ? "compact" : "comfortable"}
+      className="flex h-dvh overflow-hidden bg-ink-900 text-fog-100"
+    >
       {/* sidebar — static on desktop, drawer on mobile */}
       <aside
         className={cn(
@@ -133,6 +138,7 @@ export default function AetherWorkspace() {
               conversation={aether.activeConversation}
               view={aether.view}
               online={online}
+              modelKind={aether.settings.model.kind}
               tasksActive={
                 aether.liveTask !== null &&
                 aether.liveTask.status !== "completed" &&
@@ -211,6 +217,9 @@ export default function AetherWorkspace() {
                 onSend={(text, attachments) => void aether.send(text, attachments)}
                 onStop={aether.stop}
                 onCommand={aether.handleCommand}
+                settings={aether.settings}
+                onUpdateSettings={(patch) => void aether.updateSettings(patch)}
+                onOpenSettings={() => setSettingsOpen(true)}
               />
             ) : null}
           </>
@@ -231,8 +240,8 @@ export default function AetherWorkspace() {
           busy={aether.streaming}
           onClose={() => setSettingsOpen(false)}
           onUpdate={(patch) => void aether.updateSettings(patch)}
-          onExport={() => void aether.exportData()}
-          onWipe={() => void aether.wipeData()}
+          onExport={() => aether.exportData()}
+          onWipe={() => aether.wipeData()}
         />
       ) : null}
 

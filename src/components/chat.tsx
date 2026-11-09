@@ -17,6 +17,7 @@ export function ChatHeader({
   conversation,
   view,
   online,
+  modelKind,
   tasksActive,
   onRename,
   onMenu,
@@ -25,6 +26,7 @@ export function ChatHeader({
   conversation: Conversation | null;
   view: "chat" | "workspace";
   online: boolean;
+  modelKind: "aether" | "byok";
   tasksActive: boolean;
   onRename: (id: string, title: string) => void;
   onMenu: () => void;
@@ -32,7 +34,7 @@ export function ChatHeader({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const engineStatus = useEngineStatus(online);
+  const engineStatus = useEngineStatus(online && modelKind === "aether");
   const [powerBusy, setPowerBusy] = useState(false);
   /* Wake-in-progress. Persists for the full boot (~10 min) — driven by the
    * server's wake-in-flight tracking, not a short local timer. The previous
@@ -74,7 +76,7 @@ export function ChatHeader({
       void engineOff()
         .then((result) => {
           const anyShutdown = result.killed?.some((k) => k.result === "shutdown");
-          toast(result.message ?? (anyShutdown ? "Engines shut down." : "No running engines."), anyShutdown ? "ok" : "info");
+          toast(result.message ?? (anyShutdown ? "Aether Uncensored shut down." : "Aether Uncensored is already off."), anyShutdown ? "ok" : "info");
         })
         .catch(() => toast("Engine power action failed.", "danger"))
         .finally(() => setPowerBusy(false));
@@ -112,7 +114,7 @@ export function ChatHeader({
           );
         } else {
           setWakeRequested(false);
-          toast(result.message ?? "Engine could not be woken.", "danger");
+          toast(result.message ?? "Aether Uncensored could not be woken.", "danger");
         }
       })
       .catch(() => {
@@ -184,20 +186,24 @@ export function ChatHeader({
         {tasksActive ? <span className="anim-pulse absolute right-1 top-1 size-1.5 rounded-full bg-ember-400" /> : null}
       </button>
 
-      {/* Engine power control: shows the ACTUALLY-LIVE engine state (confirmed
-          by /api/ps) — never a stale beacon read. Click to wake / shut down. */}
+      {/* Built-in power control is irrelevant while a personal provider is active. */}
+      {modelKind === "byok" ? (
+        <span className="shrink-0 rounded-full border border-line bg-ink-850 px-2.5 py-1 text-[11px] font-medium text-fog-400" title="The selected personal provider is configured in Settings">
+          Personal provider
+        </span>
+      ) : (
       <button
         type="button"
         onClick={togglePower}
         disabled={powerBusy || !online}
         title={
           engineLive
-            ? "Engine is live — click to shut down"
+            ? "Aether Uncensored is live — click to shut down"
             : engineWaking
-              ? "Engine is waking up…"
-              : "Engine is off — click to wake"
+              ? "Aether Uncensored is waking up…"
+              : "Aether Uncensored is off — click to wake"
         }
-        aria-label={engineLive ? "Shut down engine" : engineWaking ? "Engine waking" : "Wake engine"}
+        aria-label={engineLive ? "Shut down Aether Uncensored" : engineWaking ? "Aether Uncensored waking" : "Wake Aether Uncensored"}
         className={cn(
           "flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
           !online && "cursor-not-allowed border-line bg-ink-850 text-fog-600",
@@ -223,15 +229,16 @@ export function ChatHeader({
             : powerBusy
               ? "Working…"
               : engineLive
-                ? "Engine live"
+                ? "Aether Uncensored live"
                 : engineWaking
                   ? "Waking…"
-                  : "Engine off"}
+                  : "Aether Uncensored off"}
         </span>
         <span className="sm:hidden">
           {!online ? "Off" : powerBusy ? "…" : engineLive ? "Live" : engineWaking ? "…" : "Off"}
         </span>
       </button>
+      )}
     </header>
   );
 }

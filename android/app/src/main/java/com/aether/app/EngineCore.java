@@ -1075,12 +1075,20 @@ public final class EngineCore {
     public static void chatStream(String url, String offKey, List<Msg> history, String prompt,
                                   String system, boolean[] cancelledFlag, ChatListener listener,
                                   StreamPolicy p, TurnHandle handle) {
+        chatStream(url, offKey, history, prompt, system, false, cancelledFlag, listener, p, handle);
+    }
+
+    /** Discussion is an explicit engine contract: true removes tool calling for this turn. */
+    public static void chatStream(String url, String offKey, List<Msg> history, String prompt,
+                                  String system, boolean discussion, boolean[] cancelledFlag,
+                                  ChatListener listener, StreamPolicy p, TurnHandle handle) {
         HttpURLConnection c = null;
         final boolean[] fired = new boolean[] {false};
         final long t0 = System.currentTimeMillis();
         try {
             JSONObject body = new JSONObject();
             body.put("stream", true);
+            if (discussion) body.put("discussion", true);
             JSONArray msgs = new JSONArray();
             /* No "role":"system" wrapper object -- the engine's contract does not
                use one. System text rides as a leading user message. */

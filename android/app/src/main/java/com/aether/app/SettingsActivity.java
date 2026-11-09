@@ -1,384 +1,607 @@
 package com.aether.app;
 
+import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.activity.OnBackPressedCallback;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.aether.app.core.EngineLabels;
+import com.aether.app.core.ChatSession;
+import com.aether.app.core.ChatStore;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Engine selection, status, wake and shutdown live here -- deliberately NOT on
- * the main chat screen, which stays focused on conversation.
- *
- * ROUTING. AUTO or a manual A / B / C pin, chosen as a row. Selection and LIVE
- * state stay separate (EngineRouter): pinning B shows B as off when it is off,
- * and AUTO is free to move.
- *
- * WHAT "LIVE" MEANS. A beacon URL attributed to the slot AND /api/ps 200 with a
- * non-empty models[]. "Booting" is shown while the kernel runs but the model is
- * not warm, so the user is never told an engine is ready when it cannot answer.
- *
- * POLLING. One loop guarded by a generation counter; one beacon fetch per cycle
- * shared by all three slots; Kaggle consulted only for engines with no live URL.
- *
- * SHUT-DOWN asks before it acts, reports the outcome in the note under the
- * cards, and confirms each engine individually via confirmedDown() before it is
- * called OFF -- rather than reporting a sweep it did not verify. The button is
- * enabled in every state: when there is no tunnel URL to reach, the result line
- * says so instead of the control appearing dead.
- */
+/** Settings overview plus focused subscreens, following Android's list/subscreen pattern. */
 public class SettingsActivity extends AppCompatActivity {
+    private ByokStore store;
+    private LinearLayout providerRows;
+    private EditText instructions;
+    private EditText temperature;
+    private EditText maxTokens;
+    private EditText timeoutSeconds;
+    private android.widget.Switch streamResponses;
+    private FrameLayout content;
+    private TextView screenTitle;
+    private TextView screenSubtitle;
+    private LinearLayout homeRows;
+    private EditText search;
+    private String section = "home";
+    private final ExecutorService bg = Executors.newCachedThreadPool();
+    private ActivityResultLauncher<String> exportChats;
+    private ActivityResultLauncher<String> exportConcern;
 
-    private static final int POLL_MS = 15_000;
-    /** While a wake or a shutdown is in flight: the user is watching a change. */
-    private static final int FAST_POLL_MS = 4_000;
-    private static final int BEACON_LOOKBACK_S = 3 * 3600;
-    private static final long WAKE_WATCH_MS = 15 * 60_000L;
-
-    private Credentials.Config cfg;
-    private LinearLayout routingRows;
-    private LinearLayout engineRows;
-    private TextView note;
-    private Button offAll;
-
-    private final Map<String, View> rowViews = new ConcurrentHashMap<>();
-    private final Map<String, TextView> routingTexts = new ConcurrentHashMap<>();
-    /** Only tunnels that answered /api/ps 200. Cleared the moment one fails. */
-    private final Map<String, String> liveUrls = new ConcurrentHashMap<>();
-    /** Last tunnel seen for a slot, kept only until a health check disproves it. */
-    private final Map<String, String> tunnels = new ConcurrentHashMap<>();
-    /**
-     * Per-engine truth. Each slot carries its own phase, its own evidence and
-     * the time /api/ps was last actually checked -- they are never derived from
-     * each other, and "selected" in the routing list is not one of them.
-     */
-    private final Map<String, EngineCore.EngineState> states = new ConcurrentHashMap<>();
-    /**
-     * An action the user just triggered, consumed by the next classification.
-     * This is the only thing that may produce ERROR or QUOTA, which is what
-     * keeps a stale tunnel from being reported as a failure.
-     */
-    private final Map<String, EngineCore.Action> pendingActions = new ConcurrentHashMap<>();
-    /**
-     * When a shutdown was confirmed by watching /api/ps stop answering, per
-     * slot. Kaggle's kernel status lags behind that measurement, so this is what
-     * keeps a confirmed OFF from flipping back to WAKING on the next poll. It is
-     * cleared the moment an engine answers 200 again, so a revived engine is
-     * never hidden by it.
-     */
-    private final Map<String, Long> confirmedOffAt = new ConcurrentHashMap<>();
-    /**
-     * Slots with a wake in flight. A second push does not replace a running
-     * version -- Kaggle keeps the old one alive and offers no API to stop it
-     * (issue #388) -- so a double tap would leave two engines holding GPUs and
-     * make shutdown look like it failed. Refuse the second push instead.
-     */
-    private final Set<String> waking = ConcurrentHashMap.newKeySet();
-    /** Slots with a shutdown in flight, so the button can say so at once. */
-    private final Set<String> shutting = ConcurrentHashMap.newKeySet();
-
-    /**
-     * THE BUG THIS SEPARATION FIXES: this used to be one single-thread executor
-     * shared by the poll loop and the buttons. pollLoop() never returns while the
-     * screen is open, so it owned the only worker thread and every wake or
-     * shutdown task sat in the queue behind it, forever. The UI text was set
-     * synchronously before execute(), so the card said "WAKING" and the note said
-     * "Shutting down…" while the work never ran at all -- exactly "it can't turn
-     * the engine on or off". Bumping the generation (Check now, leaving the
-     * screen) ended the loop and let the stuck task run, which is why it looked
-     * like it sometimes worked.
-     *
-     * So: one thread for polling, and a separate pool for actions, so a 15-minute
-     * wake watch can never block a shutdown.
-     */
-    private final ExecutorService pollExec = Executors.newSingleThreadExecutor(daemonFactory());
-    private final ExecutorService actionExec = Executors.newCachedThreadPool(daemonFactory());
-
-    private static ThreadFactory daemonFactory() {
-        return r -> { Thread t = new Thread(r); t.setDaemon(true); return t; };
+    private static final class Destination {
+        final String id, title, summary, group;
+        final int icon;
+        Destination(String id, String group, int icon, String title, String summary) {
+            this.id = id; this.group = group; this.icon = icon; this.title = title; this.summary = summary;
+        }
     }
-    private final Handler ui = new Handler(Looper.getMainLooper());
-    private final AtomicInteger generation = new AtomicInteger();
-    /** How many wake/shutdown operations are in flight; drives the poll rate. */
-    private final AtomicInteger transitions = new AtomicInteger();
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    private final List<Destination> destinations = Arrays.asList(
+            new Destination("general", "EXPERIENCE", R.drawable.ic_tune, "General", "Startup, keyboard and feedback"),
+            new Destination("conversation", "EXPERIENCE", R.drawable.ic_chat, "Conversation & Agent", "Discussion, response style and instructions"),
+            new Destination("appearance", "EXPERIENCE", R.drawable.ic_palette, "Appearance", "Theme, text size and motion"),
+            new Destination("models", "MODELS", R.drawable.ic_agent, "Models", "Default model and generation controls"),
+            new Destination("providers", "MODELS", R.drawable.ic_provider, "Personal Providers", "Your providers, models and encrypted keys"),
+            new Destination("activity", "ACTIVITY & DATA", R.drawable.ic_workspace, "Chat & Activity", "Research timeline, sources and history"),
+            new Destination("network", "ACTIVITY & DATA", R.drawable.ic_speed, "Network & Performance", "Launch readiness and streaming"),
+            new Destination("storage", "ACTIVITY & DATA", R.drawable.ic_database, "Storage & Data", "Export, storage and deletion"),
+            new Destination("privacy", "TRUST", R.drawable.ic_shield, "Privacy & Security", "Local data, keys and external services"),
+            new Destination("legal", "TRUST", R.drawable.ic_legal, "Legal & Policies", "Disclaimer, terms and content responsibility"),
+            new Destination("about", "TRUST", R.drawable.ic_info, "About Aether", "Version, capabilities and notices")
+    );
+
+    @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
-
-        routingRows = findViewById(R.id.routing_rows);
-        engineRows = findViewById(R.id.engine_rows);
-        note = findViewById(R.id.settings_note);
-        offAll = findViewById(R.id.off_all);
-
-        findViewById(R.id.back_btn).setOnClickListener(v -> finish());
-        findViewById(R.id.check_now).setOnClickListener(v -> checkNow());
-
-        cfg = Credentials.load(this);
-        if (cfg == null || cfg.engines.isEmpty()) {
-            note.setText("No engine credentials are baked into this build.");
-            /* Still worth reporting: "the screen says no credentials" is a
-               distinct failure and otherwise invisible from here. */
-            EngineCore.publish(telemetryTopicOrEmpty(),
-                    "build " + BuildConfig.VERSION_NAME + "(" + BuildConfig.VERSION_CODE
-                            + ") NO CREDENTIALS BAKED", 15_000);
-            return;
-        }
-        /* Confirms which build is actually installed, from the device itself. */
-        telemetry("settings opened on " + android.os.Build.MANUFACTURER + " "
-                + android.os.Build.MODEL + ", Android " + android.os.Build.VERSION.RELEASE);
-
-        buildRoutingRows();
-        buildEngineRows();
-        offAll.setOnClickListener(v -> shutDownAll());
-
-        /* Paint the cards at once. Waiting for the first poll -- a beacon fetch
-           plus a health check per engine -- left every button in its initial
-           state for up to a minute, which reads as a screen that does nothing. */
-        render();
-
-        note.setText("Every status here comes from a real check, and each engine is judged "
-                + "on its own.\n\nLIVE — /api/ps returned 200 with a loaded model. "
-                + "WAKING — a wake was accepted, or Kaggle says the kernel is queued or "
-                + "running, or the kernel answers 200 with no model yet. "
-                + "OFF — nothing answers /api/ps and Kaggle reports the kernel gone. "
-                + "QUOTA — Kaggle refused the wake for quota or limits. "
-                + "ERROR — an action you just pressed actually failed. A dead tunnel from an "
-                + "old announcement is not an error and is never shown as one."
-                + "\n\nShutting an engine down is what releases the GPU quota, and OFF is only "
-                + "reported once /api/ps has stopped answering."
-                /* Printed so an installed build can be identified on the phone
-                   itself. Every build used to be 1.0.0, which made it impossible
-                   to tell whether a fix had actually been installed. */
-                + "\n\nbuild " + BuildConfig.VERSION_NAME + " (" + BuildConfig.VERSION_CODE
-                + ") · " + getPackageName());
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (cfg == null) return;
-        int gen = generation.incrementAndGet();
-        pollExec.execute(() -> pollLoop(gen));
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        generation.incrementAndGet();
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        generation.incrementAndGet();
-        pollExec.shutdownNow();
-        actionExec.shutdownNow();
-    }
-
-    /** Force a poll immediately instead of waiting for the next tick. */
-    private void checkNow() {
-        announce("Checking every engine now…");
-        /* Deliberately does NOT overwrite the measured states with "checking…".
-           Replacing real evidence with a placeholder is the same class of lie
-           as claiming LIVE early: the card keeps showing what was last verified
-           and how old it is, and the poll replaces it with a fresh measurement. */
-        render();
-        int gen = generation.incrementAndGet();
-        pollExec.execute(() -> pollLoop(gen));
-        /* And print exactly what this phone can and cannot reach. The failure is
-           on a device nobody can inspect from here, so the phone has to be the
-           one that reports it. */
-        actionExec.execute(() -> {
-            final String report = diagnostics();
-            ui.post(() -> note.setText(report));
-            /* The same report, sent where it can actually be read. */
-            EngineCore.publish(cfg.telemetryTopic,
-                    "build " + BuildConfig.VERSION_NAME + "(" + BuildConfig.VERSION_CODE
-                            + ")\n" + EngineCore.scrubUrls(report), 15_000);
+        store = new ByokStore(this);
+        content = findViewById(R.id.settings_content);
+        screenTitle = findViewById(R.id.settings_title);
+        screenSubtitle = findViewById(R.id.settings_subtitle);
+        findViewById(R.id.back_btn).setOnClickListener(v -> navigateBack());
+        exportChats = registerForActivityResult(new ActivityResultContracts.CreateDocument("application/json"), this::writeExport);
+        exportConcern = registerForActivityResult(new ActivityResultContracts.CreateDocument("text/plain"), this::writeConcern);
+        String requested = getIntent().getStringExtra("section");
+        if (requested == null) showHome(); else showSection(requested);
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override public void handleOnBackPressed() { navigateBack(); }
         });
     }
 
-    /**
-     * Every dependency of the status pipeline, measured and printed on screen.
-     *
-     * This exists because "WAKING for ever" has at least three causes that look
-     * identical from the outside -- the engine still loading, the discovery
-     * service unreachable, or the tunnels unreachable -- and only the phone can
-     * tell them apart. Read line 1: if discovery says FAILED, nothing downstream
-     * can work, and that is the whole problem.
-     */
-    private String diagnostics() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("DIAGNOSTICS  build ").append(BuildConfig.VERSION_NAME)
-                .append(" (").append(BuildConfig.VERSION_CODE).append(")  ")
-                .append(getPackageName()).append('\n');
+    @Override protected void onPause() {
+        if (instructions != null) saveAgentSettings();
+        super.onPause();
+    }
 
-        // 1. Discovery: can this phone read the beacon at all?
-        try {
-            List<EngineCore.LiveLink> links = EngineCore.liveLinks(
-                    cfg.beaconTopic, cfg.beaconSecret, BEACON_LOOKBACK_S, 20_000);
-            sb.append("1 discovery ntfy.sh: OK, ").append(links.size())
-                    .append(" announcement(s) in ").append(BEACON_LOOKBACK_S / 3600).append("h\n");
-        } catch (Exception ex) {
-            sb.append("1 discovery ntfy.sh: FAILED -- ").append(ex.getMessage())
-                    .append("\n   ^ if this says FAILED, no engine can ever be found\n");
+    @Override protected void onDestroy() {
+        bg.shutdownNow();
+        super.onDestroy();
+    }
+
+    private void navigateBack() {
+        if (!"home".equals(section)) showHome(); else finish();
+    }
+
+    private void showHome() {
+        section = "home";
+        screenTitle.setText("Settings");
+        screenSubtitle.setText("Your workspace. Your rules.");
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout body = sectionBody(scroll);
+        TextView hero = Ui.tv(this, "Make Aether work the way you do.", 22, Ui.PRIMARY);
+        hero.setTypeface(Typeface.DEFAULT_BOLD);
+        body.addView(hero);
+        body.addView(subtitle("Choose a category. Every option has its own space."));
+        search = input("Search settings", "");
+        search.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_search, 0, 0, 0);
+        search.setCompoundDrawablePadding(Ui.dp(this, 10));
+        body.addView(search, matchParams(16));
+        homeRows = new LinearLayout(this);
+        homeRows.setOrientation(LinearLayout.VERTICAL);
+        body.addView(homeRows);
+        search.addTextChangedListener(new SimpleWatcher(() -> renderHomeRows(search.getText().toString())));
+        renderHomeRows("");
+        content.removeAllViews();
+        content.addView(scroll);
+    }
+
+    private void renderHomeRows(String filter) {
+        if (homeRows == null) return;
+        homeRows.removeAllViews();
+        String lastGroup = "";
+        String query = filter == null ? "" : filter.trim().toLowerCase(Locale.ROOT);
+        int matches = 0;
+        for (Destination d : destinations) {
+            if (!query.isEmpty() && !(d.title + " " + d.summary).toLowerCase(Locale.ROOT).contains(query)) continue;
+            matches++;
+            if (!d.group.equals(lastGroup)) {
+                homeRows.addView(groupLabel(d.group));
+                lastGroup = d.group;
+            }
+            homeRows.addView(destinationRow(d));
         }
+        if (matches == 0) homeRows.addView(Ui.centered(this, "No settings match that search.", 14, Ui.DIM));
+    }
 
-        // 2. Kaggle, and every tunnel each engine has announced.
-        for (EngineCore.Engine e : cfg.engines) {
-            String kg;
-            try { kg = EngineCore.kernelStatus(e, 20_000); }
-            catch (Exception ex) { kg = "FAILED: " + ex.getMessage(); }
-            List<String> urls = new ArrayList<>();
+    private View destinationRow(Destination d) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackgroundResource(R.drawable.bg_settings_row);
+        row.setPadding(Ui.dp(this, 14), Ui.dp(this, 13), Ui.dp(this, 12), Ui.dp(this, 13));
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(d.icon);
+        icon.setBackgroundResource(R.drawable.bg_icon_tile);
+        icon.setPadding(Ui.dp(this, 10), Ui.dp(this, 10), Ui.dp(this, 10), Ui.dp(this, 10));
+        row.addView(icon, new LinearLayout.LayoutParams(Ui.dp(this, 42), Ui.dp(this, 42)));
+        LinearLayout words = new LinearLayout(this);
+        words.setOrientation(LinearLayout.VERTICAL);
+        words.setPadding(Ui.dp(this, 13), 0, Ui.dp(this, 8), 0);
+        TextView title = Ui.tv(this, d.title, 15, Ui.PRIMARY);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        words.addView(title);
+        words.addView(Ui.meta(this, summaryFor(d)));
+        row.addView(words, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        ImageView chevron = new ImageView(this);
+        chevron.setImageResource(R.drawable.ic_chevron);
+        chevron.setAlpha(.55f);
+        row.addView(chevron, new LinearLayout.LayoutParams(Ui.dp(this, 22), Ui.dp(this, 22)));
+        row.setOnClickListener(v -> showSection(d.id));
+        row.setForeground(resolveSelectable());
+        LinearLayout.LayoutParams lp = matchParams(6);
+        row.setLayoutParams(lp);
+        return row;
+    }
+
+    private String summaryFor(Destination d) {
+        if ("providers".equals(d.id)) {
+            int n = store.list().size();
+            return n == 0 ? "Connect your own provider" : n + (n == 1 ? " provider connected" : " providers connected");
+        }
+        if ("models".equals(d.id)) {
+            return ModelPrefs.BYOK.equals(ModelPrefs.kind(this)) ? "Personal provider selected" : ModelPrefs.AETHER_LABEL + " selected";
+        }
+        if ("appearance".equals(d.id)) return AetherPrefs.theme(this) + " · " + Math.round(AetherPrefs.textScale(this) * 100) + "% text";
+        if ("conversation".equals(d.id)) return (AetherPrefs.discussion(this) ? "Discussion" : "Agent") + " · " + AetherPrefs.responseStyle(this);
+        return d.summary;
+    }
+
+    private void showSection(String id) {
+        section = id;
+        instructions = null;
+        switch (id) {
+            case "general": showGeneral(); break;
+            case "conversation": showConversation(); break;
+            case "appearance": showAppearance(); break;
+            case "models": showModels(); break;
+            case "providers": showProviders(); break;
+            case "activity": showActivity(); break;
+            case "network": showNetwork(); break;
+            case "storage": showStorage(); break;
+            case "privacy": showPrivacy(); break;
+            case "legal": showLegal(); break;
+            case "about": showAbout(); break;
+            default: showHome();
+        }
+    }
+
+    private LinearLayout openSection(String title, String subtitle) {
+        screenTitle.setText(title);
+        screenSubtitle.setText(subtitle);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout body = sectionBody(scroll);
+        content.removeAllViews();
+        content.addView(scroll);
+        return body;
+    }
+
+    private void showGeneral() {
+        LinearLayout b = openSection("General", "Everyday behavior, without the clutter.");
+        b.addView(groupLabel("STARTUP"));
+        choice(b, "When Aether opens", AetherPrefs.openLastChat(this) ? "Continue the last chat" : "Start a fresh chat",
+                new String[]{"Start a fresh chat", "Continue the last chat"}, value -> AetherPrefs.openLastChat(this, value.startsWith("Continue")));
+        toggle(b, "Send with Enter", "Off keeps Enter available for a new line.", AetherPrefs.sendOnEnter(this), value -> AetherPrefs.sendOnEnter(this, value));
+        toggle(b, "Touch feedback", "A subtle response when you send a message.", AetherPrefs.haptics(this), value -> AetherPrefs.haptics(this, value));
+        b.addView(groupLabel("GUIDANCE"));
+        action(b, "Review the welcome disclaimer", "Adult use, accuracy and responsibility", () -> showDocument("Welcome to Aether", LegalText.DISCLAIMER));
+    }
+
+    private void showConversation() {
+        LinearLayout b = openSection("Conversation & Agent", "Choose how Aether approaches each turn.");
+        b.addView(groupLabel("DEFAULT STYLE"));
+        choice(b, "Default composer mode", AetherPrefs.discussion(this) ? "Discussion" : "Agent",
+                new String[]{"Agent", "Discussion"}, value -> AetherPrefs.discussion(this, "Discussion".equals(value)));
+        choice(b, "Response style", AetherPrefs.responseStyle(this), new String[]{"Concise", "Balanced", "Detailed"}, value -> AetherPrefs.responseStyle(this, value));
+        b.addView(infoCard("Agent can research, browse, run commands and create files. Discussion focuses on the conversation and requests no tools. You can switch modes in the composer at any time."));
+        b.addView(groupLabel("CUSTOM INSTRUCTIONS"));
+        ByokClient.ChatOptions options = AgentSettings.load(this);
+        instructions = input("Example: answer plainly and state assumptions", options.instructions);
+        instructions.setMinLines(5);
+        instructions.setGravity(Gravity.TOP | Gravity.START);
+        b.addView(instructions, matchParams(8));
+        b.addView(subtitle("These instructions shape responses. They do not override law, privacy, or provider rules."));
+        b.addView(groupLabel("PERSONAL PROVIDER GENERATION"));
+        temperature = input("Temperature", String.format(Locale.US, "%s", options.temperature));
+        temperature.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        maxTokens = input("Maximum output tokens", String.valueOf(options.maxTokens));
+        maxTokens.setInputType(InputType.TYPE_CLASS_NUMBER);
+        timeoutSeconds = input("Timeout in seconds", String.valueOf(options.timeoutMs / 1000));
+        timeoutSeconds.setInputType(InputType.TYPE_CLASS_NUMBER);
+        b.addView(temperature, matchParams(8));
+        b.addView(maxTokens, matchParams(8));
+        b.addView(timeoutSeconds, matchParams(8));
+        streamResponses = new android.widget.Switch(this);
+        styleSwitch(streamResponses, "Stream responses", options.streaming);
+        b.addView(streamResponses, matchParams(10));
+        action(b, "Save conversation settings", "Apply instructions and generation controls", () -> { saveAgentSettings(); toast("Conversation settings saved."); showHome(); });
+    }
+
+    private void showAppearance() {
+        LinearLayout b = openSection("Appearance", "A calm interface, tuned to you.");
+        b.addView(groupLabel("THEME"));
+        choice(b, "App theme", AetherPrefs.theme(this), new String[]{"Midnight", "Light", "System"}, value -> { AetherPrefs.theme(this, value); recreate(); });
+        choice(b, "Text size", Math.round(AetherPrefs.textScale(this) * 100) + "%", new String[]{"90%", "100%", "115%", "120%"}, value -> {
+            AetherPrefs.textScale(this, Integer.parseInt(value.replace("%", "")) / 100f); recreate();
+        });
+        toggle(b, "Interface motion", "Composer, activity and model-picker transitions.", AetherPrefs.animations(this), value -> AetherPrefs.animations(this, value));
+        b.addView(infoCard("System animation settings are always respected. Turning motion off removes decorative movement; real progress and streaming text still update."));
+    }
+
+    private void showModels() {
+        LinearLayout b = openSection("Models", "One clear choice for every conversation.");
+        String current = ModelPrefs.BYOK.equals(ModelPrefs.kind(this)) ? "Personal provider" : ModelPrefs.AETHER_LABEL;
+        b.addView(heroCard(current, ModelPrefs.BYOK.equals(ModelPrefs.kind(this))
+                ? "Your selected provider and model are used for new turns."
+                : "Built in. Automatic readiness and continuity stay behind the scenes."));
+        action(b, "Choose a model", "Built-in and personal providers", () -> ModelPickerDialog.show(this, store, this::showModels));
+        action(b, "Manage personal providers", "Add, test, edit or remove a connection", () -> showSection("providers"));
+        b.addView(groupLabel("HOW IT WORKS"));
+        b.addView(infoCard("Model choice is remembered on this device. Personal providers receive requests directly. Built-in turns retain Aether's workspace tools; personal-provider turns use chat completions."));
+    }
+
+    private void showProviders() {
+        LinearLayout b = openSection("Personal Providers", "Your keys. Your models. Direct connections.");
+        action(b, "Add a provider", "OpenAI-compatible services and public HTTPS endpoints", () -> editProvider(null));
+        providerRows = new LinearLayout(this);
+        providerRows.setOrientation(LinearLayout.VERTICAL);
+        b.addView(providerRows, matchParams(10));
+        renderProviders();
+        action(b, "Remove all providers and keys", "Keep chat history; delete every saved connection", this::confirmClear);
+        b.addView(infoCard("A successful test is the only thing that marks a provider verified. Saved keys and suggested model names are not verification."));
+    }
+
+    private void showActivity() {
+        LinearLayout b = openSection("Chat & Activity", "See the work without reading a console.");
+        toggle(b, "Show live activity", "Animated research, browsing, command and creation steps.", AetherPrefs.showActivity(this), value -> AetherPrefs.showActivity(this, value));
+        toggle(b, "Show source details", "Expand websites and sources used by a completed turn.", AetherPrefs.expandSources(this), value -> AetherPrefs.expandSources(this, value));
+        b.addView(infoCard("Activity is based on events from the selected engine. A finished action is not proof that the answer is correct; open sources and verify important claims."));
+    }
+
+    private void showNetwork() {
+        LinearLayout b = openSection("Network & Performance", "Ready when you are, honest about the trade-offs.");
+        toggle(b, "Prepare on launch", "Start waking configured built-in routes in parallel when the app opens.", AetherPrefs.warmOnLaunch(this), value -> {
+            AetherPrefs.warmOnLaunch(this, value);
+            if (value) FleetWarmup.warmAll(getApplicationContext());
+        });
+        b.addView(infoCard("Parallel preparation reduces app-side waiting. Kaggle allocation, downloads, provider latency, quota and network conditions still determine actual readiness. Preparing all routes can consume more GPU quota."));
+        b.addView(groupLabel("BUILT-IN CONTINUITY"));
+        b.addView(infoCard("Healthy routes are reused for fast consecutive messages. If a connection drops, Aether tries untried routes in sequence and carries the existing task forward."));
+    }
+
+    private void showStorage() {
+        LinearLayout b = openSection("Storage & Data", "Your conversations stay under your control.");
+        b.addView(heroCard(readableSize(folderSize(getFilesDir())), "Used by Aether's private app storage, including chats and attachments."));
+        action(b, "Export chats", "Create a JSON document without personal provider keys", () -> exportChats.launch("aether-chats.json"));
+        action(b, "Clear chat history", "Delete every local chat and copied attachment", this::confirmClearHistory);
+        b.addView(infoCard("Exports contain conversation content and local task details. They never include personal provider API keys. Review an export before sharing it."));
+    }
+
+    private void showPrivacy() {
+        LinearLayout b = openSection("Privacy & Security", "Clear boundaries, in plain language.");
+        action(b, "Read the Privacy Policy", "Storage, requests, providers and third parties", () -> showDocument("Privacy Policy", LegalText.PRIVACY));
+        action(b, "Remove personal providers and keys", "Delete encrypted keys and connection metadata", this::confirmClear);
+        b.addView(groupLabel("ON THIS DEVICE"));
+        b.addView(infoCard("Chats use app-private storage. Personal keys use Android Keystore encryption. Android backup is disabled. Personal-provider requests go directly to the selected provider."));
+        b.addView(groupLabel("OUTSIDE THIS DEVICE"));
+        b.addView(infoCard("Built-in tools and personal providers contact external services. Their retention and handling are governed by their own policies. Local deletion cannot retract data already sent."));
+    }
+
+    private void showLegal() {
+        LinearLayout b = openSection("Legal & Policies", "Plain language for adult, responsible use.");
+        action(b, "Disclaimer", "Accuracy, adult use and important limitations", () -> showDocument("Disclaimer", LegalText.DISCLAIMER));
+        action(b, "Terms of Use", "Acceptable use, content and responsibility", () -> showDocument("Terms of Use", LegalText.TERMS));
+        action(b, "Privacy Policy", "Local data, provider requests and retention", () -> showDocument("Privacy Policy", LegalText.PRIVACY));
+        action(b, "Content & Responsibility", "Research, sources and prohibited harm", () -> showDocument("Content & Responsibility", LegalText.CONTENT));
+        action(b, "Prepare a concern report", "Create a draft; choose where to send it", () -> exportConcern.launch("aether-concern.txt"));
+        b.addView(subtitle("Policy revision: November 2026. These in-app templates are not a substitute for advice from a qualified lawyer in your jurisdiction."));
+    }
+
+    private void showAbout() {
+        LinearLayout b = openSection("About Aether", "Conversation, research and creation in one place.");
+        b.addView(heroCard("Aether", "Version " + BuildConfig.VERSION_NAME + " · made for focused work and open adult conversation."));
+        b.addView(infoCard("Use Agent for research, websites, files and commands. Switch to Discussion for a quieter conversation. Choose a personal provider when you want to use your own account."));
+        action(b, "Third-party notices", "Services and provider names", () -> showDocument("Third-party Notices", LegalText.NOTICES));
+        action(b, "Legal & Policies", "Disclaimer, terms, privacy and responsibility", this::showLegal);
+    }
+
+    private void showDocument(String title, String text) {
+        section = "document";
+        LinearLayout b = openSection(title, "Aether · November 2026");
+        TextView body = Ui.tv(this, text, 15, Ui.PRIMARY);
+        body.setLineSpacing(Ui.dp(this, 6), 1f);
+        body.setTextIsSelectable(true);
+        b.addView(body, matchParams(8));
+        action(b, "Back to Legal & Policies", "", this::showLegal);
+    }
+
+    // ---------------------------------------------------------- controls
+
+    private LinearLayout sectionBody(ScrollView scroll) {
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(Ui.dp(this, 18), Ui.dp(this, 8), Ui.dp(this, 18), Ui.dp(this, 36));
+        scroll.addView(body);
+        return body;
+    }
+
+    private TextView groupLabel(String text) {
+        TextView t = Ui.tv(this, text, 11, Ui.ACCENT);
+        t.setLetterSpacing(.1f);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setPadding(Ui.dp(this, 4), Ui.dp(this, 22), 0, Ui.dp(this, 7));
+        return t;
+    }
+
+    private TextView subtitle(String text) {
+        TextView t = Ui.tv(this, text, 12, Ui.DIM);
+        t.setPadding(Ui.dp(this, 3), Ui.dp(this, 6), Ui.dp(this, 3), Ui.dp(this, 6));
+        return t;
+    }
+
+    private View infoCard(String text) {
+        TextView t = Ui.tv(this, text, 13, Ui.DIM);
+        t.setBackgroundResource(R.drawable.bg_card);
+        t.setPadding(Ui.dp(this, 15), Ui.dp(this, 14), Ui.dp(this, 15), Ui.dp(this, 14));
+        t.setLineSpacing(Ui.dp(this, 3), 1f);
+        t.setLayoutParams(matchParams(10));
+        return t;
+    }
+
+    private View heroCard(String title, String summary) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_hero);
+        card.setPadding(Ui.dp(this, 18), Ui.dp(this, 20), Ui.dp(this, 18), Ui.dp(this, 20));
+        TextView heading = Ui.tv(this, title, 24, Ui.PRIMARY);
+        heading.setTypeface(Typeface.DEFAULT_BOLD);
+        card.addView(heading);
+        TextView sub = Ui.tv(this, summary, 13, Ui.DIM);
+        sub.setLineSpacing(Ui.dp(this, 3), 1f);
+        card.addView(sub, matchParams(8));
+        card.setLayoutParams(matchParams(12));
+        return card;
+    }
+
+    private void action(LinearLayout body, String title, String summary, Runnable run) {
+        LinearLayout row = actionRow(title, summary, R.drawable.ic_chevron, run);
+        body.addView(row, matchParams(7));
+    }
+
+    private LinearLayout actionRow(String title, String summary, int icon, Runnable run) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackgroundResource(R.drawable.bg_settings_row);
+        row.setPadding(Ui.dp(this, 15), Ui.dp(this, 13), Ui.dp(this, 13), Ui.dp(this, 13));
+        LinearLayout words = new LinearLayout(this);
+        words.setOrientation(LinearLayout.VERTICAL);
+        TextView t = Ui.tv(this, title, 14, Ui.PRIMARY);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        words.addView(t);
+        if (summary != null && !summary.isEmpty()) words.addView(Ui.meta(this, summary));
+        row.addView(words, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        ImageView chevron = new ImageView(this);
+        chevron.setImageResource(icon);
+        row.addView(chevron, new LinearLayout.LayoutParams(Ui.dp(this, 22), Ui.dp(this, 22)));
+        row.setOnClickListener(v -> run.run());
+        row.setForeground(resolveSelectable());
+        return row;
+    }
+
+    private void choice(LinearLayout body, String title, String current, String[] values, ValueConsumer consumer) {
+        action(body, title, current, () -> new AlertDialog.Builder(this).setTitle(title).setItems(values, (d, which) -> {
+            consumer.accept(values[which]);
+            showSection(section);
+        }).setNegativeButton(R.string.cancel, null).show());
+    }
+
+    private void toggle(LinearLayout body, String title, String summary, boolean value, BoolConsumer consumer) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackgroundResource(R.drawable.bg_settings_row);
+        row.setPadding(Ui.dp(this, 15), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10));
+        LinearLayout words = new LinearLayout(this);
+        words.setOrientation(LinearLayout.VERTICAL);
+        TextView t = Ui.tv(this, title, 14, Ui.PRIMARY);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        words.addView(t);
+        words.addView(Ui.meta(this, summary));
+        row.addView(words, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        android.widget.Switch sw = new android.widget.Switch(this);
+        sw.setChecked(value);
+        sw.setOnCheckedChangeListener((button, checked) -> consumer.accept(checked));
+        row.addView(sw);
+        body.addView(row, matchParams(7));
+    }
+
+    private void styleSwitch(android.widget.Switch sw, String title, boolean value) {
+        sw.setText(title);
+        sw.setTextColor(getColor(R.color.aether_fg));
+        sw.setTextSize(14);
+        sw.setChecked(value);
+    }
+
+    private EditText input(String hint, String value) {
+        EditText e = new EditText(this);
+        e.setHint(hint);
+        e.setText(value);
+        e.setTextSize(14);
+        e.setTextColor(getColor(R.color.aether_fg));
+        e.setHintTextColor(getColor(R.color.aether_dim));
+        e.setBackgroundResource(R.drawable.bg_field);
+        e.setPadding(Ui.dp(this, 13), Ui.dp(this, 12), Ui.dp(this, 13), Ui.dp(this, 12));
+        e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        return e;
+    }
+
+    private android.graphics.drawable.Drawable resolveSelectable() {
+        android.util.TypedValue value = new android.util.TypedValue();
+        getTheme().resolveAttribute(android.R.attr.selectableItemBackground, value, true);
+        return getDrawable(value.resourceId);
+    }
+
+    private LinearLayout.LayoutParams matchParams(int topDp) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = Ui.dp(this, topDp);
+        return lp;
+    }
+
+    private void saveAgentSettings() {
+        double temp = parseDouble(temperature.getText().toString(), 0.7);
+        int tokens = parseInt(maxTokens.getText().toString(), 2048);
+        int seconds = parseInt(timeoutSeconds.getText().toString(), 60);
+        AgentSettings.save(this, instructions.getText().toString(), temp, tokens, seconds * 1000, streamResponses.isChecked());
+    }
+
+    private static double parseDouble(String raw, double fallback) {
+        try { return Double.parseDouble(raw.trim()); } catch (Exception e) { return fallback; }
+    }
+
+    private static int parseInt(String raw, int fallback) {
+        try { return Integer.parseInt(raw.trim()); } catch (Exception e) { return fallback; }
+    }
+
+    private interface BoolConsumer { void accept(boolean value); }
+    private interface ValueConsumer { void accept(String value); }
+
+    private void confirmClearHistory() {
+        new AlertDialog.Builder(this).setTitle("Clear every chat?")
+                .setMessage("All local conversations and copied attachments will be deleted. Personal providers and settings remain.")
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton("Clear history", (d, w) -> bg.execute(() -> {
+                    int count = new ChatStore(new File(getFilesDir(), "chats")).deleteAll();
+                    AetherPrefs.requestHistoryReset(this);
+                    runOnUiThread(() -> { toast(count + (count == 1 ? " chat deleted." : " chats deleted.")); showHome(); });
+                })).show();
+    }
+
+    private long folderSize(File file) {
+        if (file == null || !file.exists()) return 0;
+        if (file.isFile()) return file.length();
+        long total = 0;
+        File[] children = file.listFiles();
+        if (children != null) for (File child : children) total += folderSize(child);
+        return total;
+    }
+
+    private String readableSize(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format(Locale.US, "%.1f KB", bytes / 1024f);
+        return String.format(Locale.US, "%.1f MB", bytes / (1024f * 1024f));
+    }
+
+    private void writeExport(Uri uri) {
+        if (uri == null) return;
+        bg.execute(() -> {
             try {
-                urls = EngineCore.urlsFor(cfg.beaconTopic, cfg.beaconSecret, e.slot,
-                        BEACON_LOOKBACK_S, 20_000, 6);
-            } catch (Exception ignored) { }
-            sb.append("2 engine ").append(e.slot.toUpperCase(Locale.ROOT))
-                    .append(": Kaggle=").append(kg)
-                    .append(", ").append(urls.size()).append(" tunnel(s)");
-            for (int i = 0; i < urls.size(); i++) {
-                EngineCore.Health h = EngineCore.health(urls.get(i), 15_000);
-                sb.append(i == 0 ? " -> " : ", ")
-                        .append('[').append(i).append("] HTTP ").append(h.status)
-                        .append(h.models.isEmpty() ? "" : " models=" + h.models.size());
+                JSONObject root = new JSONObject();
+                root.put("product", "Aether");
+                root.put("exportedAt", System.currentTimeMillis());
+                root.put("personalProviderKeysIncluded", false);
+                JSONArray chats = new JSONArray();
+                ChatStore chatStore = new ChatStore(new File(getFilesDir(), "chats"));
+                for (ChatStore.Meta meta : chatStore.list()) {
+                    ChatSession chat = chatStore.load(meta.id);
+                    if (chat != null) chats.put(chat.toJson());
+                }
+                root.put("chats", chats);
+                try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                    if (out == null) throw new Exception("The destination could not be opened.");
+                    out.write(root.toString(2).getBytes(StandardCharsets.UTF_8));
+                }
+                runOnUiThread(() -> toast("Chats exported without provider keys."));
+            } catch (Exception e) {
+                runOnUiThread(() -> toast("Export failed: " + e.getMessage()));
             }
-            sb.append('\n');
+        });
+    }
+
+    private void writeConcern(Uri uri) {
+        if (uri == null) return;
+        String report = "Aether concern report\n\nCreated: " + new java.util.Date() + "\nApp version: "
+                + BuildConfig.VERSION_NAME + "\n\nDescribe the answer or behavior that concerned you:\n\n\n"
+                + "What did you expect instead?\n\n\nDo not include passwords, provider keys, or private documents.\n";
+        try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+            if (out == null) throw new Exception("The destination could not be opened.");
+            out.write(report.getBytes(StandardCharsets.UTF_8));
+            toast("Report draft created. Choose where to share it from your document app.");
+        } catch (Exception e) {
+            toast("The report could not be created: " + e.getMessage());
         }
-        sb.append("3 how to read it: HTTP 200 with models = LIVE. 200 with no models = ")
-                .append("still loading. 530 or -1 = that tunnel is dead. 0 tunnels with ")
-                .append("Kaggle running = booting, no tunnel yet, about 5 minutes.");
-        return EngineCore.scrubUrls(sb.toString());
     }
 
-    // ------------------------------------------------------------- routing
-
-    private String mode() {
-        return getSharedPreferences("aether_console", MODE_PRIVATE)
-                .getString("mode", EngineRouter.AUTO);
-    }
-
-    /**
-     * Pinning an engine is a routing choice, and on its own it does not turn
-     * anything on -- which is exactly the gap that made the switch look broken.
-     * So when the chosen engine is not live, say so at once and offer to wake
-     * it, instead of leaving the user staring at a selection that changed
-     * nothing they can see.
-     */
-    private void chooseMode(final String o) {
-        setMode(o);
-        if (EngineRouter.AUTO.equals(o)) {
-            announce("AUTO selected -- the first healthy engine answers, and a failed "
-                    + "engine fails over A\u2192B\u2192C.");
+    private void renderProviders() {
+        providerRows.removeAllViews();
+        List<ByokClient.Connection> connections = store.list();
+        if (connections.isEmpty()) {
+            providerRows.addView(Ui.centered(this,
+                    "No personal providers yet. Aether Uncensored remains available independently.", 12,
+                    Ui.DIM));
             return;
         }
-        final String up = o.toUpperCase(Locale.ROOT);
-        /* Pinning is a routing choice; it says nothing about health, so the
-           engine's own measured phase is read separately and shown as such. */
-        final EngineCore.EngineState st = states.get(o);
-        if (st != null && st.isLive()) {
-            announce("Engine " + up + " pinned. It is LIVE, so only it will answer.");
-            return;
-        }
-        final EngineCore.Engine e = cfg == null ? null : cfg.bySlot(o);
-        new AlertDialog.Builder(this)
-                .setTitle("Engine " + up + " is not live")
-                .setMessage("Pinned, so only engine " + up + " will be used. Its own measured "
-                        + "status is " + (st == null ? "UNKNOWN" : badge(st.phase)) + ": "
-                        + (st == null ? "not checked yet" : st.detail)
-                        + "\n\nBooting a kernel takes several minutes.")
-                .setNegativeButton(R.string.just_pin, null)
-                .setPositiveButton(R.string.pin_and_wake, (d, w) -> {
-                    if (e != null) wake(e, null);
-                })
-                .show();
-    }
-
-    private void setMode(String m) {
-        getSharedPreferences("aether_console", MODE_PRIVATE).edit().putString("mode", m).apply();
-        buildRoutingRows();
-    }
-
-    private void buildRoutingRows() {
-        routingRows.removeAllViews();
-        routingTexts.clear();
-        /* AUTO plus every slot the router actually fails over to, taken from
-           EngineRouter so the list cannot drift from the real chain. */
-        String[] chain = EngineRouter.order();
-        String[] opts = new String[chain.length + 1];
-        opts[0] = EngineRouter.AUTO;
-        System.arraycopy(chain, 0, opts, 1, chain.length);
-        for (String o : opts) {
-            TextView row = new TextView(this);
-            row.setTextSize(14);
-            row.setBackgroundResource(R.drawable.bg_card);
-            row.setPadding(Ui.dp(this, 14), Ui.dp(this, 12), Ui.dp(this, 14), Ui.dp(this, 12));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.topMargin = Ui.dp(this, 6);
-            row.setLayoutParams(lp);
-            row.setOnClickListener(v -> chooseMode(o));
-            routingRows.addView(row);
-            routingTexts.put(o, row);
-        }
-        renderRouting();
-    }
-
-    /**
-     * Selection and health are two separate facts on one line. Choosing an
-     * engine only decides where traffic goes; it says nothing about whether
-     * that engine is running, so the phase is drawn from the engine's own
-     * measured state and the marker is labelled "routing only".
-     */
-    private void renderRouting() {
-        String current = EngineRouter.canonical(mode());
-        for (Map.Entry<String, TextView> en : routingTexts.entrySet()) {
-            String o = en.getKey();
-            boolean selected = current.equals(o);
-            StringBuilder sb = new StringBuilder();
-            sb.append(selected ? "●  " : "○  ");
-            if (EngineRouter.AUTO.equals(o)) {
-                sb.append("AUTO — first healthy, fails over ").append(EngineRouter.chainLabel());
-            } else {
-                EngineCore.EngineState st = states.get(o);
-                sb.append("Engine ").append(o.toUpperCase(Locale.ROOT))
-                        .append(" — pinned, no failover · ")
-                        .append(st == null ? "UNKNOWN" : badge(st.phase));
-            }
-            if (selected) sb.append("   (selected — routing only)");
-            TextView row = en.getValue();
-            row.setText(sb.toString());
-            row.setTextColor(getColor(selected ? R.color.aether_fg : R.color.aether_muted));
-        }
-    }
-
-    // ------------------------------------------------------------- engines
-
-    private void buildEngineRows() {
-        engineRows.removeAllViews();
-        rowViews.clear();
-        for (EngineCore.Engine e : cfg.engines) {
+        for (ByokClient.Connection c : connections) {
             LinearLayout card = new LinearLayout(this);
             card.setOrientation(LinearLayout.VERTICAL);
             card.setBackgroundResource(R.drawable.bg_card);
@@ -388,587 +611,372 @@ public class SettingsActivity extends AppCompatActivity {
             lp.topMargin = Ui.dp(this, 8);
             card.setLayoutParams(lp);
 
-            LinearLayout head = new LinearLayout(this);
-            head.setOrientation(LinearLayout.HORIZONTAL);
-            head.setGravity(Gravity.CENTER_VERTICAL);
-            /* A state indicator rather than a word to read. It is tinted from
-               the measured phase in render(), so the colour can never disagree
-               with the badge beside it -- there is one source of truth. */
-            View dot = new View(this);
-            dot.setId(R.id.engine_dot);
-            dot.setBackground(getDrawable(R.drawable.bg_engine_dot));
-            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
-                    Ui.dp(this, 9), Ui.dp(this, 9));
-            dlp.rightMargin = Ui.dp(this, 9);
-            head.addView(dot, dlp);
-            TextView name = new TextView(this);
-            name.setText("Engine " + e.slot.toUpperCase());
-            name.setTextSize(15);
-            name.setTextColor(getColor(R.color.aether_fg));
-            name.setTypeface(null, android.graphics.Typeface.BOLD);
-            LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            head.addView(name, nlp);
-            TextView status = new TextView(this);
-            status.setId(R.id.status);
-            status.setTextSize(10);
-            status.setAllCaps(true);
-            status.setLetterSpacing(0.06f);
-            status.setPadding(Ui.dp(this, 8), Ui.dp(this, 3),
-                    Ui.dp(this, 8), Ui.dp(this, 3));
-            status.setBackground(getDrawable(R.drawable.bg_status_chip));
-            status.setTextColor(getColor(R.color.aether_muted));
-            status.setText("…");
-            head.addView(status);
-            card.addView(head);
+            String verification = "verified".equals(c.testStatus) ? " · VERIFIED"
+                    : "failed".equals(c.testStatus) ? " · TEST FAILED" : " · NOT VERIFIED";
+            TextView title = Ui.tv(this, c.name + verification, 14,
+                    "verified".equals(c.testStatus) ? Ui.OK
+                            : "failed".equals(c.testStatus) ? Ui.ERROR : Ui.PRIMARY);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            card.addView(title);
+            card.addView(Ui.meta(this, c.baseUrl + (c.enabled ? "" : " · disabled")));
+            card.addView(Ui.meta(this, c.hasKey ? "API key encrypted with Android Keystore" : "No saved API key"));
 
-            /* One plain sentence about what was measured. The raw evidence --
-               HTTP codes, tunnel counts, kernel slugs -- stays behind Check
-               now, where someone debugging can ask for it. On the row it read
-               as noise and hid the actual state. */
-            TextView line = new TextView(this);
-            line.setId(R.id.engine_line);
-            line.setTextSize(12);
-            line.setTextColor(getColor(R.color.aether_muted));
-            line.setText(EngineLabels.humanLine(null, 0L));
-            LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
-            llp.topMargin = Ui.dp(this, 5);
-            card.addView(line, llp);
+            Button defaultModel = new Button(this);
+            defaultModel.setText("Default model: " + c.defaultModel);
+            defaultModel.setTextSize(12);
+            defaultModel.setTextColor(getColor(R.color.aether_fg));
+            defaultModel.setBackgroundResource(R.drawable.bg_pill_ghost);
+            defaultModel.setOnClickListener(v -> chooseDefaultModel(c));
+            card.addView(defaultModel, buttonParams());
 
-            TextView acct = Ui.meta(this, e.user + " · " + e.kernelSlug);
-            LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            alp.topMargin = Ui.dp(this, 2);
-            card.addView(acct, alp);
+            LinearLayout actions = new LinearLayout(this);
+            actions.setOrientation(LinearLayout.HORIZONTAL);
+            actions.addView(actionButton(c.enabled ? "Disable" : "Enable", v -> {
+                c.enabled = !c.enabled;
+                saveConnection(c);
+                if (!c.enabled && ModelPrefs.BYOK.equals(ModelPrefs.kind(this))
+                        && c.id.equals(ModelPrefs.connectionId(this))) ModelPrefs.selectAether(this);
+            }));
+            actions.addView(actionButton("Edit", v -> editProvider(c)));
+            actions.addView(actionButton("Remove", v -> confirmRemove(c)));
+            card.addView(actions);
 
-            LinearLayout btns = new LinearLayout(this);
-            btns.setOrientation(LinearLayout.HORIZONTAL);
-            LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            blp.topMargin = Ui.dp(this, 10);
-
-            Button wake = new Button(this);
-            wake.setId(R.id.wake);
-            wake.setText(getString(R.string.wake));
-            wake.setTextSize(12);
-            wake.setBackground(getDrawable(R.drawable.bg_pill_ghost));
-            wake.setTextColor(getColor(R.color.aether_fg));
-            wake.setOnClickListener(v -> wake(e, wake));
-            LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            btns.addView(wake, wlp);
-
-            Button off = new Button(this);
-            off.setId(R.id.off);
-            off.setText(getString(R.string.shut_down));
-            off.setTextSize(12);
-            off.setBackground(getDrawable(R.drawable.bg_pill_ghost));
-            off.setTextColor(getColor(R.color.aether_error));
-            off.setOnClickListener(v -> confirmShutDown(e.slot));
-            LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            olp.leftMargin = Ui.dp(this, 8);
-            btns.addView(off, olp);
-
-            card.addView(btns, blp);
-            engineRows.addView(card);
-            rowViews.put(e.slot, card);
-            /* Unknown, not "off": nothing has been measured yet. Claiming OFF
-               here would be the same kind of lie as claiming LIVE. */
-            states.put(e.slot, new EngineCore.EngineState(e.slot, EngineCore.Phase.UNKNOWN,
-                    "not checked yet — the first /api/ps poll decides", null, 0, null, null));
+            if (!c.testMessage.isEmpty()) {
+                card.addView(Ui.meta(this, c.testMessage
+                        + (c.testedAt > 0 ? " · " + android.text.format.DateFormat.format(
+                                "yyyy-MM-dd HH:mm", c.testedAt) : "")));
+            }
+            providerRows.addView(card);
         }
     }
 
-    // ------------------------------------------------------------- polling
-
-    private void pollLoop(int gen) {
-        while (generation.get() == gen) {
-            try {
-                pollOnce();
-                ui.post(this::render);
-            } catch (Exception ignored) { }
-            int wait = transitions.get() > 0 ? FAST_POLL_MS : POLL_MS;
-            try { Thread.sleep(wait); } catch (InterruptedException ie) { return; }
-        }
+    private LinearLayout.LayoutParams buttonParams() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = Ui.dp(this, 8);
+        return lp;
     }
 
-    private void pollOnce() {
-        /* Step 1 -- resolve. The beacon only proves a URL was published at some
-           point; it is a candidate list, never a status. */
-        Map<String, String> announced = new ConcurrentHashMap<>();
-        String beaconError = null;
+    private Button actionButton(String label, View.OnClickListener listener) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setTextSize(11);
+        b.setTextColor(getColor(R.color.aether_fg));
+        b.setBackgroundResource(R.drawable.bg_pill_ghost);
+        b.setOnClickListener(listener);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        lp.topMargin = Ui.dp(this, 6);
+        lp.rightMargin = Ui.dp(this, 4);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    private void saveConnection(ByokClient.Connection c) {
         try {
-            for (EngineCore.LiveLink l : EngineCore.liveLinks(
-                    cfg.beaconTopic, cfg.beaconSecret, BEACON_LOOKBACK_S, 20_000)) {
-                if (l.slot == null || cfg.bySlot(l.slot) == null) continue;
-                if (!announced.containsKey(l.slot)) announced.put(l.slot, l.url);
-            }
-        } catch (Exception ex) {
-            /* NOT swallowed. This used to be `catch (Exception ignored) {}`, so a
-               phone that cannot reach the discovery service saw an empty list,
-               fell back to Kaggle's "running", and showed WAKING for ever with
-               no clue that discovery -- not the engine -- was the thing failing.
-               That is indistinguishable from a slow boot, which is the worst
-               possible way to report it. */
-            beaconError = String.valueOf(ex.getMessage());
-        }
-
-        for (EngineCore.Engine e : cfg.engines) {
-            /* Step 2 -- obtain a URL: the newest announcement, else the last one
-               that actually answered. */
-            String url = announced.get(e.slot);
-            if (url == null) url = tunnels.get(e.slot);
-
-            /* Step 3 -- health-check it. This is the only evidence that counts. */
-            int status = EngineCore.NO_CHECK;
-            List<String> models = new ArrayList<>();
-            if (url != null) {
-                EngineCore.Health h = EngineCore.health(url, 15_000);
-                status = h.status;
-                models = h.models;
-                if (h.status == 200) {
-                    tunnels.put(e.slot, url);
-                    confirmedOffAt.remove(e.slot);   // it is answering: not off
-                } else {
-                    /* Step 4 -- a tunnel that will not answer is stale. Drop it
-                       here so the next poll re-resolves instead of re-reporting
-                       the same dead URL as an error. */
-                    tunnels.remove(e.slot);
-                    liveUrls.remove(e.slot);
-                    url = null;
-                }
-            } else {
-                tunnels.remove(e.slot);
-            }
-
-            /* Step 5 -- classify. Kaggle's own kernel status is only consulted
-               when the engine is not answering, and only to tell WAKING from
-               OFF; a dead tunnel never becomes ERROR. */
-            String kg = status == 200 ? null : safeKernelStatus(e);
-            EngineCore.Action pending = pendingActions.remove(e.slot);
-            Long offAt = confirmedOffAt.get(e.slot);
-            EngineCore.EngineState st = EngineCore.classify(
-                    e.slot, status, models, url, kg, pending, offAt == null ? 0L : offAt);
-            /* A discovery outage is reported, not hidden. It never overrides a
-               real /api/ps measurement -- only the "nothing answering" case,
-               where without it the screen would claim a boot that may not be
-               happening. */
-            if (beaconError != null && url == null) {
-                st = new EngineCore.EngineState(e.slot, st.phase,
-                        st.detail + " — cannot reach the discovery service, so no tunnel can "
-                                + "be found: " + beaconError,
-                        null, st.verifiedAtMs, st.models, st.kaggleStatus);
-            }
-            states.put(e.slot, st);
-            if (st.isLive()) liveUrls.put(e.slot, st.url); else liveUrls.remove(e.slot);
-            ui.post(this::render);      // show each engine as soon as it is known
+            store.save(c);
+            renderProviders();
+        } catch (Exception e) {
+            toast(e.getMessage());
         }
     }
 
-    /** Kaggle's kernel status, or null when it could not be read. Never throws. */
-    private String safeKernelStatus(EngineCore.Engine e) {
-        if (e == null) return null;
-        try {
-            return EngineCore.kernelStatus(e, 20_000);
-        } catch (Exception ex) {
-            return null;
-        }
-    }
-
-    private void render() {
-        for (Map.Entry<String, View> en : rowViews.entrySet()) {
-            String slot = en.getKey();
-            View card = en.getValue();
-            EngineCore.EngineState st = states.get(slot);
-
-            TextView status = card.findViewById(R.id.status);
-            TextView line = card.findViewById(R.id.engine_line);
-            View dot = card.findViewById(R.id.engine_dot);
-            /* Badge, sentence and dot all come from the same measured phase, so
-               they cannot contradict each other. EngineState scrubs tunnel URLs
-               on the way in, so none of this can leak a raw address. */
-            EngineCore.Phase ph = st == null ? EngineCore.Phase.UNKNOWN : st.phase;
-            status.setText(badge(ph));
-            status.setTextColor(getColor(colorFor(ph)));
-            line.setText(EngineLabels.humanLine(st, System.currentTimeMillis()));
-            line.setTextColor(getColor(st == null
-                    ? R.color.aether_muted : colorFor(st.phase)));
-            if (dot != null && dot.getBackground() != null) {
-                dot.getBackground().mutate().setTint(getColor(colorFor(ph)));
-            }
-
-            Button wake = card.findViewById(R.id.wake);
-            /* Disabled only while a wake is genuinely in progress, so a second
-               tap cannot queue another GPU run by accident. */
-            wake.setEnabled(st == null || st.phase != EngineCore.Phase.WAKING);
-
-            Button off = card.findViewById(R.id.off);
-            boolean busy = shutting.contains(slot);
-            off.setEnabled(!busy);
-            off.setText(busy ? "Shutting down…" : getString(R.string.shut_down));
-            if (busy) {
-                line.setText("Shutting down — waiting for the engine to stop");
-                line.setTextColor(getColor(R.color.aether_warn));
-                if (dot != null && dot.getBackground() != null) {
-                    dot.getBackground().mutate().setTint(getColor(R.color.aether_warn));
-                }
-            }
-            /* Shut down stays clickable in every state. A disabled button is
-               indistinguishable from a broken one, and the honest answer to
-               "shut down an engine that is not reachable" is a sentence, not
-               silence -- so the action always reports what it found. */
-        }
-        renderRouting();      // the pinned engine's phase, refreshed with the rest
-    }
-
-    /** One implementation, in the pure-Java layer, so EngineLabelsProof covers it. */
-    private static String badge(EngineCore.Phase p) {
-        return EngineLabels.badge(p);
-    }
-
-    private int colorFor(EngineCore.Phase p) {
-        switch (p) {
-            case LIVE:    return R.color.aether_ok;
-            case WAKING:  return R.color.aether_warn;
-            case QUOTA:   return R.color.aether_warn;
-            case ERROR:   return R.color.aether_error;
-            default:      return R.color.aether_muted;
-        }
-    }
-
-    private static String ago(long ms) {
-        long s = ms / 1000;
-        if (s < 5) return "just now";
-        if (s < 60) return s + "s ago";
-        long m = s / 60;
-        if (m < 60) return m + " min ago";
-        return (m / 60) + " h ago";
-    }
-
-    // ------------------------------------------------------------- actions
-
-    /**
-     * Wake an engine and then WATCH it, reporting what Kaggle and /api/ps
-     * actually say at each step. Nothing here claims an engine is ready before
-     * /api/ps has returned 200 with a loaded model.
-     */
-    private void wake(final EngineCore.Engine e, final Button wake) {
-        final String up = e.slot.toUpperCase(Locale.ROOT);
-        /* One push at a time per engine. A second one would start another
-           concurrent version that cannot be stopped from the API. */
-        if (!waking.add(e.slot)) {
-            announce("Engine " + up + " is already waking. A second push would start "
-                    + "another version Kaggle cannot be told to stop.");
+    private void chooseDefaultModel(ByokClient.Connection c) {
+        if (c.models.isEmpty()) {
+            editProvider(c);
             return;
         }
-        if (wake != null) wake.setEnabled(false);
-        /* A new wake supersedes any earlier confirmed shutdown, or the boot
-           would be reported OFF for as long as that record lived. */
-        confirmedOffAt.remove(e.slot);
-        /* "WAKING" the moment it is pressed. Nothing stronger is claimed until
-           /api/ps answers 200 with a loaded model. */
-        states.put(e.slot, new EngineCore.EngineState(e.slot, EngineCore.Phase.WAKING,
-                "waking — sending the kernel to Kaggle", null, 0, null, null));
-        announce("Waking engine " + up + "…");
-        transitions.incrementAndGet();
-        render();
-        actionExec.execute(() -> {
-            /* Any instance still serving for this engine is stood down first.
-               Without this, each wake added another GPU session Kaggle cannot be
-               told to stop, until the account hit its session cap and every
-               later push was refused. */
-            int stood = EngineCore.releasePrevious(e, cfg.offKey, cfg.beaconTopic,
-                    cfg.beaconSecret, 3600, 20_000);
-            if (stood > 0) {
-                telemetry("released " + stood + " previous instance(s) of engine " + up
-                        + " before pushing");
-                ui.post(() -> announce("Engine " + up + ": stood down " + stood
-                        + " previous instance" + (stood == 1 ? "" : "s") + " first"));
-            }
+        String[] models = c.models.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+                .setTitle("Default model · " + c.name)
+                .setItems(models, (dialog, which) -> {
+                    c.defaultModel = models[which];
+                    saveConnection(c);
+                    if (ModelPrefs.BYOK.equals(ModelPrefs.kind(this))
+                            && c.id.equals(ModelPrefs.connectionId(this))) {
+                        ModelPrefs.selectByok(this, c.id, c.defaultModel);
+                    }
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void confirmRemove(ByokClient.Connection c) {
+        new AlertDialog.Builder(this)
+                .setTitle("Remove " + c.name + "?")
+                .setMessage("The provider record and its encrypted API key will be removed from this device.")
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton("Remove", (dialog, which) -> {
+                    store.delete(c.id);
+                    if (ModelPrefs.BYOK.equals(ModelPrefs.kind(this))
+                            && c.id.equals(ModelPrefs.connectionId(this))) ModelPrefs.selectAether(this);
+                    renderProviders();
+                }).show();
+    }
+
+    private void confirmClear() {
+        if (store.list().isEmpty()) {
+            toast("There are no personal providers to remove.");
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Remove every personal provider?")
+                .setMessage("All personal provider records and encrypted keys will be removed from this device. Chat history remains.")
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton("Remove all", (dialog, which) -> {
+                    store.clear();
+                    ModelPrefs.selectAether(this);
+                    renderProviders();
+                    toast("Personal providers and keys removed.");
+                }).show();
+    }
+
+    // ------------------------------------------------------------ editor
+
+    private void editProvider(ByokClient.Connection existing) {
+        ByokClient.Connection original = existing == null ? null : existing.copy();
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(Ui.dp(this, 20), Ui.dp(this, 12), Ui.dp(this, 20), Ui.dp(this, 12));
+        scroll.addView(root);
+
+        List<ByokClient.Provider> providers = ByokClient.providers();
+        List<String> providerNames = new ArrayList<>();
+        int providerIndex = 0;
+        for (int i = 0; i < providers.size(); i++) {
+            providerNames.add(providers.get(i).name);
+            if (original != null && providers.get(i).id.equals(original.provider)) providerIndex = i;
+        }
+        Spinner provider = new Spinner(this);
+        provider.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, providerNames));
+        root.addView(fieldLabel("Provider connector"));
+        root.addView(provider);
+
+        EditText name = providerInput(original == null ? providers.get(0).name : original.name, "Display name");
+        EditText baseUrl = providerInput(original == null ? providers.get(0).baseUrl : original.baseUrl,
+                "https://provider.example.com/v1");
+        EditText apiKey = providerInput("", original == null ? "Paste your API key" : "Leave blank to keep the saved key");
+        apiKey.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        apiKey.setAutofillHints("");
+        EditText models = providerInput(joinModels(original == null ? providers.get(0).suggestedModels : original.models),
+                "Model IDs, one per line");
+        models.setMinLines(4);
+        models.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
+        EditText defaultModel = providerInput(original == null
+                ? (providers.get(0).suggestedModels.isEmpty() ? "" : providers.get(0).suggestedModels.get(0))
+                : original.defaultModel, "Default model ID");
+        CheckBox enabled = new CheckBox(this);
+        enabled.setText("Enabled");
+        enabled.setTextColor(getColor(R.color.aether_fg));
+        enabled.setChecked(original == null || original.enabled);
+
+        root.addView(fieldLabel("Display name")); root.addView(name);
+        root.addView(fieldLabel("API base URL")); root.addView(baseUrl);
+        root.addView(fieldLabel("API key")); root.addView(apiKey);
+        root.addView(fieldLabel("Model IDs · one per line")); root.addView(models);
+        root.addView(fieldLabel("Default model")); root.addView(defaultModel);
+        root.addView(enabled);
+
+        TextView help = Ui.meta(this, "Built-in connector URLs are managed automatically. Custom endpoints "
+                + "require public HTTPS and implement GET /models and POST /chat/completions. Suggested model "
+                + "IDs are hints, not proof of availability.");
+        root.addView(help);
+        TextView status = Ui.tv(this, original == null || original.testMessage.isEmpty()
+                ? "Not verified" : original.testMessage, 12, Ui.DIM);
+        root.addView(status);
+
+        Button test = new Button(this);
+        test.setText("Test & discover models");
+        test.setBackgroundResource(R.drawable.bg_pill_ghost);
+        test.setTextColor(getColor(R.color.aether_fg));
+        Button save = new Button(this);
+        save.setText(original == null ? "Save provider" : "Save changes");
+        save.setBackgroundResource(R.drawable.bg_pill_accent);
+        save.setTextColor(getColor(R.color.aether_bg));
+        root.addView(test, buttonParams());
+        root.addView(save, buttonParams());
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(original == null ? "Add a personal provider" : "Edit " + original.name)
+                .setView(scroll)
+                .setNegativeButton(R.string.cancel, null)
+                .create();
+        provider.setSelection(providerIndex);
+        if (original != null) provider.setEnabled(false);
+        baseUrl.setEnabled(original == null || "custom".equals(original.provider));
+
+        final String[] testState = new String[] {
+                original == null ? "" : original.testStatus,
+                original == null ? "" : original.testMessage,
+                String.valueOf(original == null ? 0L : original.testedAt)
+        };
+        TextWatcher invalidate = new SimpleWatcher(() -> {
+            testState[0] = ""; testState[1] = ""; testState[2] = "0";
+            status.setText("Not verified · connection details changed");
+            status.setTextColor(getColor(R.color.aether_muted));
+        });
+        apiKey.addTextChangedListener(invalidate);
+        baseUrl.addTextChangedListener(invalidate);
+
+        provider.setOnItemSelectedListener(new SimpleItemSelectedListener(position -> {
+            if (original != null) return;
+            ByokClient.Provider p = providers.get(position);
+            name.setText(p.name);
+            baseUrl.setText(p.baseUrl);
+            baseUrl.setEnabled("custom".equals(p.id));
+            models.setText(joinModels(p.suggestedModels));
+            defaultModel.setText(p.suggestedModels.isEmpty() ? "" : p.suggestedModels.get(0));
+            testState[0] = ""; testState[1] = "";
+        }));
+
+        test.setOnClickListener(v -> {
+            ByokClient.Provider selected = original == null ? providers.get(provider.getSelectedItemPosition())
+                    : ByokClient.provider(original.provider);
+            ByokClient.Connection draft = draft(original, selected, name, baseUrl, apiKey, models, defaultModel, enabled);
             try {
-                EngineCore.kernelPush(e, Credentials.renderNotebook(
-                        Credentials.notebookTemplate(this), cfg, e.slot),
-                        EngineCore.KERNEL_TITLE, true, 120_000);
-            } catch (Exception ex) {
-                transitions.decrementAndGet();
-                waking.remove(e.slot);
-                String msg = String.valueOf(ex.getMessage());
-                int code = ex instanceof EngineCore.EngineException
-                        ? ((EngineCore.EngineException) ex).status : -1;
-                /* A quota refusal is its own state, not a generic error. */
-                EngineCore.Action a = EngineCore.isQuotaRefusal(code, msg)
-                        ? EngineCore.Action.quotaHit("wake", msg)
-                        : EngineCore.Action.failed("wake", msg);
-                telemetry("wake FAILED: engine " + up + " -- " + msg);
-                states.put(e.slot, EngineCore.classify(e.slot, EngineCore.NO_CHECK, null,
-                        null, safeKernelStatus(e), a));
-                final EngineCore.EngineState bad = states.get(e.slot);
-                ui.post(() -> {
-                    render();
-                    announce("Engine " + up + ": " + badge(bad.phase) + " — " + bad.detail);
-                    if (wake != null) wake.setEnabled(true);
-                });
+                if (draft.apiKey.isEmpty() && original != null) draft.apiKey = store.withKey(original.id).apiKey;
+            } catch (Exception e) {
+                status.setText(e.getMessage());
                 return;
             }
-            telemetry("wake accepted by Kaggle: engine " + up);
-            /* Accepted. That earns WAKING and nothing more. */
-            states.put(e.slot, new EngineCore.EngineState(e.slot, EngineCore.Phase.WAKING,
-                    "waking — Kaggle accepted the kernel; booting takes several minutes",
-                    null, 0, null, null));
-            ui.post(() -> {
-                render();
-                announce("Engine " + up + ": kernel accepted. It becomes LIVE only when "
-                        + "/api/ps answers 200 with a model.");
-            });
-            watchToLive(e.slot, System.currentTimeMillis() + WAKE_WATCH_MS, wake);
-        });
-    }
-
-    /** Poll one engine until /api/ps really answers, or the window runs out. */
-    private void watchToLive(final String slot, long deadline, final Button wake) {
-        final String up = slot.toUpperCase(Locale.ROOT);
-        final int myGen = generation.get();
-        try {
-            while (System.currentTimeMillis() < deadline && generation.get() == myGen) {
-                /* Probe EVERY tunnel this slot has announced, not just the first.
-                   One engine can have several in the window (Kaggle leaves old
-                   versions running), and a watcher that only ever looks at the
-                   first match can sit on a dead one for ever while the real
-                   tunnel goes unexamined -- which reads as "stuck on WAKING". */
-                List<String> urls = new ArrayList<>();
+            test.setEnabled(false);
+            save.setEnabled(false);
+            status.setText("Testing the real provider endpoint…");
+            status.setTextColor(getColor(R.color.aether_warn));
+            bg.execute(() -> {
                 try {
-                    for (String u : EngineCore.urlsFor(cfg.beaconTopic, cfg.beaconSecret,
-                            slot, BEACON_LOOKBACK_S, 20_000, 6)) urls.add(u);
-                } catch (Exception ignored) { }
-                String url = null;
-                int status = EngineCore.NO_CHECK;
-                List<String> models = new ArrayList<>();
-                for (String u : urls) {
-                    EngineCore.Health h = EngineCore.health(u, 15_000);
-                    if (h.status == 200 && !h.models.isEmpty()) {
-                        url = u; status = h.status; models = h.models;
-                        break;                                  // fully live: stop here
-                    }
-                    if (h.status == 200 && status != 200) { url = u; status = h.status; }
-                }
-                if (url != null) { tunnels.put(slot, url); confirmedOffAt.remove(slot); }
-                else { tunnels.remove(slot); liveUrls.remove(slot); }
-                /* A new wake in progress is never shadowed by an earlier
-                   confirmed shutdown: wake() clears it, and 0 is passed here. */
-                EngineCore.EngineState st = EngineCore.classify(slot, status, models, url,
-                        status == 200 ? null : safeKernelStatus(cfg.bySlot(slot)), null, 0L);
-                states.put(slot, st);
-                if (st.isLive()) {
-                    liveUrls.put(slot, st.url);
-                    telemetry("engine " + up + " LIVE after "
-                            + ((System.currentTimeMillis() - (deadline - WAKE_WATCH_MS)) / 1000)
-                            + "s");
-                    final EngineCore.EngineState live = st;
-                    ui.post(() -> {
-                        render();
-                        announce("Engine " + up + " is LIVE — "
-                                + String.join(", ", live.models));
-                        if (wake != null) wake.setEnabled(true);
+                    List<String> discovered = ByokClient.discoverModels(draft);
+                    runOnUiThread(() -> {
+                        if (isDestroyed()) return;
+                        testState[0] = "verified";
+                        testState[1] = "Provider responded successfully with " + discovered.size() + " models.";
+                        testState[2] = String.valueOf(System.currentTimeMillis());
+                        status.setText(testState[1]);
+                        status.setTextColor(getColor(R.color.aether_ok));
+                        Set<String> merged = new LinkedHashSet<>(discovered);
+                        merged.addAll(splitModels(models.getText().toString()));
+                        models.setText(joinModels(new ArrayList<>(merged)));
+                        if (!discovered.contains(defaultModel.getText().toString()) && !discovered.isEmpty()) {
+                            defaultModel.setText(discovered.get(0));
+                        }
+                        test.setEnabled(true); save.setEnabled(true);
                     });
-                    return;
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        if (isDestroyed()) return;
+                        testState[0] = "failed";
+                        testState[1] = e.getMessage() == null ? "Connection test failed." : e.getMessage();
+                        testState[2] = String.valueOf(System.currentTimeMillis());
+                        status.setText("Not verified · " + testState[1]);
+                        status.setTextColor(getColor(R.color.aether_error));
+                        test.setEnabled(true); save.setEnabled(true);
+                    });
                 }
-                ui.post(this::render);
-                try { Thread.sleep(FAST_POLL_MS); } catch (InterruptedException ie) { return; }
-            }
-            telemetry("engine " + up + " did NOT come live inside "
-                    + (WAKE_WATCH_MS / 60_000) + " min");
-            ui.post(() -> {
-                render();
-                announce("Engine " + up + " did not answer /api/ps inside "
-                        + (WAKE_WATCH_MS / 60_000) + " minutes. It is not LIVE.");
-                if (wake != null) wake.setEnabled(true);
             });
-        } finally {
-            transitions.decrementAndGet();
-            waking.remove(slot);
-        }
-    }
-
-    /** The current tunnel URL for one slot, or null when it has not announced. */
-    private String liveUrlFor(String slot) {
-        try {
-            for (EngineCore.LiveLink l : EngineCore.liveLinks(
-                    cfg.beaconTopic, cfg.beaconSecret, BEACON_LOOKBACK_S, 20_000)) {
-                if (slot.equals(l.slot)) return l.url;
-            }
-        } catch (Exception ignored) { }
-        return null;
-    }
-
-    /** One engine: confirm first, because this releases a GPU quota. */
-    private void confirmShutDown(final String slot) {
-        new AlertDialog.Builder(this)
-                .setTitle("Shut down engine " + slot.toUpperCase(Locale.ROOT) + "?")
-                .setMessage("This releases the GPU that engine is holding. "
-                        + "OFF is only reported once /api/ps stops answering.")
-                .setNegativeButton(R.string.cancel, null)
-                .setPositiveButton(R.string.shut_down, (d, w) -> shutDown(slot))
-                .show();
-    }
-
-    private void shutDown(final String slot) {
-        announce("Shutting down engine " + slot.toUpperCase(Locale.ROOT) + "…");
-        /* Change the row at once. Confirming a shutdown means watching the
-           engine stop answering, which takes several seconds; a button that
-           looks inert for that long reads as broken, so it gets pressed again
-           -- and each press queued another shutdown of the same engine. */
-        shutting.add(slot);
-        render();
-        actionExec.execute(() -> {
-            try {
-                final EngineCore.EngineState result = shutOne(slot);
-                states.put(slot, result);
-                telemetry("shutdown engine " + slot.toUpperCase(Locale.ROOT) + ": "
-                        + badge(result.phase) + " -- " + result.detail);
-                ui.post(() -> {
-                    render();
-                    announce("Engine " + slot.toUpperCase(Locale.ROOT) + ": "
-                            + badge(result.phase) + " — " + result.detail);
-                });
-            } finally {
-                shutting.remove(slot);
-                ui.post(this::render);
-            }
         });
-    }
 
-    private void shutDownAll() {
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.shut_down_all_title)
-                .setMessage(R.string.shut_down_all_message)
-                .setNegativeButton(R.string.cancel, null)
-                .setPositiveButton(R.string.shut_down_all, (d, w) -> {
-                    offAll.setEnabled(false);
-                    announce("Shutting down every live engine…");
-                    actionExec.execute(() -> {
-                        /* Every engine with an announced tunnel, whether or not
-                           this app had already seen it fully LIVE -- same reason
-                           as in shutOne(). */
-                        List<String> targets = new ArrayList<>();
-                        for (EngineCore.Engine e : cfg.engines) {
-                            if (liveUrls.containsKey(e.slot) || tunnels.containsKey(e.slot)) {
-                                targets.add(e.slot);
-                                continue;
-                            }
-                            String url = liveUrlFor(e.slot);
-                            if (url != null) { liveUrls.put(e.slot, url); targets.add(e.slot); }
-                        }
-                        if (targets.isEmpty()) {
-                            ui.post(() -> {
-                                offAll.setEnabled(true);
-                                announce(getString(R.string.nothing_to_shut_down));
-                            });
-                            return;
-                        }
-                        StringBuilder report = new StringBuilder();
-                        for (String slot : targets) {
-                            ui.post(this::render);
-                            EngineCore.EngineState result = shutOne(slot);
-                            states.put(slot, result);
-                            if (report.length() > 0) report.append("\n");
-                            report.append(slot.toUpperCase(Locale.ROOT)).append(": ")
-                                    .append(badge(result.phase)).append(" — ").append(result.detail);
-                            ui.post(this::render);
-                        }
-                        final String done = report.toString();
-                        ui.post(() -> {
-                            offAll.setEnabled(true);
-                            announce(done);
-                        });
+        save.setOnClickListener(v -> {
+            ByokClient.Provider selected = original == null ? providers.get(provider.getSelectedItemPosition())
+                    : ByokClient.provider(original.provider);
+            ByokClient.Connection draft = draft(original, selected, name, baseUrl, apiKey, models, defaultModel, enabled);
+            draft.testStatus = testState[0]; draft.testMessage = testState[1];
+            try { draft.testedAt = Long.parseLong(testState[2]); } catch (Exception ignored) { }
+            save.setEnabled(false);
+            bg.execute(() -> {
+                try {
+                    store.save(draft);
+                    runOnUiThread(() -> {
+                        if (isDestroyed()) return;
+                        renderProviders();
+                        dialog.dismiss();
+                        toast("verified".equals(draft.testStatus)
+                                ? "Verified provider saved." : "Provider saved locally; connection not verified.");
                     });
-                })
-                .show();
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        if (isDestroyed()) return;
+                        save.setEnabled(true);
+                        status.setText(e.getMessage());
+                        status.setTextColor(getColor(R.color.aether_error));
+                    });
+                }
+            });
+        });
+        dialog.show();
     }
 
+    private ByokClient.Connection draft(ByokClient.Connection original, ByokClient.Provider selected,
+                                        EditText name, EditText baseUrl, EditText apiKey, EditText models,
+                                        EditText defaultModel, CheckBox enabled) {
+        ByokClient.Connection c = original == null ? new ByokClient.Connection() : original.copy();
+        c.provider = selected.id;
+        c.name = name.getText().toString().trim();
+        c.baseUrl = baseUrl.getText().toString().trim();
+        c.apiKey = apiKey.getText().toString().trim();
+        c.defaultModel = defaultModel.getText().toString().trim();
+        c.enabled = enabled.isChecked();
+        c.models.clear();
+        c.models.addAll(splitModels(models.getText().toString()));
+        return c;
+    }
 
-    /** The telemetry topic even when credentials failed to load. */
-    private String telemetryTopicOrEmpty() {
-        try {
-            Credentials.Config c = Credentials.load(this);
-            return c == null ? "" : c.telemetryTopic;
-        } catch (Exception e) {
-            return "";
+    private static List<String> splitModels(String raw) {
+        Set<String> out = new LinkedHashSet<>();
+        for (String line : raw.split("[\\n,]")) {
+            String model = line.trim();
+            if (!model.isEmpty()) out.add(model);
         }
+        return new ArrayList<>(out);
     }
 
-    /**
-     * Report one line to the telemetry topic.
-     *
-     * This is how an installed build can be observed at all: the build host has
-     * no route to the phone, but both sides can reach ntfy. It runs off the UI
-     * thread, publishes nothing secret (URLs are scrubbed, keys never leave the
-     * device), and can never affect what the user sees.
-     */
-    private void telemetry(final String what) {
-        if (cfg == null || cfg.telemetryTopic == null || cfg.telemetryTopic.isEmpty()) return;
-        final String body = "build " + BuildConfig.VERSION_NAME + "(" + BuildConfig.VERSION_CODE
-                + ") " + EngineCore.scrubUrls(what);
-        actionExec.execute(() -> EngineCore.publish(cfg.telemetryTopic, body, 15_000));
-    }
-
-    /** Last action's outcome, always visible -- no action fails silently. */
-    private void announce(String message) {
-        /* Belt and braces: EngineState already scrubs, and nothing here should
-           ever hold a tunnel, but the screen must never print a raw endpoint. */
-        final String safe = EngineCore.scrubUrls(message);
-        ui.post(() -> note.setText(safe));
-    }
-
-    private EngineCore.EngineState shutOne(String slot) {
-        /* EVERY tunnel this slot has announced, not just the newest. Kaggle
-           leaves previous kernel versions running after a new push and offers no
-           API to stop them (issue #388), so each has its own tunnel and its own
-           GPU. Killing only the newest one is why shutdown looked like it
-           failed. */
-        List<String> urls = new ArrayList<>();
-        String known = liveUrls.get(slot);
-        if (known == null) known = tunnels.get(slot);
-        if (known != null) urls.add(known);
-        try {
-            for (String u : EngineCore.urlsFor(cfg.beaconTopic, cfg.beaconSecret,
-                    slot, BEACON_LOOKBACK_S, 20_000, 6)) {
-                if (!urls.contains(u)) urls.add(u);
-            }
-        } catch (Exception ignored) { }
-
-        if (urls.isEmpty()) {
-            /* Nothing announced. Not an error -- there is nothing to shut down.
-               Classify from Kaggle instead of inventing a failure. */
-            tunnels.remove(slot);
-            liveUrls.remove(slot);
-            return EngineCore.classify(slot, EngineCore.NO_CHECK, null, null,
-                    safeKernelStatus(cfg.bySlot(slot)), null, 0L);
+    private static String joinModels(List<String> models) {
+        StringBuilder out = new StringBuilder();
+        for (String model : models) {
+            if (out.length() > 0) out.append('\n');
+            out.append(model);
         }
+        return out.toString();
+    }
 
-        transitions.incrementAndGet();
-        try {
-            EngineCore.ShutdownAll r = EngineCore.shutDownEvery(
-                    urls, cfg.offKey, 30_000, 8, 4_000);
-            tunnels.remove(slot);
-            liveUrls.remove(slot);
-            if (r.allDown) {
-                /* Every instance that was answering has been watched stopping. */
-                confirmedOffAt.put(slot, System.currentTimeMillis());
-                return new EngineCore.EngineState(slot, EngineCore.Phase.OFF,
-                        "off — " + r.message, null, System.currentTimeMillis(), null, null);
-            }
-            /* A real failure: an instance accepted /off and kept answering. */
-            return EngineCore.classify(slot, EngineCore.NO_CHECK, null, null,
-                    safeKernelStatus(cfg.bySlot(slot)),
-                    EngineCore.Action.failed("shutdown", r.message), 0L);
-        } catch (Exception ex) {
-            return EngineCore.classify(slot, EngineCore.NO_CHECK, null, null, null,
-                    EngineCore.Action.failed("shutdown", String.valueOf(ex.getMessage())), 0L);
-        } finally {
-            transitions.decrementAndGet();
+    private TextView fieldLabel(String text) {
+        TextView label = Ui.tv(this, text, 12, Ui.PRIMARY);
+        label.setPadding(0, Ui.dp(this, 10), 0, Ui.dp(this, 4));
+        return label;
+    }
+
+    private EditText providerInput(String value, String hint) {
+        EditText input = new EditText(this);
+        input.setText(value);
+        input.setHint(hint);
+        input.setTextColor(getColor(R.color.aether_fg));
+        input.setHintTextColor(getColor(R.color.aether_dim));
+        input.setBackgroundResource(R.drawable.bg_field);
+        input.setPadding(Ui.dp(this, 10), Ui.dp(this, 8), Ui.dp(this, 10), Ui.dp(this, 8));
+        input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        return input;
+    }
+
+    private void toast(String text) {
+        Toast.makeText(this, text == null ? "Provider operation failed." : text, Toast.LENGTH_LONG).show();
+    }
+
+    private interface SelectedListener { void selected(int position); }
+
+    private static final class SimpleItemSelectedListener implements android.widget.AdapterView.OnItemSelectedListener {
+        private final SelectedListener listener;
+        SimpleItemSelectedListener(SelectedListener listener) { this.listener = listener; }
+        @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+            listener.selected(position);
         }
+        @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+    }
+
+    private static final class SimpleWatcher implements TextWatcher {
+        private final Runnable changed;
+        SimpleWatcher(Runnable changed) { this.changed = changed; }
+        @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+        @Override public void onTextChanged(CharSequence s, int start, int before, int count) { changed.run(); }
+        @Override public void afterTextChanged(Editable s) { }
     }
 }

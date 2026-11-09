@@ -1,52 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="@color/aether_bg">
+    android:orientation="vertical" android:background="@color/aether_bg">
+
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:padding="16dp">
-
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="horizontal" android:gravity="center_vertical">
-            <TextView android:id="@+id/back_btn" android:layout_width="wrap_content"
-                android:layout_height="wrap_content" android:text="‹"
-                android:textColor="@color/aether_accent" android:textSize="28sp"
-                android:paddingRight="12dp" android:paddingLeft="4dp"
-                android:contentDescription="@string/back" />
-            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_weight="1" android:text="@string/settings"
-                android:textColor="@color/aether_fg" android:textSize="20sp"
+        android:orientation="horizontal" android:gravity="center_vertical"
+        android:paddingStart="10dp" android:paddingEnd="18dp"
+        android:paddingTop="16dp" android:paddingBottom="12dp">
+        <ImageButton android:id="@+id/back_btn" android:layout_width="44dp"
+            android:layout_height="44dp" android:background="@drawable/bg_ghost_circle"
+            android:src="@drawable/ic_back" android:contentDescription="@string/back"
+            android:padding="12dp" />
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:orientation="vertical"
+            android:layout_marginStart="12dp">
+            <TextView android:id="@+id/settings_title" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="Settings"
+                android:textColor="@color/aether_fg" android:textSize="24sp"
                 android:textStyle="bold" />
+            <TextView android:id="@+id/settings_subtitle" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:layout_marginTop="2dp"
+                android:text="Your workspace. Your rules." android:textColor="@color/aether_muted"
+                android:textSize="12sp" />
         </LinearLayout>
-
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="18dp" android:text="@string/routing"
-            android:textColor="@color/aether_muted" android:textSize="12sp"
-            android:textAllCaps="true" android:letterSpacing="0.08" />
-        <LinearLayout android:id="@+id/routing_rows" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:orientation="vertical"
-            android:layout_marginTop="8dp" />
-
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="22dp" android:text="@string/engines"
-            android:textColor="@color/aether_muted" android:textSize="12sp"
-            android:textAllCaps="true" android:letterSpacing="0.08" />
-        <LinearLayout android:id="@+id/engine_rows" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:orientation="vertical"
-            android:layout_marginTop="8dp" />
-
-        <Button android:id="@+id/check_now" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="18dp"
-            android:background="@drawable/bg_pill_ghost" android:text="@string/check_now"
-            android:textColor="@color/aether_fg" android:textSize="13sp" />
-
-        <Button android:id="@+id/off_all" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="18dp"
-            android:background="@drawable/bg_pill_ghost" android:text="@string/shut_down_all"
-            android:textColor="@color/aether_error" android:textSize="13sp" />
-
-        <TextView android:id="@+id/settings_note" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:layout_marginTop="16dp"
-            android:textColor="@color/aether_dim" android:textSize="11sp"
-            android:lineSpacingExtra="3dp" />
     </LinearLayout>
-</ScrollView>
+
+    <FrameLayout android:id="@+id/settings_content" android:layout_width="match_parent"
+        android:layout_height="0dp" android:layout_weight="1" />
+</LinearLayout>

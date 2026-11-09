@@ -17,6 +17,16 @@ const CONNECT_TIMEOUT_MS = 30_000;
 
 export type EngineRouting = "auto" | "a" | "b" | "c" | "d";
 
+/** Keep internal fleet slot identities out of user-facing chat errors. */
+export function publicEngineError(message: string): string {
+  return message
+    .replace(/\b[A-D](?:\s*→\s*[A-D]){1,3}\b/g, "automatic fallback")
+    .replace(/\bfailover\s+from\s+[A-D]\s+to\s+[A-D]\b/gi, "automatic fallback within Aether Uncensored")
+    .replace(/\bEngine\s+[A-D]\b/g, "Aether Uncensored")
+    .replace(/\b(?:slot|engine)\s*[:=]?\s*[A-D]\b/gi, "Aether Uncensored")
+    .replace(/\s*\(manual routing — no silent switch\)/g, "");
+}
+
 export interface EngineChatOutcome {
   status: "complete" | "stopped" | "error";
   text: string;
@@ -199,6 +209,7 @@ export async function runEngineChat(options: {
   signal: AbortSignal;
   streaming: boolean;
   mode: EngineRouting;
+  instructions?: string;
   onEvent: (event: AgentEvent) => void;
 }): Promise<EngineChatOutcome> {
   /* HARD TIMEOUT: race the actual work against a timer so a hung engine
@@ -233,9 +244,10 @@ async function runEngineChatInner(options: {
   signal: AbortSignal;
   streaming: boolean;
   mode: EngineRouting;
+  instructions?: string;
   onEvent: (event: AgentEvent) => void;
 }): Promise<EngineChatOutcome> {
-  const { turns, signal, streaming, mode, onEvent } = options;
+  const { turns, signal, streaming, mode, instructions, onEvent } = options;
   const attachments: AttachmentMeta[] = [];
   const citations: Array<{ title: string; url: string }> = [];
   let content = "";
@@ -244,10 +256,17 @@ async function runEngineChatInner(options: {
   let engineState: string | undefined;
   let engineUsed: string | undefined;
 
-  /* Only user/assistant ever reach the engine — role:"system" is never sent. */
+  /* Only user/assistant ever reach the engine — role:"system" is never sent.
+     Custom instructions are scoped as user-provided context on the last turn. */
   const messages = turns
     .filter((t) => t.role === "user" || t.role === "assistant")
     .map((t) => ({ role: t.role, content: t.content }));
+  if (instructions?.trim() && messages.length > 0) {
+    const last = messages[messages.length - 1];
+    if (last.role === "user") {
+      last.content = `[User instructions for this request]\n${instructions.trim()}\n\n[User request]\n${last.content}`;
+    }
+  }
 
   /**
    * A CONNECT deadline only. `AbortSignal.timeout()` stays armed for the whole
@@ -318,7 +337,7 @@ async function runEngineChatInner(options: {
     let detail = `Engine stream error (HTTP ${response.status}).`;
     try {
       const body = (await response.json()) as { error?: string; state?: string; engine?: string };
-      if (body?.error) detail = body.error;
+      if (body?.error) detail = publicEngineError(body.error);
       engineState = body?.state;
       engineUsed = body?.engine;
     } catch {
@@ -394,14 +413,14 @@ async function runEngineChatInner(options: {
         );
       }
       const error = line.error as { message?: string } | undefined;
-      if (error?.message) failed = error.message;
+      if (error?.message) failed = publicEngineError(error.message);
       if (line.done === true) break;
     }
   } catch (error) {
     if (idleController.signal.aborted && !signal.aborted) {
       failed = `The engine stream went idle for ${IDLE_TIMEOUT_MS / 1000}s. Partial output preserved — try again.`;
     } else if (!signal.aborted) {
-      failed = failed ?? (error as Error)?.message ?? "The engine stream broke.";
+      failed = publicEngineError(failed ?? (error as Error)?.message ?? "The engine stream broke.");
     }
   } finally {
     if (idleTimer) clearTimeout(idleTimer);

@@ -8,12 +8,13 @@ import {
   useRef,
   useState,
 } from "react";
-import type { AttachmentMeta } from "@/lib/types";
+import type { AttachmentMeta, Settings } from "@/lib/types";
 import { cn, formatBytes } from "@/lib/utils";
 import { FileStore } from "@/storage";
 import { MediaProvider } from "@/providers";
 import type { SlashResult } from "@/hooks/useAether";
 import { Icon } from "./icons";
+import { ModelSelector } from "./model-selector";
 
 export interface ComposerHandle {
   addFiles: (files: File[]) => Promise<void>;
@@ -40,10 +41,13 @@ interface ComposerProps {
   onSend: (text: string, attachments: AttachmentMeta[]) => void;
   onStop: () => void;
   onCommand: (name: string, arg: string) => Promise<SlashResult>;
+  settings: Settings;
+  onUpdateSettings: (patch: Partial<Settings>) => void;
+  onOpenSettings: () => void;
 }
 
 export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
-  { busy, disabled, onSend, onStop, onCommand },
+  { busy, disabled, onSend, onStop, onCommand, settings, onUpdateSettings, onOpenSettings },
   ref,
 ) {
   const [value, setValue] = useState("");
@@ -153,7 +157,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         setValue("");
         return;
       }
-      if (event.key === "Enter" && !event.shiftKey) {
+      if (event.key === "Enter" && !event.shiftKey && (settings.sendOnEnter || event.ctrlKey || event.metaKey)) {
         event.preventDefault();
         const command = slashMatches[slashIndex];
         const hasArg = value.trim().length > command.name.length + 1;
@@ -169,7 +173,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       }
     }
 
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey && (settings.sendOnEnter || event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       /* Known slash commands execute; anything else is sent as a message. */
       if (knownCommand(value)) {
@@ -303,16 +307,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           )}
         </div>
 
-        <div className="mx-auto mt-2 flex items-center justify-center text-[11px] text-fog-600">
+        <div className="mx-auto mt-2 flex items-center justify-between gap-3 text-[11px] text-fog-600">
+          <ModelSelector settings={settings} onUpdate={onUpdateSettings} onOpenSettings={onOpenSettings} />
           {attaching ? (
             <span>Storing attachment…</span>
           ) : (
-            <span className="flex flex-wrap items-center justify-center gap-x-1.5 whitespace-nowrap">
-              <span className="hidden sm:inline">
-                <kbd className="rounded border border-line bg-ink-850 px-1 py-px font-mono text-[10px]">Enter</kbd> send ·{" "}
-                <kbd className="rounded border border-line bg-ink-850 px-1 py-px font-mono text-[10px]">Shift+Enter</kbd> newline · paste or drop media
-              </span>
-              <span className="sm:hidden">Enter to send · Shift+Enter for newline</span>
+            <span className="hidden text-right md:block">
+              {settings.sendOnEnter ? (
+                <><kbd className="rounded border border-line bg-ink-850 px-1 py-px font-mono text-[10px]">Enter</kbd> send ·{" "}</>
+              ) : (
+                <><kbd className="rounded border border-line bg-ink-850 px-1 py-px font-mono text-[10px]">Ctrl+Enter</kbd> send ·{" "}</>
+              )}
+              <kbd className="rounded border border-line bg-ink-850 px-1 py-px font-mono text-[10px]">Shift+Enter</kbd> newline · paste or drop media
             </span>
           )}
         </div>

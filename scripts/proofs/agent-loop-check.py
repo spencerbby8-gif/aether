@@ -74,6 +74,9 @@ class FakeProc:
     def kill(self):
         pass
 
+    def poll(self):
+        return 0
+
 
 class FakeSubprocess:
     """Stands in for the curl call the final-answer path makes."""
@@ -95,7 +98,7 @@ def make_env(script):
     """script: list of model responses, one per iteration."""
     calls = {'n': 0}
 
-    def ollama_stream(payload, push, timeout=1200, on_think=None):
+    def ollama_stream(payload, push, timeout=1200, on_think=None, on_progress=None):
         k = calls['n']
         calls['n'] += 1
         PAYLOADS.append(json.loads(json.dumps(payload)))
@@ -154,7 +157,8 @@ def make_env(script):
             json.dumps({'message': {'content': 'FINAL ANSWER'}, 'done': False}).encode(),
             json.dumps({'message': {'content': ''}, 'done': True}).encode(),
         ]),
-        'LAST_HIT': {'t': 0},
+        'LAST_HIT': {'t': 0}, 'GEN_DIR': '/tmp/aether-proof-generated', 'notify': lambda *a, **k: None, '_CURRENT': {'session': 'default', 'ws': '/tmp'},
+        '_session_dir': lambda session: '/tmp', '_publish_archives': lambda *a, **k: None, '_checkpoint_workspace': lambda *a, **k: None,
     }
     exec(helpers, ns)
     exec(func_src, ns)
@@ -508,7 +512,7 @@ print("== a model call that raises still ends the request ==")
 # `q.get()` blocked forever. The request never reached completed, error or
 # aborted -- it just stopped answering, which is the exact failure the client
 # experiences as a permanent "Thinking".
-def _boom(payload, push, timeout=1200, on_think=None):
+def _boom(payload, push, timeout=1200, on_think=None, on_progress=None):
     raise RuntimeError('stub exploded')
 
 
@@ -526,6 +530,30 @@ _rx = h_x.wfile.buf.getvalue().decode('utf-8', 'replace')
 chk("it reports the failure instead of going silent",
     'engine error' in _rx and 'stub exploded' in _rx, _rx.strip()[-110:])
 chk("and the response still terminates", '"done": true' in _rx, 'scanned')
+
+print("== discussion is a hard tool boundary ==")
+TOOL_CALLS_SEEN[:] = []
+PAYLOADS[:] = []
+ns_d, _ = make_env([step_tools(tc('web_search', query='must not run')), step_text('not reached')])
+actual_discussion_tools = []
+def _forbidden_search(**kwargs):
+    actual_discussion_tools.append(kwargs)
+    return 'must not happen'
+ns_d['EXEC']['web_search'] = _forbidden_search
+h_d = FakeHandler()
+ns_d['agent_stream'](h_d, {'discussion': True,
+    'messages': [{'role': 'user', 'content': 'search for something'}]})
+chk("discussion sends no tool schema to the model",
+    len(PAYLOADS) == 1 and PAYLOADS[0].get('tools') == [],
+    str([] if not PAYLOADS else PAYLOADS[0].get('tools')))
+chk("discussion discards even an unexpected tool call",
+    len(actual_discussion_tools) == 0, str(actual_discussion_tools))
+chk("discussion avoids the reasoning overhead",
+    len(PAYLOADS) == 1 and PAYLOADS[0].get('think') is False,
+    str(None if not PAYLOADS else PAYLOADS[0].get('think')))
+chk("discussion carries a plain-language instruction",
+    len(PAYLOADS) == 1 and 'DISCUSSION MODE' in PAYLOADS[0]['messages'][0]['content'],
+    "system instruction present")
 
 print("\n%d passed, %d failed" % (ok, fail))
 raise SystemExit(0 if fail == 0 else 1)

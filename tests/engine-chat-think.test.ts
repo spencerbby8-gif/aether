@@ -8,7 +8,7 @@
 import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { runEngineChat } from "@/providers/engine-chat";
+import { publicEngineError, runEngineChat } from "@/providers/engine-chat";
 
 const OPEN = "<th" + "ink>";
 const CLOSE = "</th" + "ink>";
@@ -107,5 +107,18 @@ describe("runEngineChat reasoning-marker handling", () => {
     expect(outcome.text).not.toContain("let me verify");
     expect(outcome.text).toBe("The answer is 42.  Confirmed.");
     expect(streamed).not.toContain("think>");
+  });
+});
+
+
+describe("public Aether identity", () => {
+  it("never exposes internal slot identities or fallback hops in chat errors", () => {
+    expect(publicEngineError("Engine B failed: upstream unavailable (manual routing — no silent switch)")).toBe(
+      "Aether Uncensored failed: upstream unavailable",
+    );
+    expect(publicEngineError("failover from a to c; route A → B → C → D; slot=d")).toBe(
+      "automatic fallback within Aether Uncensored; route automatic fallback; Aether Uncensored",
+    );
+    expect(publicEngineError("The provider returned HTTP 503.")).toBe("The provider returned HTTP 503.");
   });
 });

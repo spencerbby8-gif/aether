@@ -71,6 +71,9 @@ class FakeProc:
     def kill(self):
         pass
 
+    def poll(self):
+        return 0
+
 
 class FakeSubprocess:
     PIPE = -1
@@ -86,7 +89,7 @@ def run_agent(payload):
     """Run the REAL agent_stream. Returns (payloads the model saw, client text)."""
     seen = []
 
-    def ollama_stream(p, push, timeout=1200, on_think=None):
+    def ollama_stream(p, push, timeout=1200, on_think=None, on_progress=None):
         seen.append(json.loads(json.dumps(p)))
         m = {'content': 'ok'}
         push(m['content'])
@@ -100,7 +103,8 @@ def run_agent(payload):
         'EXEC': {'web_search': lambda **k: 'r'},
         'ollama_stream': ollama_stream,
         'subprocess': FakeSubprocess(),
-        'LAST_HIT': {'t': 0},
+        'LAST_HIT': {'t': 0}, 'GEN_DIR': '/tmp/aether-proof-generated', 'notify': lambda *a, **k: None, '_CURRENT': {'session': 'default', 'ws': '/tmp'},
+        '_session_dir': lambda session: '/tmp', '_publish_archives': lambda *a, **k: None, '_checkpoint_workspace': lambda *a, **k: None,
     }
     exec(helpers, ns)
     exec(agent_src, ns)
@@ -118,7 +122,7 @@ def run_agent(payload):
     return seen, ''.join(chunks)
 
 
-ns0 = {}
+ns0 = {'GEN_DIR': '/tmp/aether-proof-generated', 'notify': lambda *a, **k: None}
 exec(helpers, ns0)
 huq = ns0['has_user_query']
 exec(src[src.index('def history_window'):src.index('def has_user_query')], ns0)
