@@ -69,45 +69,79 @@ public class ScreenshotTest {
         shot("01-chat-welcome");
 
         openWorkspace();
-        shot("02-workspace");
+        assertVisible("Inspect and edit the files your Agent creates");
+        shot("02-workspace-files");
         device.pressBack();
         device.waitForIdle();
+
+        openHistory();
+        assertVisible("Sign in or create account");
+        assertVisible("Settings");
+        shot("03-history-account-settings");
+        clickId("account_btn");
+        assertVisible("Your Aether account");
+        assertVisible("Continue with Google");
+        shot("04-account-auth");
+        device.pressBack();
+        device.waitForIdle();
+        if (device.findObject(By.textContains("RECENT CHATS")) != null) {
+            device.pressBack();
+            device.waitForIdle();
+        }
 
         clickId("model_selector");
         assertVisible("Choose your model");
         assertVisible("Personal OpenAI");
-        shot("03-model-picker");
+        shot("05-model-picker");
         clickText("Personal OpenAI");
         clickText("gpt-4o-mini");
         assertVisible("gpt-4o-mini");
 
         clickId("mode_discuss");
-        assertVisible("Conversation only · no tools");
-        shot("04-discussion-composer");
+        assertVisible("Fast conversation · search, fetch and crawl");
+        shot("06-discussion-composer");
+        clickId("mode_agent");
+        clickId("attach_btn");
+        assertVisible("Connectors & MCP");
+        assertVisible("Auto-run Agent commands");
+        shot("07-agent-plus-menu");
+        clickText("Connectors & MCP");
+        assertVisible("GitHub");
+        assertVisible("Custom MCP server");
+        shot("08-connector-catalog");
+        clickText("GitHub", true);
+        assertVisible("Read/search tools");
+        assertVisible("Create/edit tools");
+        assertVisible("Execute/workflow tools");
+        shot("09-github-permissions");
+        device.pressBack();
+        device.pressBack();
+        device.pressBack();
+        device.waitForIdle();;
 
         clickId("settings_btn");
         assertClearOfSystemBars("back_btn", true);
         assertVisible("Make Aether work the way you do.");
-        shot("05-settings-home");
+        shot("10-settings-home");
 
         clickText("Models");
         assertVisible("One clear choice for every conversation.");
-        shot("06-settings-models");
+        shot("11-settings-models");
         device.pressBack();
 
         clickText("Personal Providers");
         assertVisible("Your keys. Your models. Direct connections.");
         assertVisible("Personal OpenAI");
-        shot("07-settings-providers");
+        shot("12-settings-providers");
         device.pressBack();
 
         clickText("Appearance");
         assertVisible("A calm interface, tuned to you.");
-        shot("08-settings-appearance");
+        shot("13-settings-appearance");
         clickText("App theme");
         clickText("Light");
         assertVisible("Make Aether work the way you do.");
-        shot("09-settings-light");
+        shot("14-settings-light");
 
         clickText("Appearance");
         clickText("App theme");
@@ -117,15 +151,16 @@ public class ScreenshotTest {
         scrollTo("Legal & Policies");
         clickText("Legal & Policies");
         assertVisible("Plain language for adult, responsible use.");
-        shot("10-settings-legal");
+        shot("15-settings-legal");
         clickText("Privacy Policy");
         assertVisible("PRIVACY POLICY");
-        shot("11-privacy-policy");
+        shot("16-privacy-policy");
         device.pressBack();              // legal list
         assertVisible("Plain language for adult, responsible use.");
         device.pressBack();              // settings home
         device.pressBack();              // chat
 
+        final Object[] fixturePanel = new Object[1];
         scenario.onActivity(activity -> {
             try {
                 Method add = ChatActivity.class.getDeclaredMethod("addAssistantBubble");
@@ -134,6 +169,7 @@ public class ScreenshotTest {
                 Field panelField = bubble.getClass().getDeclaredField("activity");
                 panelField.setAccessible(true);
                 Object panel = panelField.get(bubble);
+                fixturePanel[0] = panel;
                 Method event = panel.getClass().getDeclaredMethod("event", String.class);
                 event.setAccessible(true);
                 // Recorded engine events from scripts/proofs/output/real-agent-events.ndjson.
@@ -142,17 +178,76 @@ public class ScreenshotTest {
                 event.invoke(panel, "↳ web_search returned 1204 chars");
                 event.invoke(panel, "🛠️ fetch_page({\"url\": \"https://www.premiumtimesng.com/\"})");
                 event.invoke(panel, "↳ fetch_page returned 12045 chars");
+                event.invoke(panel, "🛠️ run_command({\"command\": \"pwd\"})");
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
         device.waitForIdle();
-        assertVisible("Reading a source");
-        shot("12-activity-recorded-fixture");
-        openWorkspace();
+        assertVisible("$ pwd");
+        shot("17-activity-command-open");
+        scenario.onActivity(activity -> {
+            try {
+                Object panel = fixturePanel[0];
+                Method event = panel.getClass().getDeclaredMethod("event", String.class);
+                event.setAccessible(true);
+                event.invoke(panel, "↳ run_command returned 24 chars");
+                Field report = panel.getClass().getDeclaredField("report"); report.setAccessible(true);
+                report.set(panel, "Status: Finished\n3 steps · workspace checkpoint saved");
+                Method render = panel.getClass().getDeclaredMethod("render"); render.setAccessible(true); render.invoke(panel);
+            } catch (Exception e) { throw new RuntimeException(e); }
+        });
+        device.waitForIdle();
+        assertTrue("Completed command collapsed automatically", device.findObject(By.textContains("$ pwd")) == null);
+        // The fixture panel is the activity view containing the command text.
+        clickText("Ran a command", true);
+        assertVisible("$ pwd");
+        assertVisible("TASK SUMMARY");
+        shot("18-activity-command-summary");
+        scenario.onActivity(activity -> {
+            try {
+                Object panel = fixturePanel[0];
+                Method finish = panel.getClass().getDeclaredMethod("finish"); finish.setAccessible(true); finish.invoke(panel);
+            } catch (Exception e) { throw new RuntimeException(e); }
+        });
+        device.waitForIdle();
+
+        scenario.onActivity(activity -> {
+            try {
+                org.json.JSONObject payload = new org.json.JSONObject();
+                org.json.JSONArray items = new org.json.JSONArray();
+                items.put(new org.json.JSONObject().put("id", "target").put("text", "Which target should I build?").put("options", new org.json.JSONArray().put("Android").put("Web")));
+                items.put(new org.json.JSONObject().put("id", "release").put("text", "Which release should I prepare?").put("options", new org.json.JSONArray().put("Debug").put("Production")));
+                items.put(new org.json.JSONObject().put("id", "confirm").put("text", "Ready to continue?").put("options", new org.json.JSONArray().put("Yes").put("Not yet")));
+                payload.put("items", items);
+                Method questions = ChatActivity.class.getDeclaredMethod("showAgentQuestions", org.json.JSONObject.class);
+                questions.setAccessible(true); questions.invoke(activity, payload);
+            } catch (Exception e) { throw new RuntimeException(e); }
+        });
+        assertVisible("AGENT QUESTION · 1 OF 3");
+        shot("19-agent-question-first");
+        clickText("Android", true);
+        clickText("Submit", true);
+        assertVisible("AGENT QUESTION · 2 OF 3");
+        assertVisible("Which release should I prepare?");
+        shot("20-agent-question-second");
+        clickText("Skip", true);
+        assertVisible("AGENT QUESTION · 3 OF 3");
+
+        clickId("input");
+        UiObject2 composerInput = device.wait(Until.findObject(By.res(PKG + ":id/input")), 5_000);
+        assertNotNull(composerInput);
+        composerInput.setText("Keyboard keeps the composer visible");
+        device.waitForIdle();
+        shot("21-keyboard-open");
+        assertClearOfSystemBars("send_btn", false);
+        device.pressBack();
+        device.waitForIdle();
+
+        openHistory();
         clickId("new_chat_btn");
         assertVisible("welcome to aether,");
-        shot("13-new-chat-welcome");
+        shot("22-new-chat-welcome");
         writeManifest();
         scenario.close();
     }
@@ -187,7 +282,7 @@ public class ScreenshotTest {
             shot("workspace-failure");
             device.dumpWindowHierarchy(new File(output, "workspace-failure-hierarchy.xml"));
         }
-        assertNotNull("Workspace drawer did not open after three real taps", workspace);
+        assertNotNull("Workspace screen did not open after three real taps", workspace);
         device.waitForIdle();
     }
 
@@ -198,10 +293,18 @@ public class ScreenshotTest {
         device.waitForIdle();
     }
 
-    private void clickText(String text) {
-        UiObject2 object = device.wait(Until.findObject(By.text(text)), 6_000);
+    private void clickText(String text) { clickText(text, false); }
+
+    private void clickText(String text, boolean contains) {
+        UiObject2 object = device.wait(Until.findObject(contains ? By.textContains(text) : By.text(text)), 6_000);
         assertNotNull("Missing text " + text, object);
         object.click();
+        device.waitForIdle();
+    }
+
+    private void openHistory() {
+        clickId("menu_btn");
+        assertVisible("RECENT CHATS");
         device.waitForIdle();
     }
 
@@ -228,9 +331,12 @@ public class ScreenshotTest {
                 + "  \"navigation\": \"instrumented APK UI\",\n"
                 + "  \"liveProviderConnectivity\": false,\n"
                 + "  \"liveFleetConnectivity\": false,\n"
+                + "  \"liveAuth\": false,\n"
+                + "  \"liveDrive\": false,\n"
+                + "  \"liveMcp\": false,\n"
                 + "  \"personalProvider\": \"local, unverified screenshot fixture; no real key\",\n"
-                + "  \"activityScreenshot\": \"recorded engine-event fixture, not a live turn\",\n"
-                + "  \"screenshots\": 13\n"
+                + "  \"activityScreenshot\": \"recorded engine-event and structured-question fixtures, not a live turn\",\n"
+                + "  \"screenshots\": 22\n"
                 + "}";
         try (FileOutputStream out = new FileOutputStream(new File(output, "verification.json"))) {
             out.write(json.getBytes(StandardCharsets.UTF_8));

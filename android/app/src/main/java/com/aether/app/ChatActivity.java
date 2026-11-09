@@ -33,6 +33,8 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.core.view.GravityCompat;
 
+import org.json.JSONArray;
+
 import android.content.ContentValues;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -123,7 +125,10 @@ public class ChatActivity extends AppCompatActivity {
     private TextView modeDiscuss;
     private TextView modeNote;
     private boolean discussionMode;
+    private String activePrompt;
+    private boolean modeRestartRequested;
     private LinearLayout sessionList;
+    private TextView accountLabel;
     private LinearLayout attachRow;
 
     private Credentials.Config cfg;
@@ -204,6 +209,7 @@ public class ChatActivity extends AppCompatActivity {
         modeDiscuss = findViewById(R.id.mode_discuss);
         modeNote = findViewById(R.id.composer_mode_note);
         sessionList = findViewById(R.id.session_list);
+        accountLabel = findViewById(R.id.account_label);
         attachRow = findViewById(R.id.attach_row);
 
         pickFile = registerForActivityResult(new ActivityResultContracts.GetContent(),
@@ -228,10 +234,15 @@ public class ChatActivity extends AppCompatActivity {
         updateModelSelector();
         FleetWarmup.addListener(warmupListener);
         FleetWarmup.warmAll(getApplicationContext());
+        findViewById(R.id.account_btn).setOnClickListener(v -> showAccount());
+        findViewById(R.id.drawer_settings_btn).setOnClickListener(v -> openSettings());
         findViewById(R.id.settings_btn).setOnClickListener(v -> openSettings());
         findViewById(R.id.workspace_btn).setOnClickListener(v -> {
-            refreshDrawer();
-            drawer.openDrawer(GravityCompat.START);
+            Intent workspace = new Intent(this, WorkspaceActivity.class);
+            workspace.putExtra("engine", cachedUrl);
+            workspace.putExtra("key", cfg == null ? "" : cfg.offKey);
+            workspace.putExtra("session", current == null ? "default" : current.id);
+            startActivity(workspace);
         });
         findViewById(R.id.suggest_research).setOnClickListener(v -> {
             setDiscussionMode(false);
@@ -255,7 +266,7 @@ public class ChatActivity extends AppCompatActivity {
             drawer.openDrawer(GravityCompat.START);
         });
         findViewById(R.id.new_chat_btn).setOnClickListener(v -> newChat());
-        findViewById(R.id.attach_btn).setOnClickListener(v -> pickFile.launch("*/*"));
+        findViewById(R.id.attach_btn).setOnClickListener(v -> showComposerMenu());
 
         sendBtn.setOnClickListener(v -> onSend());
         stopBtn.setOnClickListener(v -> {
@@ -286,6 +297,8 @@ public class ChatActivity extends AppCompatActivity {
             }
         });
         showEmptyState();
+        String lastChat = AetherPrefs.lastChat(this);
+        if (!lastChat.isEmpty()) openChat(lastChat);
         maybeShowDisclaimer();
     }
 
@@ -320,18 +333,52 @@ public class ChatActivity extends AppCompatActivity {
         FleetWarmup.removeListener(warmupListener);
     }
 
+    private void showComposerMenu() {
+        if (discussionMode) return;
+        LinearLayout menu = new LinearLayout(this); menu.setOrientation(LinearLayout.VERTICAL);
+        menu.setPadding(Ui.dp(this, 12), Ui.dp(this, 6), Ui.dp(this, 12), Ui.dp(this, 12));
+        TextView attach = Ui.tv(this, "Attach a file", 15, Ui.PRIMARY);
+        attach.setGravity(Gravity.CENTER_VERTICAL); attach.setOnClickListener(v -> pickFile.launch("*/*")); menu.addView(attach,
+                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 54)));
+        TextView connectors = Ui.tv(this, "Connectors & MCP", 15, Ui.PRIMARY);
+        connectors.setGravity(Gravity.CENTER_VERTICAL); connectors.setOnClickListener(v -> ConnectorSheet.show(this, this::refreshChip));
+        menu.addView(connectors, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 54)));
+        android.widget.CheckBox auto = new android.widget.CheckBox(this);
+        auto.setText("Auto-run Agent commands"); auto.setTextSize(14); auto.setChecked(AetherPrefs.autoRunCommands(this));
+        auto.setOnCheckedChangeListener((button, checked) -> AetherPrefs.autoRunCommands(this, checked));
+        menu.addView(auto, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 54)));
+        TextView note = Ui.tv(this, "Agent only · Commands are always shown in the activity trace. Disable auto-run to remove shell execution from the next request.", 11, Ui.DIM);
+        menu.addView(note);
+        new AlertDialog.Builder(this).setTitle("Add to your task").setView(menu).setNegativeButton("Close", null).show();
+    }
+
     private void openSettings() {
         startActivity(new Intent(this, SettingsActivity.class));
     }
 
     private void setDiscussionMode(boolean discussion) {
+        if (cancelFlag != null && discussionMode != discussion) {
+            activePrompt = null;
+            if (liveBubble != null && liveBubble.model != null) activePrompt = liveBubble.model.content;
+            /* The current request's mode is immutable. Stop its stream first and
+               restart the same user goal once, on the newly selected route. */
+            modeRestartRequested = true;
+            if (cancelFlag != null) cancelFlag[0] = true;
+            turn.cancel();
+            toast("Switching mode · the current request will continue in "
+                    + (discussion ? "Discussion" : "Agent"));
+        }
         discussionMode = discussion;
+        AetherPrefs.discussion(this, discussionMode);
+        findViewById(R.id.attach_btn).setVisibility(discussionMode ? View.GONE : View.VISIBLE);
         modeAgent.setBackgroundResource(discussion ? 0 : R.drawable.bg_segment_active);
         modeDiscuss.setBackgroundResource(discussion ? R.drawable.bg_segment_active : 0);
         modeAgent.setTextColor(getColor(discussion ? R.color.aether_muted : R.color.aether_fg));
         modeDiscuss.setTextColor(getColor(discussion ? R.color.aether_fg : R.color.aether_muted));
-        modeNote.setText(discussion ? "Conversation only · no tools" : "Research, create and take action");
-        if (!discussion) input.setHint("Message Aether…");
+        modeNote.setText(discussion ? "Fast conversation · search, fetch and crawl"
+                : "Research, create and take action");
+        input.setHint(discussion ? "Ask anything, with the web when needed…" : "Message Aether…");
+        refreshChip();
     }
 
     private void maybeShowDisclaimer() {
@@ -447,6 +494,18 @@ public class ChatActivity extends AppCompatActivity {
 
     // --------------------------------------------------------------- history
 
+    private void showAccount() {
+        SupabaseAuth.Session session = new SupabaseAuth(this).session();
+        if (session == null) { startActivity(new Intent(this, AuthActivity.class)); return; }
+        new AlertDialog.Builder(this).setTitle(session.email.isEmpty() ? "Aether account" : session.email)
+                .setMessage("Signed in. Backup, restore and connector permissions are managed separately. Session tokens are encrypted on this device.")
+                .setNegativeButton("Close", null)
+                .setNeutralButton("Backup & restore", (d, w) -> startActivity(new Intent(this, BackupActivity.class)))
+                .setPositiveButton("Sign out", (d, w) -> new SupabaseAuth(this).signOut((ok, message) -> ui.post(() -> {
+                    toast(message); refreshDrawer();
+                }))).show();
+    }
+
     private void refreshDrawer() {
         storeExec.execute(() -> {
             final List<ChatStore.Meta> metas = store.list();
@@ -455,6 +514,9 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void buildDrawer(List<ChatStore.Meta> metas) {
+        SupabaseAuth.Session account = new SupabaseAuth(this).session();
+        if (accountLabel != null) accountLabel.setText(account == null ? "Sign in or create account"
+                : (account.email.isEmpty() ? "Aether account" : account.email));
         sessionList.removeAllViews();
         if (metas.isEmpty()) {
             sessionList.addView(Ui.centered(this, getString(R.string.no_chats_yet), 13, Ui.DIM));
@@ -571,6 +633,7 @@ public class ChatActivity extends AppCompatActivity {
             ui.post(() -> {
                 if (s == null) { toast("That chat could not be read."); return; }
                 current = s;
+                AetherPrefs.lastChat(this, s.id);
                 headerSub.setText(s.title);
                 renderSession(s);
             });
@@ -581,6 +644,7 @@ public class ChatActivity extends AppCompatActivity {
         drawer.closeDrawer(GravityCompat.START);
         if (current != null && current.messageCount() > 0) persist();
         current = null;
+        AetherPrefs.lastChat(this, "");
         staged.clear();
         renderStaged();
         msgList.removeAllViews();
@@ -796,6 +860,7 @@ public class ChatActivity extends AppCompatActivity {
         long lastRender = 0L;
         /** Model message this bubble is filling, so it can be persisted. */
         ChatMessage model;
+        String session = "default";
     }
 
     private AssistantBubble addAssistantBubble() {
@@ -886,14 +951,14 @@ public class ChatActivity extends AppCompatActivity {
     private final class ActivityPanel {
         final LinearLayout card = new LinearLayout(ChatActivity.this);
         final LinearLayout list = new LinearLayout(ChatActivity.this);
-        final View dot = new View(ChatActivity.this);
+        final AgentPulseView pulseView = new AgentPulseView(ChatActivity.this);
         final TextView label = Ui.tv(ChatActivity.this, "", 13, Ui.DIM);
         final TextView chevron = Ui.tv(ChatActivity.this, "", 13, Ui.DIM);
         final AgentActivity model = new AgentActivity();
         String report;
-        private final AlphaAnimation pulse = new AlphaAnimation(1f, 0.28f);
         private boolean running;
         private boolean expanded;
+        private int detailIndex = -1;
 
         ActivityPanel() {
             card.setOrientation(LinearLayout.HORIZONTAL);
@@ -906,11 +971,10 @@ public class ChatActivity extends AppCompatActivity {
             card.setVisibility(View.GONE);
 
             LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
-                    Ui.dp(ChatActivity.this, 9), Ui.dp(ChatActivity.this, 9));
-            dlp.rightMargin = Ui.dp(ChatActivity.this, 10);
-            dot.setBackgroundResource(R.drawable.bg_dot_accent);
-            dot.setLayoutParams(dlp);
-            card.addView(dot);
+                    Ui.dp(ChatActivity.this, 28), Ui.dp(ChatActivity.this, 22));
+            dlp.rightMargin = Ui.dp(ChatActivity.this, 8);
+            pulseView.setLayoutParams(dlp);
+            card.addView(pulseView);
             label.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
             label.setMaxLines(2);
             card.addView(label, new LinearLayout.LayoutParams(0,
@@ -926,19 +990,16 @@ public class ChatActivity extends AppCompatActivity {
             llp.topMargin = Ui.dp(ChatActivity.this, 6);
             list.setLayoutParams(llp);
 
-            pulse.setDuration(620);
-            pulse.setRepeatCount(AlphaAnimation.INFINITE);
-            pulse.setRepeatMode(AlphaAnimation.REVERSE);
         }
 
         boolean event(String raw) {
             if (!model.feed(raw)) return false;
             running = true;
-            if (model.hasSteps() && AetherPrefs.showActivity(ChatActivity.this)) expanded = true;
+            AgentActivity.Step open = model.open();
+            detailIndex = open == null ? -1 : model.steps().indexOf(open);
+            if ((model.hasSteps() || model.hasReasoning()) && AetherPrefs.showActivity(ChatActivity.this)) expanded = true;
             card.setVisibility(AetherPrefs.showActivity(ChatActivity.this) ? View.VISIBLE : View.GONE);
-            if (AetherPrefs.animations(ChatActivity.this) && dot.getAnimation() == null) {
-                dot.startAnimation(pulse);
-            }
+            pulseView.setRunning(AetherPrefs.animations(ChatActivity.this));
             render();
             return true;
         }
@@ -949,13 +1010,13 @@ public class ChatActivity extends AppCompatActivity {
             model.finish();
             running = false;
             expanded = false;
-            dot.clearAnimation();
-            dot.setAlpha(1f);
+            detailIndex = -1;
+            pulseView.setRunning(false);
             render();
         }
 
         void toggle() {
-            if (!model.hasSteps() && (report == null || report.isEmpty())) return;
+            if (!model.hasSteps() && !model.hasReasoning() && (report == null || report.isEmpty())) return;
             expanded = !expanded;
             render();
         }
@@ -969,7 +1030,7 @@ public class ChatActivity extends AppCompatActivity {
             String text;
             if (running) {
                 AgentActivity.Step open = model.open();
-                text = open != null && !open.detail.isEmpty()
+                text = open != null && !open.detail.isEmpty() && !"run_command".equals(open.tool)
                         ? open.label + " · " + open.detail : model.labelNow();
             } else {
                 text = model.summary();
@@ -977,7 +1038,7 @@ public class ChatActivity extends AppCompatActivity {
             }
             label.setText(text);
             label.setTextColor(getColor(running ? Ui.ACCENT : Ui.DIM));
-            boolean detail = model.hasSteps() || (report != null && !report.isEmpty());
+            boolean detail = model.hasSteps() || model.hasReasoning() || (report != null && !report.isEmpty());
             chevron.setText(detail ? (expanded ? "⌃" : "⌄") : "");
             chevron.setVisibility(detail ? View.VISIBLE : View.GONE);
             card.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
@@ -993,7 +1054,35 @@ public class ChatActivity extends AppCompatActivity {
 
         private void renderList() {
             list.removeAllViews();
-            for (AgentActivity.Step st : model.steps()) {
+            if (model.hasReasoning()) {
+                LinearLayout thought = new LinearLayout(ChatActivity.this);
+                thought.setOrientation(LinearLayout.VERTICAL);
+                thought.setBackgroundResource(R.drawable.bg_settings_row);
+                thought.setPadding(Ui.dp(ChatActivity.this, 13), Ui.dp(ChatActivity.this, 10),
+                        Ui.dp(ChatActivity.this, 13), Ui.dp(ChatActivity.this, 10));
+                LinearLayout heading = new LinearLayout(ChatActivity.this);
+                heading.setGravity(Gravity.CENTER_VERTICAL);
+                AgentPulseView thinking = new AgentPulseView(ChatActivity.this);
+                thinking.setRunning(running && AetherPrefs.animations(ChatActivity.this));
+                heading.addView(thinking, new LinearLayout.LayoutParams(
+                        Ui.dp(ChatActivity.this, 28), Ui.dp(ChatActivity.this, 22)));
+                TextView title = Ui.tv(ChatActivity.this,
+                        running ? "Thinking through the task" : "Reasoning phase complete", 12, Ui.PRIMARY);
+                title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                title.setPadding(Ui.dp(ChatActivity.this, 7), 0, 0, 0);
+                heading.addView(title);
+                thought.addView(heading);
+                TextView privacy = Ui.tv(ChatActivity.this,
+                        "Operational status only · private reasoning is not shown", 11, Ui.DIM);
+                privacy.setPadding(Ui.dp(ChatActivity.this, 35), Ui.dp(ChatActivity.this, 4), 0, 0);
+                thought.addView(privacy);
+                LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                tp.topMargin = Ui.dp(ChatActivity.this, 5);
+                list.addView(thought, tp);
+            }
+            for (int index = 0; index < model.steps().size(); index++) {
+                AgentActivity.Step st = model.steps().get(index);
                 LinearLayout row = new LinearLayout(ChatActivity.this);
                 row.setOrientation(LinearLayout.VERTICAL);
                 row.setBackgroundResource(R.drawable.bg_settings_row);
@@ -1004,7 +1093,8 @@ public class ChatActivity extends AppCompatActivity {
                 TextView state = Ui.tv(ChatActivity.this, st.done ? "✓" : "◌", 14,
                         st.done ? Ui.OK : Ui.ACCENT);
                 top.addView(state);
-                TextView name = Ui.tv(ChatActivity.this, iconFor(st.tool) + "  " + st.label, 12, Ui.PRIMARY);
+                TextView name = Ui.tv(ChatActivity.this, iconFor(st.tool) + "  "
+                        + (st.done ? st.past : st.label), 12, Ui.PRIMARY);
                 name.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
                 name.setPadding(Ui.dp(ChatActivity.this, 9), 0, 0, 0);
                 top.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -1012,11 +1102,36 @@ public class ChatActivity extends AppCompatActivity {
                     top.addView(Ui.meta(ChatActivity.this, st.durationMs < 1000
                             ? st.durationMs + "ms" : (st.durationMs / 1000) + "s"));
                 }
+                boolean hasDetails = !st.detail.isEmpty() || st.chars > 0
+                        || (st.source != null && !st.source.isEmpty());
+                boolean showDetails = hasDetails && detailIndex == index;
+                if (hasDetails) {
+                    TextView chevron = Ui.meta(ChatActivity.this, showDetails ? "⌃" : "⌄");
+                    chevron.setPadding(Ui.dp(ChatActivity.this, 10), 0, 0, 0);
+                    top.addView(chevron);
+                    final int selected = index;
+                    top.setOnClickListener(v -> {
+                        detailIndex = detailIndex == selected ? -1 : selected;
+                        render();
+                    });
+                    top.setContentDescription((showDetails ? "Collapse " : "Expand ") + st.label);
+                }
                 row.addView(top);
+                LinearLayout details = new LinearLayout(ChatActivity.this);
+                details.setOrientation(LinearLayout.VERTICAL);
+                details.setVisibility(showDetails ? View.VISIBLE : View.GONE);
                 if (!st.detail.isEmpty()) {
-                    TextView detail = Ui.tv(ChatActivity.this, st.detail, 12, Ui.DIM);
-                    detail.setPadding(Ui.dp(ChatActivity.this, 23), Ui.dp(ChatActivity.this, 4), 0, 0);
-                    row.addView(detail);
+                    TextView detail = Ui.tv(ChatActivity.this,
+                            "run_command".equals(st.tool) ? "$ " + st.detail : st.detail, 12, Ui.DIM);
+                    if ("run_command".equals(st.tool)) detail.setTypeface(Ui.mono(ChatActivity.this));
+                    detail.setPadding(Ui.dp(ChatActivity.this, 23), Ui.dp(ChatActivity.this, 7), 0, 0);
+                    detail.setTextIsSelectable(true);
+                    details.addView(detail);
+                }
+                if (st.chars > 0) {
+                    TextView returned = Ui.meta(ChatActivity.this, "Returned " + st.chars + " characters");
+                    returned.setPadding(Ui.dp(ChatActivity.this, 23), Ui.dp(ChatActivity.this, 5), 0, 0);
+                    details.addView(returned);
                 }
                 if (st.source != null && !st.source.isEmpty()) {
                     TextView site = Ui.tv(ChatActivity.this, "↗  " + st.source, 11, Ui.ACCENT);
@@ -1024,8 +1139,9 @@ public class ChatActivity extends AppCompatActivity {
                     site.setMaxLines(2);
                     site.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
                     site.setOnClickListener(v -> openSource(st.source));
-                    row.addView(site);
+                    details.addView(site);
                 }
+                row.addView(details);
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                 lp.topMargin = Ui.dp(ChatActivity.this, 5);
@@ -1611,6 +1727,7 @@ public class ChatActivity extends AppCompatActivity {
      */
     private void send(final String prompt, final List<Attachment> attachments) {
         if (current == null) current = store.create(prompt);
+        AetherPrefs.lastChat(this, current.id);
         if (!current.titleLocked && ("New chat".equals(current.title) || current.title == null
                 || current.title.isEmpty())) {
             current.rename(TextNormalizer.title(prompt, 42));
@@ -1637,6 +1754,7 @@ public class ChatActivity extends AppCompatActivity {
         final AssistantBubble b = addAssistantBubble();
         ChatMessage model = new ChatMessage(ChatMessage.ROLE_ASSISTANT);
         b.model = model;
+        b.session = current.id;
         current.messages.add(model);
         attachMessageActions(b.contentZone, model);
 
@@ -1650,6 +1768,7 @@ public class ChatActivity extends AppCompatActivity {
         /* And the conversation before it -- without this every message is a
            cold start and "summarise that" has nothing to summarise. */
         final List<EngineCore.Msg> history = historyFor(userMsg, model);
+        activePrompt = prompt;
 
         bg.execute(() -> {
             if (ModelPrefs.BYOK.equals(ModelPrefs.kind(this))) {
@@ -1851,6 +1970,12 @@ public class ChatActivity extends AppCompatActivity {
                         b.raw.append(t);
                         ui.post(() -> renderAnswer(b, false));
                     }
+                    @Override public void onQuestions(org.json.JSONObject questions) {
+                        ui.post(() -> showAgentQuestions(questions));
+                    }
+                    @Override public void onNotice(String notice) {
+                        ui.post(() -> pushNotice(b, notice));
+                    }
                     @Override public void onDone(boolean good, String e) {
                         if (recorded.compareAndSet(false, true)) { ok[0] = good; err[0] = e; }
                     }
@@ -1871,7 +1996,8 @@ public class ChatActivity extends AppCompatActivity {
                             persist();
                         });
                     }
-                }, EngineCore.StreamPolicy.standard(), turn);
+                }, EngineCore.StreamPolicy.standard(), turn, b.session, discussion ? new JSONArray() : new ConnectorStore(this).enabledPayload(),
+                !discussion && AetherPrefs.autoRunCommands(this));
 
         boolean userStopped = cancel[0];
         boolean cancelled = "cancelled".equals(err[0]);
@@ -1919,12 +2045,94 @@ public class ChatActivity extends AppCompatActivity {
         finalizeTurn(b, prompt, ok[0], err[0], System.currentTimeMillis() - t0);
     }
 
+    /** Render one structured Agent question at a time, then return all answers. */
+    private void showAgentQuestions(org.json.JSONObject payload) {
+        final org.json.JSONArray items = payload.optJSONArray("items");
+        if (items == null || items.length() == 0) return;
+        final LinearLayout card = new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_card); card.setPadding(Ui.dp(this, 18), Ui.dp(this, 16), Ui.dp(this, 18), Ui.dp(this, 16));
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cardParams.topMargin = Ui.dp(this, 12); msgList.addView(card, cardParams);
+        final org.json.JSONArray answers = new org.json.JSONArray();
+        final int[] index = {0};
+        final Runnable[] render = new Runnable[1];
+        render[0] = () -> {
+            card.removeAllViews();
+            if (index[0] >= items.length()) {
+                msgList.removeView(card);
+                StringBuilder response = new StringBuilder("Answers to the Agent’s questions:\n");
+                for (int i = 0; i < answers.length(); i++) {
+                    org.json.JSONObject answer = answers.optJSONObject(i);
+                    if (answer != null) response.append("\n").append(answer.optString("question"))
+                            .append("\nAnswer: ").append(answer.optString("answer")).append("\n");
+                }
+                send(response.toString(), null); return;
+            }
+            org.json.JSONObject question = items.optJSONObject(index[0]);
+            if (question == null) { index[0]++; render[0].run(); return; }
+            TextView progress = Ui.meta(this, "AGENT QUESTION · " + (index[0] + 1) + " OF " + items.length());
+            progress.setLetterSpacing(.08f); card.addView(progress);
+            TextView title = Ui.tv(this, question.optString("text", "Choose an option"), 18, Ui.PRIMARY);
+            title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD); title.setPadding(0, Ui.dp(this, 10), 0, Ui.dp(this, 10)); card.addView(title);
+            final android.widget.RadioGroup options = new android.widget.RadioGroup(this); options.setOrientation(android.widget.RadioGroup.VERTICAL);
+            final org.json.JSONArray choices = question.optJSONArray("options");
+            if (choices != null) for (int i = 0; i < choices.length(); i++) {
+                android.widget.RadioButton option = new android.widget.RadioButton(this);
+                option.setText(choices.optString(i)); option.setTextColor(getColor(Ui.PRIMARY)); option.setTextSize(14);
+                option.setId(View.generateViewId()); option.setPadding(Ui.dp(this, 4), Ui.dp(this, 6), Ui.dp(this, 4), Ui.dp(this, 6)); options.addView(option);
+            }
+            card.addView(options);
+            LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.END);
+            TextView skip = Ui.tv(this, "Skip", 13, Ui.DIM); skip.setGravity(Gravity.CENTER);
+            TextView submit = Ui.tv(this, "Submit", 13, Ui.PRIMARY); submit.setGravity(Gravity.CENTER);
+            submit.setTypeface(android.graphics.Typeface.DEFAULT_BOLD); submit.setBackgroundResource(R.drawable.bg_pill_accent);
+            actions.addView(skip, new LinearLayout.LayoutParams(Ui.dp(this, 82), Ui.dp(this, 46)));
+            actions.addView(submit, new LinearLayout.LayoutParams(Ui.dp(this, 100), Ui.dp(this, 46))); card.addView(actions);
+            final java.util.concurrent.atomic.AtomicBoolean answered = new java.util.concurrent.atomic.AtomicBoolean();
+            skip.setOnClickListener(v -> {
+                if (!answered.compareAndSet(false, true)) return;
+                try { answers.put(new org.json.JSONObject().put("question", question.optString("text")).put("answer", "Skipped")); } catch (Exception ignored) { }
+                index[0]++; render[0].run();
+            });
+            submit.setOnClickListener(v -> {
+                if (options.getCheckedRadioButtonId() == -1) { toast("Choose an option or Skip."); return; }
+                android.widget.RadioButton selected = options.findViewById(options.getCheckedRadioButtonId());
+                if (!answered.compareAndSet(false, true)) return;
+                try { answers.put(new org.json.JSONObject().put("question", question.optString("text")).put("answer", selected.getText().toString())); } catch (Exception ignored) { }
+                index[0]++; render[0].run();
+            });
+            scrollBottom();
+        };
+        render[0].run();
+    }
+
     /** Every turn ends here, exactly once, on the UI thread. */
     private void finalizeTurn(final AssistantBubble b, final String prompt,
                               final boolean ok, final String err, final long ms) {
         ui.post(() -> {
             setStreaming(false);
             cancelFlag = null;
+            final boolean switchModes = modeRestartRequested;
+            final String restartPrompt = activePrompt;
+            modeRestartRequested = false;
+            activePrompt = null;
+            if (switchModes) {
+                b.activity.finish();
+                if (b.model != null) {
+                    b.model.content = TextNormalizer.normalize(b.raw.toString());
+                    b.model.status = ChatMessage.STATUS_STOPPED;
+                    b.model.note = "mode changed · continuing in a new request";
+                }
+                if (current != null && !current.messages.isEmpty()
+                        && current.messages.get(current.messages.size() - 1) == b.model) {
+                    current.messages.remove(current.messages.size() - 1);
+                }
+                msgList.removeView(b.wrap);
+                if (restartPrompt != null) {
+                    ui.postDelayed(() -> send(restartPrompt, null), 180);
+                    return;
+                }
+            }
             /* Every turn ends here exactly once: the activity strip is closed
                and its animation cancelled, the answer gets its final layout,
                and whatever the turn really used is shown as sources. A partial
@@ -2094,6 +2302,7 @@ public class ChatActivity extends AppCompatActivity {
         final ChatSession s = current;
         storeExec.execute(() -> {
             store.save(s);
+            SupabaseCloud.sync(getApplicationContext(), s);
             ui.post(ChatActivity.this::refreshDrawer);
         });
     }

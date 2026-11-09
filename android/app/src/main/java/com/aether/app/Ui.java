@@ -47,7 +47,8 @@ final class Ui {
         final int bottom = content.getPaddingBottom();
         // Listen before AppCompat or DrawerLayout can consume the window insets.
         ViewCompat.setOnApplyWindowInsetsListener(decor, (view, windowInsets) -> {
-            Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+            Insets bars = windowInsets.getInsets(
+                    WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.ime());
             content.setPadding(left + bars.left, top + bars.top,
                     right + bars.right, bottom + bars.bottom);
             return WindowInsetsCompat.CONSUMED;

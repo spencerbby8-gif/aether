@@ -854,6 +854,9 @@ public final class EngineCore {
          * of the model's prose, which it may reword or drop.
          */
         default void onMedia(String kind, String url, String source) { }
+        /** Structured mid-task choices; never parsed out of model prose. */
+        default void onQuestions(JSONObject questions) { }
+        default void onNotice(String notice) { }
     }
 
     /**
@@ -1078,16 +1081,27 @@ public final class EngineCore {
         chatStream(url, offKey, history, prompt, system, false, cancelledFlag, listener, p, handle);
     }
 
-    /** Discussion is an explicit engine contract: true removes tool calling for this turn. */
+    /** Discussion has an explicit web-only tool contract on the engine. */
     public static void chatStream(String url, String offKey, List<Msg> history, String prompt,
                                   String system, boolean discussion, boolean[] cancelledFlag,
                                   ChatListener listener, StreamPolicy p, TurnHandle handle) {
+        chatStream(url, offKey, history, prompt, system, discussion, cancelledFlag, listener, p, handle,
+                "default", null, true);
+    }
+
+    public static void chatStream(String url, String offKey, List<Msg> history, String prompt,
+                                  String system, boolean discussion, boolean[] cancelledFlag,
+                                  ChatListener listener, StreamPolicy p, TurnHandle handle,
+                                  String session, JSONArray connectors, boolean autoRunCommands) {
         HttpURLConnection c = null;
         final boolean[] fired = new boolean[] {false};
         final long t0 = System.currentTimeMillis();
         try {
             JSONObject body = new JSONObject();
             body.put("stream", true);
+            body.put("session", session == null || session.isEmpty() ? "default" : session);
+            body.put("auto_run_commands", autoRunCommands);
+            if (connectors != null && connectors.length() > 0) body.put("connectors", connectors);
             if (discussion) body.put("discussion", true);
             JSONArray msgs = new JSONArray();
             /* No "role":"system" wrapper object -- the engine's contract does not
@@ -1229,6 +1243,12 @@ public final class EngineCore {
                                     media.optString("source", ""));
                         }
                     }
+
+                    String notice = o.optString("notice", "");
+                    if (!notice.isEmpty()) listener.onNotice(scrubUrls(notice).replaceAll("(?i)bearer\\s+\\S+", "credential hidden"));
+
+                    JSONObject questions = o.optJSONObject("questions");
+                    if (questions != null) listener.onQuestions(questions);
 
                     JSONObject msg = o.optJSONObject("message");
                     if (msg != null) {

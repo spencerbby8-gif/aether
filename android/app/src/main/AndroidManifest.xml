@@ -21,6 +21,21 @@
         <activity android:name=".ChatActivity" android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".BackupActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
+        <activity android:name=".AuthActivity" android:exported="true" android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="aether" android:host="auth" android:path="/callback" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".WorkspaceActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
         <activity android:name=".SettingsActivity" android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
     </application>

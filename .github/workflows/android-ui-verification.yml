@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - 'android/ui-verification-*'
+      - 'android/agent-runtime-*'
 
 permissions:
   contents: read
@@ -49,6 +50,12 @@ jobs:
 
       - name: Verify engine source integrity
         run: node scripts/verify-engine-source.mjs
+
+      - name: Run engine, MCP and question protocol proofs
+        run: |
+          python3 scripts/proofs/engine-request-check.py
+          python3 scripts/proofs/agent-loop-check.py
+          python3 scripts/proofs/mcp-client-check.py
 
       - name: Upload APKs for the hardware-accelerated emulator
         uses: actions/upload-artifact@v4
@@ -122,11 +129,13 @@ jobs:
             adb pull /sdcard/Android/data/com.aether.app.debug/files/screenshots/. screenshots/ || true
             if [ "$TEST_STATUS" -ne 0 ]; then exit "$TEST_STATUS"; fi
             test -f screenshots/01-chat-welcome.png
-            test -f screenshots/03-model-picker.png
-            test -f screenshots/05-settings-home.png
-            test -f screenshots/11-privacy-policy.png
-            test -f screenshots/12-activity-recorded-fixture.png
-            test -f screenshots/13-new-chat-welcome.png
+            test -f screenshots/05-model-picker.png
+            test -f screenshots/10-settings-home.png
+            test -f screenshots/16-privacy-policy.png
+            test -f screenshots/18-activity-command-summary.png
+            test -f screenshots/20-agent-question-second.png
+            test -f screenshots/21-keyboard-open.png
+            test -f screenshots/22-new-chat-welcome.png
             test -f screenshots/verification.json
             cat screenshots/verification.json
 

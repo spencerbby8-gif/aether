@@ -60,9 +60,15 @@ final class ModelPickerDialog {
                 ModelPrefs.AETHER_LABEL, "Built in · research, tools and seamless continuity",
                 aetherSelected ? "Selected" : "Ready", aetherSelected);
         builtIn.setOnClickListener(v -> {
-            ModelPrefs.selectAether(context);
-            dialog.dismiss();
-            changed.run();
+            new android.app.AlertDialog.Builder(context)
+                    .setTitle("Your responsibility with Aether Uncensored")
+                    .setMessage("Aether Uncensored may produce unexpected, offensive or harmful content and may execute tools you permit. You are responsible for reviewing outputs, commands and files; complying with the law and third-party rights; and deciding what is safe to use. No output is professional advice or guaranteed to be correct.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("I understand — use Aether", (confirmation, which) -> {
+                        ModelPrefs.selectAether(context);
+                        dialog.dismiss();
+                        changed.run();
+                    }).show();
         });
         sheet.addView(builtIn, margins(context, 0, 0, 0, 10));
 

@@ -531,29 +531,79 @@ chk("it reports the failure instead of going silent",
     'engine error' in _rx and 'stub exploded' in _rx, _rx.strip()[-110:])
 chk("and the response still terminates", '"done": true' in _rx, 'scanned')
 
-print("== discussion is a hard tool boundary ==")
+print("== discussion is a hard, read-only web boundary ==")
 TOOL_CALLS_SEEN[:] = []
 PAYLOADS[:] = []
-ns_d, _ = make_env([step_tools(tc('web_search', query='must not run')), step_text('not reached')])
+ns_d, _ = make_env([step_tools(tc('web_search', query='current information')), step_text('web answer')])
+ns_d['TOOLS'] = [
+    {'type': 'function', 'function': {'name': name, 'parameters': {'type': 'object', 'properties': {}}}}
+    for name in ('web_search', 'fetch_page', 'crawl_site')]
+ns_d['EXEC']['fetch_page'] = lambda **kwargs: 'page'
+ns_d['EXEC']['crawl_site'] = lambda **kwargs: 'crawl'
 actual_discussion_tools = []
-def _forbidden_search(**kwargs):
+def _allowed_search(**kwargs):
     actual_discussion_tools.append(kwargs)
-    return 'must not happen'
-ns_d['EXEC']['web_search'] = _forbidden_search
+    return 'current search result'
+ns_d['EXEC']['web_search'] = _allowed_search
 h_d = FakeHandler()
 ns_d['agent_stream'](h_d, {'discussion': True,
-    'messages': [{'role': 'user', 'content': 'search for something'}]})
-chk("discussion sends no tool schema to the model",
-    len(PAYLOADS) == 1 and PAYLOADS[0].get('tools') == [],
-    str([] if not PAYLOADS else PAYLOADS[0].get('tools')))
-chk("discussion discards even an unexpected tool call",
-    len(actual_discussion_tools) == 0, str(actual_discussion_tools))
+    'messages': [{'role': 'user', 'content': 'search for something current'}]})
+chk("discussion sends exactly the three web tool schemas",
+    len(PAYLOADS) >= 1 and {t['function']['name'] for t in PAYLOADS[0].get('tools', [])}
+        == {'web_search', 'fetch_page', 'crawl_site'},
+    str([] if not PAYLOADS else [t['function']['name'] for t in PAYLOADS[0].get('tools', [])]))
+chk("discussion really executes web_search",
+    actual_discussion_tools == [{'query': 'current information'}], str(actual_discussion_tools))
+chk("discussion returns an answer after the web result",
+    len(PAYLOADS) == 2 and 'web answer' in h_d.wfile.buf.getvalue().decode('utf-8', 'replace'),
+    "model calls=%d" % len(PAYLOADS))
 chk("discussion avoids the reasoning overhead",
-    len(PAYLOADS) == 1 and PAYLOADS[0].get('think') is False,
+    len(PAYLOADS) >= 1 and PAYLOADS[0].get('think') is False,
     str(None if not PAYLOADS else PAYLOADS[0].get('think')))
-chk("discussion carries a plain-language instruction",
-    len(PAYLOADS) == 1 and 'DISCUSSION MODE' in PAYLOADS[0]['messages'][0]['content'],
+chk("discussion carries a web-capable plain-language instruction",
+    len(PAYLOADS) >= 1 and 'DISCUSSION MODE' in PAYLOADS[0]['messages'][0]['content']
+        and 'web_search' in PAYLOADS[0]['messages'][0]['content'],
     "system instruction present")
+chk("discussion uses a reduced tool and iteration budget",
+    ns_d['agent_stream'].__code__.co_consts != () and len(PAYLOADS) == 2,
+    "bounded web turn")
+
+TOOL_CALLS_SEEN[:] = []
+PAYLOADS[:] = []
+ns_blocked, _ = make_env([step_tools(tc('run_command', command='touch forbidden')), step_text('refused')])
+executed_shell = []
+ns_blocked['EXEC']['run_command'] = lambda **kwargs: executed_shell.append(kwargs) or 'must not happen'
+h_blocked = FakeHandler()
+ns_blocked['agent_stream'](h_blocked, {'discussion': True,
+    'messages': [{'role': 'user', 'content': 'run a shell command'}]})
+chk("discussion rejects an unexpected shell call before execution",
+    not executed_shell and len(PAYLOADS) == 1,
+    "shell calls=%d model calls=%d" % (len(executed_shell), len(PAYLOADS)))
+
+print("== structured Agent questions pause for a real user decision ==")
+TOOL_CALLS_SEEN[:] = []
+PAYLOADS[:] = []
+ns_q, _ = make_env([step_tools(tc('ask_user', questions=[
+    {'id':'target','text':'Which target?','options':['Android','Web']},
+    {'id':'release','text':'Which release?','options':['Debug','Production']}
+])), step_text('must wait')])
+h_q = FakeHandler()
+ns_q['agent_stream'](h_q, {'messages':[{'role':'user','content':'Build my app'}]})
+q_raw = h_q.wfile.buf.getvalue().decode('utf-8','replace')
+q_events = []
+for _line in q_raw.splitlines():
+    _line = _line.strip()
+    if _line.startswith('{'):
+        try:
+            _event = json.loads(_line)
+            if _event.get('questions'): q_events.append(_event['questions']['items'])
+        except Exception: pass
+chk("ask_user emits both structured questions without executing a tool",
+    len(q_events) == 1 and len(q_events[0]) == 2 and q_events[0][0]['options'] == ['Android','Web'],
+    str(q_events))
+chk("the model loop stops instead of fabricating answers",
+    len(PAYLOADS) == 1 and 'must wait' not in q_raw, 'model calls=%d' % len(PAYLOADS))
+chk("the question turn still terminates cleanly", '"done": true' in q_raw, 'terminal event present')
 
 print("\n%d passed, %d failed" % (ok, fail))
 raise SystemExit(0 if fail == 0 else 1)

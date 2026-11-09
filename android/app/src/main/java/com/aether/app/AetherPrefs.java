@@ -72,9 +72,14 @@ public final class AetherPrefs {
     }
 
     public static String discussionInstructions(Context c) {
-        return "Discussion mode is enabled. Focus on natural, direct conversation. "
-                + "Do not search, browse, crawl, run commands, create files, or call tools. "
-                + "Answer from the conversation and say when current information would need verification. "
+        return "Discussion mode is enabled. Focus on fast, natural, direct conversation. "
+                + "You may use web search, page fetch and same-site crawling when current information or sources are useful. "
+                + "Do not run commands, create or edit files, or call non-web tools. Keep browsing focused and cite what you used. "
                 + instructions(c);
     }
+
+    public static boolean autoRunCommands(Context c) { return p(c).getBoolean("auto_run_commands", true); }
+    public static void autoRunCommands(Context c, boolean value) { p(c).edit().putBoolean("auto_run_commands", value).apply(); }
+    public static String lastChat(Context c) { return p(c).getString("last_chat", ""); }
+    public static void lastChat(Context c, String id) { p(c).edit().putString("last_chat", id == null ? "" : id).apply(); }
 }

@@ -43,8 +43,10 @@ public final class AndroidProductProof {
         check("chat sends the selected discussion mode", chat.contains("discussion, cancel")
                 && chat.contains("discussionInstructions"), "request plumbing");
         String notebook = read("android/app/src/main/assets/aether-notebook-template.json");
-        check("the engine removes tool calling in discussion", notebook.contains("([] if discussion else TOOLS)")
-                && notebook.contains("tcs = [] if discussion") && notebook.contains("DISCUSSION MODE"), "hard per-turn tool boundary");
+        check("discussion has web-only tools and rejects shell/file calls", notebook.contains("'tools': turn_tools")
+                && notebook.contains("discussion_tools = {'web_search', 'fetch_page', 'crawl_site'}")
+                && notebook.contains("tool blocked in discussion mode")
+                && notebook.contains("DISCUSSION MODE"), "hard per-turn read-only web boundary");
         check("launch warm-up is shared and parallel", chat.contains("FleetWarmup.warmAll")
                 && read("android/app/src/main/java/com/aether/app/SplashActivity.java").contains("FleetWarmup.warmAll")
                 && read("android/app/src/main/java/com/aether/app/FleetWarmup.java").contains("newFixedThreadPool"), "process-wide coordinator");

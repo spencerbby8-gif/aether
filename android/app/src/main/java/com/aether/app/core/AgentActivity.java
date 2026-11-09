@@ -134,6 +134,9 @@ public final class AgentActivity {
 
     public boolean hasSteps() { return !steps.isEmpty(); }
 
+    /** Operational reasoning state only; private reasoning text is never retained. */
+    public boolean hasReasoning() { return reasoning || (!writing && iteration > 0); }
+
     /** True once any real token of the answer has arrived. */
     public boolean isWriting() { return writing; }
 
@@ -306,8 +309,10 @@ public final class AgentActivity {
         if ("web_search".equals(tool)) return clip(text(args, "query"), 60);
         if ("fetch_page".equals(tool) || "crawl_site".equals(tool)) return host(text(args, "url"));
         if ("generate_image".equals(tool)) return clip(text(args, "prompt"), 48);
-        /* run_command and generate_voice: the argument is a shell line or a
-           paragraph of text. Neither reads as an activity, so no detail. */
+        if ("run_command".equals(tool)) return clip(text(args, "command"), 500);
+        if ("list_files".equals(tool) || "package_files".equals(tool)) {
+            return clip(text(args, "path") != null ? text(args, "path") : text(args, "name"), 160);
+        }
         return "";
     }
 

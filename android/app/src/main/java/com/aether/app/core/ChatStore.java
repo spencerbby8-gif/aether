@@ -146,6 +146,35 @@ public final class ChatStore {
 
     // -------------------------------------------------------------- write
 
+    /** Portable session history; secrets and provider configuration are absent by construction. */
+    public synchronized JSONArray exportSessions() {
+        JSONArray out = new JSONArray();
+        for (Meta meta : list()) {
+            ChatSession session = load(meta.id);
+            try { if (session != null) out.put(session.toJson()); }
+            catch (JSONException ignored) { }
+        }
+        return out;
+    }
+
+    /** Merge a backup without replacing a newer local transcript. Returns imported count. */
+    public synchronized int importSessions(JSONArray sessions) {
+        if (sessions == null) return 0;
+        int imported = 0;
+        for (int i = 0; i < sessions.length(); i++) {
+            try {
+                ChatSession incoming = ChatSession.fromJson(sessions.getJSONObject(i));
+                if (!isSafeId(incoming.id)) continue;
+                ChatSession existing = load(incoming.id);
+                if (existing != null && existing.updatedAt >= incoming.updatedAt) continue;
+                writeAtomic(file(incoming.id), incoming.toJson().toString());
+                upsertIndex(metaOf(incoming));
+                imported++;
+            } catch (Exception ignored) { }
+        }
+        return imported;
+    }
+
     /** Persist a conversation, atomically, and refresh the index entry. */
     public synchronized void save(ChatSession s) {
         if (s == null || !isSafeId(s.id)) return;
