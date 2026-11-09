@@ -46,6 +46,7 @@ public class ExhaustiveThemeTest {
             Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
             AetherPrefs.theme(context, theme);
             settingsHome();
+            chatScreens();
             String[] sections = {"general", "conversation", "appearance", "models", "providers",
                     "activity", "network", "storage", "privacy", "legal", "about"};
             for (String section : sections) settingsSection(section);
@@ -65,6 +66,30 @@ public class ExhaustiveThemeTest {
             setText("settings_search", "backup");
             shot("settings-search-backup");
         }
+    }
+
+    /** The conversation surface itself, in this theme: welcome, drawer, pickers. */
+    private void chatScreens() throws Exception {
+        try (ActivityScenario<ChatActivity> scenario = ActivityScenario.launch(ChatActivity.class)) {
+            shot("chat-welcome");
+            clickId("menu_btn");
+            shot("chat-drawer");
+            scenario.onActivity(activity -> {
+                try {
+                    java.lang.reflect.Field drawer = ChatActivity.class.getDeclaredField("drawer");
+                    drawer.setAccessible(true);
+                    ((androidx.drawerlayout.widget.DrawerLayout) drawer.get(activity)).closeDrawers();
+                } catch (Exception e) { throw new RuntimeException(e); }
+            });
+            device.waitForIdle();
+            clickId("model_selector");
+            shot("chat-model-picker");
+            device.pressBack();
+            clickId("attach_btn");
+            shot("chat-attachment-sheet");
+            device.pressBack();
+        }
+        device.waitForIdle();
     }
 
     private void settingsSection(String section) throws Exception {
