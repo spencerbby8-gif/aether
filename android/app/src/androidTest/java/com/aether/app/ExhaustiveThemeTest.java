@@ -88,6 +88,9 @@ public class ExhaustiveThemeTest {
             clickId("attach_btn");
             shot("chat-attachment-sheet");
             device.pressBack();
+            clickId("mode_discuss");
+            shot("chat-discussion-composer");
+            clickId("mode_agent");
         }
         device.waitForIdle();
     }
