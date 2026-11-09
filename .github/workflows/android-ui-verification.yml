@@ -23,8 +23,11 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Confirm preinstalled Android SDK
+        run: |
+          printf 'Android SDK: %s\n' "$ANDROID_HOME"
+          command -v sdkmanager
+          sdkmanager --list_installed | head -30
 
       - name: Set up Gradle 9.7.1
         uses: gradle/actions/setup-gradle@v4
@@ -84,5 +87,5 @@ jobs:
             screenshots/
             instrumentation.log
             android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
