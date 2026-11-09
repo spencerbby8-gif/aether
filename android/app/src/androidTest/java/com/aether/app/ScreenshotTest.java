@@ -223,6 +223,15 @@ public class ScreenshotTest {
             } catch (Exception e) { throw new RuntimeException(e); }
         });
         assertTrue("Completed command did not fold automatically", folded[0]);
+        // The drawer was used for Settings, and while it is open it covers the
+        // transcript, so taps would land on it instead of the activity card.
+        scenario.onActivity(activity -> {
+            try {
+                Field drawer = ChatActivity.class.getDeclaredField("drawer"); drawer.setAccessible(true);
+                ((androidx.drawerlayout.widget.DrawerLayout) drawer.get(activity)).closeDrawers();
+            } catch (Exception e) { throw new RuntimeException(e); }
+        });
+        device.waitForIdle();
         // Nothing but the collapsed line is showing yet.
         assertTrue("Collapsed line did not name the command", device.findObject(By.textContains("Ran a command")) != null);
         // Tapping the collapsed line re-opens the panel; the summary is the
