@@ -10,9 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  build-and-screenshots:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     steps:
       - name: Check out verification branch
         uses: actions/checkout@v4
@@ -32,9 +32,7 @@ jobs:
           "$SDKMANAGER" --list_installed | head -30
 
       - name: Confirm hosted Gradle
-        run: |
-          command -v gradle
-          gradle --version
+        run: gradle --version
 
       - name: Install Android compile components
         run: |
@@ -52,39 +50,50 @@ jobs:
       - name: Verify engine source integrity
         run: node scripts/verify-engine-source.mjs
 
-      - name: Cache Android dependencies
-        uses: actions/cache@v4
+      - name: Upload APKs for the hardware-accelerated emulator
+        uses: actions/upload-artifact@v4
         with:
+          name: aether-android-apks
           path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: android-gradle-${{ hashFiles('android/**/*.gradle', 'android/gradle.properties') }}
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Cache Android virtual device
-        id: avd-cache
-        uses: actions/cache@v4
+  screenshots:
+    needs: build
+    runs-on: macos-13
+    timeout-minutes: 30
+    steps:
+      - name: Set up Java 21 for Android SDK tools
+        uses: actions/setup-java@v4
         with:
-          path: ~/.android/avd
-          key: aether-avd-api35-default-pixel6-v2
+          distribution: temurin
+          java-version: '21'
 
-      - name: Run emulator, navigate the app and capture screenshots
+      - name: Download the exact APKs built on Linux
+        uses: actions/download-artifact@v4
+        with:
+          name: aether-android-apks
+          path: apks
+
+      - name: Run hardware-accelerated emulator and capture real UI evidence
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           target: default
           profile: pixel_6
+          avd-name: aether-ui
           ram-size: 4096
           heap-size: 512
-          avd-name: aether-ui
-          force-avd-creation: false
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          emulator-options: -no-window -gpu host -noaudio -no-boot-anim
           script: |
             adb wait-for-device
             adb shell input keyevent 82
-            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-            adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb install -r apks/app-debug.apk
+            adb install -r apks/app-debug-androidTest.apk
             adb logcat -c
             set -o pipefail
             set +e
@@ -114,13 +123,6 @@ jobs:
             screenshots/
             instrumentation.log
             logcat.txt
-            android/app/build/outputs/apk/debug/app-debug.apk
+            apks/app-debug.apk
           if-no-files-found: warn
           retention-days: 7
-
-      - name: Preserve the AVD after failed diagnostics too
-        if: always() && steps.avd-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.android/avd
-          key: aether-avd-api35-default-pixel6-v2
