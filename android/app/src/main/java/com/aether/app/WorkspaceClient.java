@@ -39,6 +39,10 @@ public final class WorkspaceClient {
         action(engine, key, session, path, "/api/workspace/delete", cb);
     }
 
+    public static void rollback(String engine, String key, String session, Callback cb) {
+        action(engine, key, session, "", "/api/workspace/rollback", cb);
+    }
+
     private static void action(String engine, String key, String session, String path, String route, Callback cb) {
         try {
             JSONObject body = new JSONObject(); body.put("session", session); body.put("path", path);

@@ -72,7 +72,8 @@ public final class WorkspaceActivity extends AppCompatActivity {
         TextView up = action("↑ Up", v -> goUp());
         TextView refresh = action("Refresh", v -> load());
         TextView folder = action("+ Folder", v -> newFolderDialog());
-        toolbar.addView(up); toolbar.addView(refresh); toolbar.addView(folder);
+        TextView rollback = action("Rollback", v -> confirmRollback());
+        toolbar.addView(up); toolbar.addView(refresh); toolbar.addView(folder); toolbar.addView(rollback);
         root.addView(toolbar);
 
         editor = new EditText(this);
@@ -202,6 +203,17 @@ public final class WorkspaceActivity extends AppCompatActivity {
                         WorkspaceClient.delete(engine, key, session, file.optString("path"), (ok, result) -> ui.post(() -> {
                             toast(ok ? "Deleted" : result); if (ok) load();
                         }))).show();
+    }
+
+    private void confirmRollback() {
+        new AlertDialog.Builder(this).setTitle("Roll back the last workspace change?")
+                .setMessage("Restore the checkpoint captured before the most recent Workspace edit or shell command. Current files in this chat’s workspace will be replaced. This does not undo external connector actions.")
+                .setNegativeButton("Cancel", null).setPositiveButton("Restore checkpoint", (d, w) -> {
+                    closeEditor();
+                    WorkspaceClient.rollback(engine, key, session, (ok, result) -> ui.post(() -> {
+                        toast(ok ? "Workspace checkpoint restored" : result); if (ok) load();
+                    }));
+                }).show();
     }
 
     private String join(String value) { return path.isEmpty() ? value : path + "/" + value; }

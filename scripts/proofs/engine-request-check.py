@@ -16,6 +16,7 @@ import os
 import queue
 import threading
 import time
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TPL = os.path.join(HERE, "..", "..", "android", "app", "src", "main",
@@ -96,7 +97,7 @@ def run_agent(payload):
         return {'message': m, 'done': True}
 
     ns = {
-        'json': json, 'queue': queue, 'threading': threading, 'time': time,
+        'json': json, 'queue': queue, 'threading': threading, 'time': time, 'urllib': urllib,
         'SYSMSG': 'You are AETHER.', 'MODEL': 'test-model',
         'NUM_CTX': 16384, 'TOOL_RESULT_MAX': 2500,
         'TOOLS': [{"type": "function", "function": {"name": "web_search"}}],
@@ -122,7 +123,7 @@ def run_agent(payload):
     return seen, ''.join(chunks)
 
 
-ns0 = {'GEN_DIR': '/tmp/aether-proof-generated', 'notify': lambda *a, **k: None}
+ns0 = {'GEN_DIR': '/tmp/aether-proof-generated', 'notify': lambda *a, **k: None, 'urllib': urllib}
 exec(helpers, ns0)
 huq = ns0['has_user_query']
 exec(src[src.index('def history_window'):src.index('def has_user_query')], ns0)

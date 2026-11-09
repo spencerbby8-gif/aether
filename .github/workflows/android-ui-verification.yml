@@ -56,6 +56,7 @@ jobs:
           python3 scripts/proofs/engine-request-check.py
           python3 scripts/proofs/agent-loop-check.py
           python3 scripts/proofs/mcp-client-check.py
+          python3 scripts/proofs/workspace-recovery-check.py
 
       - name: Upload APKs for the hardware-accelerated emulator
         uses: actions/upload-artifact@v4

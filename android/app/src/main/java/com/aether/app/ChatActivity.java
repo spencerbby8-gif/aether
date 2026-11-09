@@ -335,21 +335,38 @@ public class ChatActivity extends AppCompatActivity {
 
     private void showComposerMenu() {
         if (discussionMode) return;
+        android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         LinearLayout menu = new LinearLayout(this); menu.setOrientation(LinearLayout.VERTICAL);
-        menu.setPadding(Ui.dp(this, 12), Ui.dp(this, 6), Ui.dp(this, 12), Ui.dp(this, 12));
+        menu.setBackgroundResource(R.drawable.bg_sheet);
+        menu.setPadding(Ui.dp(this, 20), Ui.dp(this, 12), Ui.dp(this, 20), Ui.dp(this, 18));
+        View handle = new View(this); handle.setBackgroundResource(R.drawable.bg_pill_ghost);
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(Ui.dp(this, 42), Ui.dp(this, 4));
+        hp.gravity = Gravity.CENTER_HORIZONTAL; hp.bottomMargin = Ui.dp(this, 16); menu.addView(handle, hp);
+        TextView title = Ui.tv(this, "Add to your task", 24, Ui.PRIMARY); title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        menu.addView(title, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 52)));
         TextView attach = Ui.tv(this, "Attach a file", 15, Ui.PRIMARY);
-        attach.setGravity(Gravity.CENTER_VERTICAL); attach.setOnClickListener(v -> pickFile.launch("*/*")); menu.addView(attach,
+        attach.setGravity(Gravity.CENTER_VERTICAL); attach.setOnClickListener(v -> { dialog.dismiss(); pickFile.launch("*/*"); }); menu.addView(attach,
                 new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 54)));
         TextView connectors = Ui.tv(this, "Connectors & MCP", 15, Ui.PRIMARY);
-        connectors.setGravity(Gravity.CENTER_VERTICAL); connectors.setOnClickListener(v -> ConnectorSheet.show(this, this::refreshChip));
+        connectors.setGravity(Gravity.CENTER_VERTICAL); connectors.setOnClickListener(v -> { dialog.dismiss(); ConnectorSheet.show(this, this::refreshChip); });
         menu.addView(connectors, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 54)));
         android.widget.CheckBox auto = new android.widget.CheckBox(this);
-        auto.setText("Auto-run Agent commands"); auto.setTextSize(14); auto.setChecked(AetherPrefs.autoRunCommands(this));
+        auto.setText("Auto-run Agent commands"); auto.setTextSize(14); auto.setTextColor(getColor(Ui.PRIMARY)); auto.setChecked(AetherPrefs.autoRunCommands(this));
         auto.setOnCheckedChangeListener((button, checked) -> AetherPrefs.autoRunCommands(this, checked));
         menu.addView(auto, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this, 54)));
         TextView note = Ui.tv(this, "Agent only · Commands are always shown in the activity trace. Disable auto-run to remove shell execution from the next request.", 11, Ui.DIM);
         menu.addView(note);
-        new AlertDialog.Builder(this).setTitle("Add to your task").setView(menu).setNegativeButton("Close", null).show();
+        dialog.setContentView(menu);
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            window.setGravity(Gravity.BOTTOM); window.setDimAmount(.62f);
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            if (AetherPrefs.animations(this)) window.setWindowAnimations(R.style.AetherSheetAnimation);
+        }
+        dialog.show();
     }
 
     private void openSettings() {
@@ -365,7 +382,7 @@ public class ChatActivity extends AppCompatActivity {
             modeRestartRequested = true;
             if (cancelFlag != null) cancelFlag[0] = true;
             turn.cancel();
-            toast("Switching mode · the current request will continue in "
+            toast("Mode changed · stopping this request; completed tool effects remain. Continuing in "
                     + (discussion ? "Discussion" : "Agent"));
         }
         discussionMode = discussion;

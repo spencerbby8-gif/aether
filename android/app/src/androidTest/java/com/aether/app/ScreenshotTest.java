@@ -89,10 +89,22 @@ public class ScreenshotTest {
             device.waitForIdle();
         }
 
+        ActivityScenario<BackupActivity> backupScenario = ActivityScenario.launch(BackupActivity.class);
+        assertVisible("Backup & restore");
+        assertVisible("Sign in to your Aether account before connecting backup.");
+        shot("04b-backup-signed-out");
+        backupScenario.close();
+        device.waitForIdle();
+
         clickId("model_selector");
         assertVisible("Choose your model");
         assertVisible("Personal OpenAI");
         shot("05-model-picker");
+        clickText("Aether Uncensored", true);
+        assertVisible("Your responsibility with Aether Uncensored");
+        assertVisible("You are responsible for reviewing outputs, commands and files");
+        shot("05b-uncensored-responsibility");
+        clickText("Cancel");
         clickText("Personal OpenAI");
         clickText("gpt-4o-mini");
         assertVisible("gpt-4o-mini");
@@ -107,8 +119,10 @@ public class ScreenshotTest {
         shot("07-agent-plus-menu");
         clickText("Connectors & MCP");
         assertVisible("GitHub");
-        assertVisible("Custom MCP server");
         shot("08-connector-catalog");
+        scrollTo("Custom MCP server");
+        assertVisible("Custom MCP server");
+        scrollTo("GitHub");
         clickText("GitHub", true);
         assertVisible("Read/search tools");
         assertVisible("Create/edit tools");

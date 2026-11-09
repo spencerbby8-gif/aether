@@ -6,6 +6,14 @@
         <item name="android:navigationBarColor">@color/aether_bg</item>
         <item name="android:textColorPrimary">@color/aether_fg</item>
         <item name="android:colorAccent">@color/aether_accent</item>
+        <item name="alertDialogTheme">@style/AetherAlertDialog</item>
+    </style>
+    <style name="AetherAlertDialog" parent="Theme.AppCompat.Dialog.Alert">
+        <item name="android:windowBackground">@color/aether_surface</item>
+        <item name="android:colorBackground">@color/aether_surface</item>
+        <item name="android:textColorPrimary">@color/aether_fg</item>
+        <item name="android:textColorSecondary">@color/aether_muted</item>
+        <item name="colorAccent">@color/aether_accent</item>
     </style>
     <style name="Theme.Aether.Splash" parent="Theme.Aether">
         <item name="android:windowBackground">@color/aether_bg</item>

@@ -43,7 +43,7 @@ public final class AuthActivity extends AppCompatActivity {
         TextView title = Ui.tv(this, "Your Aether account", 30, Ui.PRIMARY);
         title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         title.setPadding(0, Ui.dp(this, 42), 0, Ui.dp(this, 10)); root.addView(title);
-        TextView intro = Ui.tv(this, "Sign in to synchronize your account, connector grants and app backups. Chat remains available without an account.", 14, Ui.DIM);
+        TextView intro = Ui.tv(this, "Sign in to synchronize your chats and keep account-linked app backups. Chat remains available without an account.", 14, Ui.DIM);
         root.addView(intro);
 
         TextView google = button(driveBackup ? "Connect Google Drive backup" : "Continue with Google", false);

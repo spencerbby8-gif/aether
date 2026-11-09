@@ -13,6 +13,7 @@ import os
 import queue
 import threading
 import time
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TPL = os.path.join(HERE, "..", "..", "android", "app", "src", "main",
@@ -142,7 +143,7 @@ def make_env(script):
         return "result for " + str(query)
 
     ns = {
-        'json': json, 'queue': queue, 'threading': threading, 'time': time,
+        'json': json, 'queue': queue, 'threading': threading, 'time': time, 'urllib': urllib,
         'SYSMSG': 'You are AETHER.', 'MODEL': 'test-model',
         'NUM_CTX': 16384, 'TOOL_RESULT_MAX': 2500,
         'EXEC': {'web_search': web_search, 'run_command': run_command,

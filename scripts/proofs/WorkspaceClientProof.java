@@ -47,6 +47,8 @@ public final class WorkspaceClientProof {
             check("mkdir uses its real route", mkdir.ok && requests.get(3).startsWith("POST /api/workspace/mkdir"), requests.get(3));
             Result delete = new Result(); WorkspaceClient.delete(url, "test-key", "chat123", "notes.txt", delete); delete.await();
             check("delete uses its real route", delete.ok && requests.get(4).startsWith("POST /api/workspace/delete"), requests.get(4));
+            Result rollback = new Result(); WorkspaceClient.rollback(url, "test-key", "chat123", rollback); rollback.await();
+            check("rollback calls the authenticated checkpoint route", rollback.ok && requests.get(5).startsWith("POST /api/workspace/rollback"), requests.get(5));
             Result denied = new Result(); WorkspaceClient.list(url, "wrong", "chat123", "", denied); denied.await();
             check("engine authentication failure reaches caller", !denied.ok, denied.value);
             Result refused = new Result(); WorkspaceClient.list("http://example.com", "key", "chat", "", refused); refused.await();

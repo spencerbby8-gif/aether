@@ -5,7 +5,7 @@ import io, json, os
 HERE = os.path.dirname(os.path.abspath(__file__))
 TPL = os.path.join(HERE, '..', '..', 'android', 'app', 'src', 'main', 'assets', 'aether-notebook-template.json')
 src = json.load(open(TPL))['cells'][4]['source']
-code = src[src.index('def _mcp_request'):src.index('def agent_stream')]
+code = src[src.index('class _MCPNoRedirect'):src.index('def agent_stream')]
 
 passed = failed = 0
 def check(name, condition, detail=''):
@@ -19,7 +19,7 @@ class Request:
         self.url, self.data, self.method, self.headers = url, data, method, {}
     def add_header(self, key, value): self.headers[key.lower()] = value
 class Response:
-    def __init__(self, value): self.value = value
+    def __init__(self, value): self.value = value; self.headers = {'Mcp-Session-Id':'session-proof'}
     def __enter__(self): return self
     def __exit__(self, *args): pass
     def read(self, limit):
@@ -30,11 +30,17 @@ class Response:
 class Urllib:
     class request:
         Request = Request
+        HTTPRedirectHandler = object
+        @staticmethod
+        def build_opener(handler): return Urllib.request
+        @staticmethod
+        def open(request, timeout): return Urllib.request.urlopen(request, timeout)
         @staticmethod
         def urlopen(request, timeout):
             payload = json.loads(request.data)
             calls.append((request, payload))
             method = payload['method']
+            if method == 'notifications/initialized': return Response({'body':{}})
             if method == 'initialize': body = {'jsonrpc':'2.0','id':payload['id'],'result':{'protocolVersion':'2025-03-26','capabilities':{'tools':{}}}}
             elif method == 'tools/list':
                 body = {'jsonrpc':'2.0','id':payload['id'],'result':{'tools':[
@@ -52,7 +58,8 @@ exec(code, ns)
 server = {'name':'GitHub','url':'https://mcp.example/mcp','token':'secret-not-logged','enabled':True,'read':True,'write':False,'execute':False,'repository':'owner/project'}
 schemas, executors, errors = ns['_mcp_bind']([server])
 names = [s['function']['name'] for s in schemas]
-check('initialize and tools/list produce a real schema', len(calls) == 2 and calls[0][1]['method'] == 'initialize' and calls[1][1]['method'] == 'tools/list', len(calls))
+check('initialize, initialized notification and tools/list produce a real schema', len(calls) == 3 and calls[0][1]['method'] == 'initialize' and calls[1][1]['method'] == 'notifications/initialized' and calls[2][1]['method'] == 'tools/list', {'calls':len(calls), 'errors':errors})
+check('notification has no JSON-RPC id and session is propagated', 'id' not in calls[1][1] and calls[-1][0].headers.get('mcp-session-id') == 'session-proof')
 check('read grant exposes search but not write/execute', len(names) == 2 and any(n.endswith('__search_issues') for n in names) and any(n.endswith('__ui_get') for n in names), names)
 check('readOnlyHint false denies fork under a read grant', not any(n.endswith('__fork_repository') for n in names))
 result = executors[next(n for n in names if n.endswith('__search_issues'))](query='aether')
