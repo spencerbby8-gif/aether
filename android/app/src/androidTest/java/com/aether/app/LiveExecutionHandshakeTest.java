@@ -158,15 +158,39 @@ public class LiveExecutionHandshakeTest {
         final Method stream = ChatActivity.class.getDeclaredMethod("streamWithFailover", String.class, String.class,
                 String.class, type, List.class, List.class, boolean.class);
         stream.setAccessible(true);
+        // The activity is captured on the main thread, but the turn itself runs
+        // on its own thread -- exactly as a send does. Invoking it inside
+        // onActivity would block the main looper that renders the approval card.
+        final ChatActivity[] activityRef = new ChatActivity[1];
+        scenario.onActivity(activity -> activityRef[0] = activity);
         final AtomicReference<Throwable> failure = new AtomicReference<>();
-        Thread thread = new Thread(() -> scenario.onActivity(activity -> {
-            try { stream.invoke(activity, engine.url(), "execute the proof command", "execute the proof command",
-                    bubble[0], new ArrayList<String>(), new ArrayList<EngineCore.Msg>(), false); }
-            catch (Exception e) { failure.set(e); }
-        }));
+        Thread thread = new Thread(() -> {
+            try {
+                stream.invoke(activityRef[0], engine.url(), "execute the proof command", "execute the proof command",
+                        bubble[0], new ArrayList<String>(), new ArrayList<EngineCore.Msg>(), false);
+            } catch (Throwable e) { failure.set(e); }
+        }, "aether-live-proof-turn");
+        thread.setDaemon(true);
         thread.start();
-        assertTrue("Live HTTP chat was not requested", engine.chat.await(7, TimeUnit.SECONDS));
-        if (failure.get() != null) throw new AssertionError(failure.get());
+        if (!engine.chat.await(10, TimeUnit.SECONDS)) {
+            Throwable cause = failure.get();
+            throw new AssertionError("Live HTTP chat was not requested; app-side error=" + turnNote(bubble[0])
+                    + "; requests=" + engine.requests
+                    + (cause == null ? "" : "; thrown=" + cause), cause);
+        }
+        if (failure.get() != null) throw new AssertionError("The live turn failed to start", failure.get());
+    }
+
+    /** The bubble's own record of what went wrong, so a failure names the cause. */
+    private static String turnNote(Object bubble) {
+        try {
+            Field model = bubble.getClass().getDeclaredField("model"); model.setAccessible(true);
+            Object message = model.get(bubble);
+            if (message == null) return "no message";
+            Field status = message.getClass().getField("status"); status.setAccessible(true);
+            Field note = message.getClass().getField("note"); note.setAccessible(true);
+            return String.valueOf(status.get(message)) + "/" + String.valueOf(note.get(message));
+        } catch (Throwable e) { return "unreadable (" + e + ")"; }
     }
 
     private static void set(Object target, String name, Object value) throws Exception {

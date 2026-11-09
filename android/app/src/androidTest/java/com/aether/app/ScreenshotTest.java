@@ -208,7 +208,19 @@ public class ScreenshotTest {
             } catch (Exception e) { throw new RuntimeException(e); }
         });
         device.waitForIdle();
-        assertTrue("Completed command collapsed automatically", device.findObject(By.textContains("$ pwd")) == null);
+        // Folded means the panel itself hides its detail list. Reading the whole
+        // window instead would also match any earlier bubble still on screen.
+        boolean[] folded = new boolean[1];
+        scenario.onActivity(activity -> {
+            try {
+                Object panel = fixturePanel[0];
+                Field expanded = panel.getClass().getDeclaredField("expanded"); expanded.setAccessible(true);
+                Field listField = panel.getClass().getDeclaredField("list"); listField.setAccessible(true);
+                android.view.View list = (android.view.View) listField.get(panel);
+                folded[0] = !expanded.getBoolean(panel) && list.getVisibility() == android.view.View.GONE;
+            } catch (Exception e) { throw new RuntimeException(e); }
+        });
+        assertTrue("Completed command did not fold automatically", folded[0]);
         // The fixture panel is the activity view containing the command text.
         clickText("Ran a command", true);
         assertVisible("$ pwd");

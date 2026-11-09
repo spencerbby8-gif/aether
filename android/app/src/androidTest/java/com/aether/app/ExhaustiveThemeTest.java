@@ -60,9 +60,9 @@ public class ExhaustiveThemeTest {
     private void settingsHome() throws Exception {
         try (ActivityScenario<SettingsActivity> scenario = ActivityScenario.launch(SettingsActivity.class)) {
             shot("settings-home"); bottom("settings-home-bottom");
-            clickId("search"); setText("search", "not-a-real-setting");
+            clickId("settings_search"); setText("settings_search", "not-a-real-setting");
             shot("settings-search-empty");
-            setText("search", "backup");
+            setText("settings_search", "backup");
             shot("settings-search-backup");
         }
     }
