@@ -134,6 +134,8 @@ public class ChatActivity extends AppCompatActivity {
 
     private Credentials.Config cfg;
     private ByokStore byokStore;
+    /** Null in normal use; instrumentation can supply a deterministic provider transport. */
+    private ByokClient.Transport byokAgentTransport;
     private ChatStore store;
     private ChatSession current;
 
@@ -687,7 +689,8 @@ public class ChatActivity extends AppCompatActivity {
                    model's reasoning was never saved, so a reloaded transcript
                    cannot resurrect it. finish() collapses the strip and stops
                    any animation before the message is even on screen. */
-                for (String line : m.toolLines) b.activity.event(line);
+                if (m.activitySteps != null && m.activitySteps.length() > 0) b.activity.model.restore(m.activitySteps);
+                else for (String line : m.toolLines) b.activity.event(line);
                 b.activity.report = m.taskReport;
                 b.activity.finish();
                 if (m.media != null && !m.media.isEmpty()) {
@@ -1133,6 +1136,28 @@ public class ChatActivity extends AppCompatActivity {
             pulseView.setRunning(AetherPrefs.animations(ChatActivity.this));
             render();
             return true;
+        }
+
+        void localStart(String id, String name, String arguments) {
+            model.startTool(id, name, arguments);
+            running = true;
+            expanded = AetherPrefs.showActivity(ChatActivity.this);
+            card.setVisibility(AetherPrefs.showActivity(ChatActivity.this) ? View.VISIBLE : View.GONE);
+            pulseView.setRunning(AetherPrefs.animations(ChatActivity.this));
+            render();
+        }
+
+        void localOutput(String id, String chunk) {
+            model.appendToolOutput(id, chunk);
+            running = true;
+            expanded = AetherPrefs.showActivity(ChatActivity.this);
+            render();
+        }
+
+        void localEnd(String id, String name, String output, boolean ok, int exitCode) {
+            model.completeTool(id, name, output, ok, exitCode);
+            running = true;
+            render();
         }
 
         void writing() { model.noteContent(); render(); }
@@ -1941,7 +1966,31 @@ public class ChatActivity extends AppCompatActivity {
         });
     }
 
-    /** One direct personal-provider turn. Cross-provider failover is not implicit. */
+    /** A real approval boundary shared by local writes, commands and MCP calls. */
+    private boolean approveLocalTool(String action, String detail) throws Exception {
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        final AtomicBoolean approved = new AtomicBoolean(false);
+        ui.post(() -> {
+            if (isFinishing() || isDestroyed()) { latch.countDown(); return; }
+            String message = detail == null ? "" : detail;
+            if (message.length() > 1800) message = message.substring(0, 1800) + "\n…";
+            AlertDialog dialog = new AlertDialog.Builder(this)
+                    .setTitle(action)
+                    .setMessage(message)
+                    .setNegativeButton("Deny", (d, w) -> latch.countDown())
+                    .setPositiveButton("Approve once", (d, w) -> { approved.set(true); latch.countDown(); })
+                    .setOnCancelListener(d -> latch.countDown())
+                    .create();
+            dialog.show();
+        });
+        boolean[] cancelled = cancelFlag;
+        while (!latch.await(150, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            if (cancelled != null && cancelled[0]) return false;
+        }
+        return approved.get();
+    }
+
+    /** One direct personal-provider turn. Agent mode has a bounded real tool loop. */
     private void streamByok(ByokClient.Connection connection, String selectedModel,
                             String wire, String prompt, AssistantBubble b,
                             List<EngineCore.Msg> history, boolean discussion) {
@@ -1951,17 +2000,60 @@ public class ChatActivity extends AppCompatActivity {
         final long started = System.currentTimeMillis();
         ByokClient.ChatOptions options = AgentSettings.load(this);
         options.instructions = discussion ? AetherPrefs.discussionInstructions(this) : AetherPrefs.instructions(this);
-        ByokClient.chat(connection, selectedModel, history, wire, options, cancel,
-                new EngineCore.ChatListener() {
-                    @Override public void onThinking(String text) { }
+        if (discussion) {
+            ByokClient.chat(connection, selectedModel, history, wire, options, cancel,
+                    new EngineCore.ChatListener() {
+                        @Override public void onThinking(String text) { }
+                        @Override public void onContent(String text) {
+                            b.raw.append(text);
+                            ui.post(() -> renderAnswer(b, false));
+                        }
+                        @Override public void onDone(boolean ok, String error) {
+                            finalizeTurn(b, prompt, ok, error, System.currentTimeMillis() - started);
+                        }
+                    }, turn);
+            return;
+        }
+
+        String session = current == null ? "default" : current.id;
+        LocalToolRegistry registry = new LocalToolRegistry(
+                new java.io.File(getFilesDir(), "agent-workspace/" + session),
+                new ConnectorStore(this).enabledLocalGrants(), this::approveLocalTool);
+        ByokAgent.chat(connection, selectedModel, history, wire, options, registry, cancel, turn,
+                new ByokAgent.Listener() {
+                    private void saveActivity() {
+                        if (b.model != null) b.model.activitySteps = b.activity.model.toJson();
+                    }
+                    @Override public void onIteration(int iteration) {
+                        ui.post(() -> { b.activity.event("⚙️ agent step " + iteration + "..."); saveActivity(); });
+                    }
+                    @Override public void onToolStart(String id, String name, String arguments) {
+                        ui.post(() -> {
+                            b.activity.localStart(id, name, arguments);
+                            if (b.model != null) b.model.toolLines.add("🛠️ " + name + "(" + arguments + ")");
+                            saveActivity(); scrollBottom();
+                        });
+                    }
+                    @Override public void onToolOutput(String id, String name, String output) {
+                        ui.post(() -> { b.activity.localOutput(id, output); saveActivity(); scrollBottom(); });
+                    }
+                    @Override public void onToolEnd(String id, String name, String output, boolean ok, int exitCode) {
+                        ui.post(() -> {
+                            b.activity.localEnd(id, name, output, ok, exitCode);
+                            if (b.model != null) b.model.toolLines.add("↳ " + name + " returned " + output.length() + " chars");
+                            saveActivity();
+                        });
+                    }
                     @Override public void onContent(String text) {
                         b.raw.append(text);
                         ui.post(() -> renderAnswer(b, false));
                     }
                     @Override public void onDone(boolean ok, String error) {
+                        for (String warning : registry.warnings()) ui.post(() -> pushNotice(b, warning));
+                        ui.post(this::saveActivity);
                         finalizeTurn(b, prompt, ok, error, System.currentTimeMillis() - started);
                     }
-                }, turn);
+                }, byokAgentTransport == null ? new ByokClient.HttpTransport() : byokAgentTransport);
     }
 
     /** The cached engine, if it was live recently and the mode has not changed. */
@@ -2365,6 +2457,7 @@ public class ChatActivity extends AppCompatActivity {
                             + b.reqShape);
                 }
             }
+            if (b.model != null) b.model.activitySteps = b.activity.model.toJson();
             persist();
             refreshChip();
         });

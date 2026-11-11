@@ -305,7 +305,7 @@ public class SettingsActivity extends AppCompatActivity {
         action(b, "Choose a model", "Built-in and personal providers", () -> ModelPickerDialog.show(this, store, this::showModels));
         action(b, "Manage personal providers", "Add, test, edit or remove a connection", () -> showSection("providers"));
         b.addView(groupLabel("HOW IT WORKS"));
-        b.addView(infoCard("Model choice is remembered on this device. Personal providers receive requests directly. Built-in turns retain Aether's workspace tools; personal-provider turns use chat completions."));
+        b.addView(infoCard("Model choice is remembered on this device. Personal providers receive requests directly. Agent mode adds bounded local tools, live command output and approved MCP connector calls; Discussion mode stays focused on conversation."));
     }
 
     private void showProviders() {

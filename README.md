@@ -47,18 +47,20 @@ Android **Settings → Models & BYOK → Add provider** supports the same nine
 OpenAI-compatible connectors, manual model IDs, real `/models` discovery and
 connection tests, editing, enable/disable, and deletion. Personal chat is sent
 **directly from the Android app to the selected provider**; it does not use the
-Next.js BYOK proxy. Personal-provider chat supports streaming and non-streaming
-chat completions, history, custom instructions, temperature, output-token and
-timeout controls. Aether workspace tools remain on the built-in fleet.
+Next.js BYOK proxy. Discussion mode supports streaming and non-streaming chat
+completions, history, custom instructions, temperature, output-token and timeout
+controls. Agent mode adds a bounded function-calling loop with real local web,
+workspace-file and allowlisted Android-command tools, live stdout/stderr banners,
+and approved Streamable-HTTP MCP connector calls. See `docs/local-agent-runtime.md`.
 
 Unlike the web implementation, Android encrypts each personal API key with
 AES-GCM using a non-exportable Android Keystore key. Only key-free provider
 metadata is kept in private SharedPreferences. There is no cloud sync or
 server-side key vault. Saving a key does not mean the provider is verified;
 only a successful provider response sets that state. The Settings data/privacy
-section also explains local chat history and the personal-provider tool limit.
+section also explains local chat history and external-service data handling.
 
-The Android source version is 2.8.0 (versionCode 47). Build and offline-check it
+The Android source version is 3.2.0 (versionCode 50). Build and offline-check it
 with the pinned toolchain:
 
 ```sh

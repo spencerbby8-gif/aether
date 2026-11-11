@@ -206,6 +206,7 @@ final class AgentTimelineView extends LinearLayout {
 
         boolean expanded = openIndex == globalIndex;
         boolean hasDetails = !step.detail.isEmpty() || step.chars > 0
+                || (step.output != null && !step.output.isEmpty())
                 || (step.source != null && !step.source.isEmpty());
 
         TextView name = Ui.tv(context, iconFor(step.tool) + "  " + (step.done ? step.past : step.label),
@@ -260,7 +261,26 @@ final class AgentTimelineView extends LinearLayout {
                 detail.setTextIsSelectable(true);
                 well.addView(detail);
             }
-            if (step.chars > 0) {
+            if (step.output != null && !step.output.isEmpty()) {
+                TextView outputLabel = Ui.meta(context, step.done
+                        ? (step.ok ? "OUTPUT" : "OUTPUT · FAILED") : "LIVE OUTPUT");
+                outputLabel.setTextColor(context.getColor(step.ok ? R.color.aether_dim : R.color.aether_error));
+                outputLabel.setPadding(0, Ui.dp(context, 7), 0, Ui.dp(context, 3));
+                well.addView(outputLabel);
+                String visible = step.output.length() > 16_000
+                        ? "[earlier output folded]\n" + step.output.substring(step.output.length() - 16_000)
+                        : step.output;
+                TextView output = Ui.tv(context, visible, 10, Ui.DIM);
+                output.setTypeface(Ui.mono(context));
+                output.setTextIsSelectable(true);
+                output.setLineSpacing(0f, 1.12f);
+                well.addView(output);
+            }
+            if (step.exitCode >= 0) {
+                TextView returned = Ui.meta(context, "Exit " + step.exitCode + " · " + step.chars + " characters");
+                returned.setPadding(0, Ui.dp(context, 5), 0, 0);
+                well.addView(returned);
+            } else if (step.chars > 0) {
                 TextView returned = Ui.meta(context, "Returned " + step.chars + " characters");
                 returned.setPadding(0, Ui.dp(context, 5), 0, 0);
                 well.addView(returned);
