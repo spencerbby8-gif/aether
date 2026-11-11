@@ -112,7 +112,9 @@ public class LocalAgentInteractionTest {
 
             UiObject2 collapse = device.wait(Until.findObject(By.desc("Collapse Running a command")), 6000);
             assertNotNull(collapse); collapse.click(); device.waitForIdle();
-            assertTrue("Command output did not collapse", device.wait(Until.gone(By.textContains("aether-android-live-output")), 5000));
+            // The compact $ command preview remains by design; the detailed
+            // output well is what must disappear when the row is collapsed.
+            assertTrue("Command output did not collapse", device.wait(Until.gone(By.text("OUTPUT")), 5000));
             shot("02-command-output-collapsed");
 
             UiObject2 expand = device.wait(Until.findObject(By.desc("Expand Running a command")), 6000);
