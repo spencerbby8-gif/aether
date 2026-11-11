@@ -110,16 +110,21 @@ public final class AgentRun {
             case "fetch_page":
             case "crawl_site":
             case "list_files":
+            case "read_file":
+            case "current_time":
             case "package_files":
                 return Kind.GATHER;
             case "browser":
                 return Kind.BROWSE;
             case "run_command":
                 return Kind.EXECUTE;
+            case "write_file":
+            case "delete_file":
             case "generate_image":
             case "generate_voice":
                 return Kind.CREATE;
             default:
+                if (tool.startsWith("mcp_")) return Kind.EXECUTE;
                 return Kind.OTHER;
         }
     }
@@ -130,7 +135,7 @@ public final class AgentRun {
             case GATHER:    return "Gathering information";
             case BROWSE:    return "Browsing the web";
             case EXECUTE:   return "Running commands";
-            case CREATE:    return "Creating media";
+            case CREATE:    return "Creating and editing";
             default:        return "Working";
         }
     }

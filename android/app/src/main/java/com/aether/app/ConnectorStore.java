@@ -82,6 +82,34 @@ public final class ConnectorStore {
         return false;
     }
 
+    /**
+     * Enabled connector configuration for the on-device Agent loop. Secrets are
+     * decrypted in memory only while constructing the registry and are never
+     * serialized, logged, or included in chat history.
+     */
+    public List<LocalToolRegistry.ConnectorGrant> enabledLocalGrants() {
+        List<LocalToolRegistry.ConnectorGrant> out = new ArrayList<>();
+        for (Connector item : list()) {
+            if (!item.enabled) continue;
+            if (item.oauth && item.expiresAt > 0 && item.expiresAt < System.currentTimeMillis() + 60_000) {
+                ConnectorOAuth.refreshBlocking(appContext, item);
+                item = find(item.id);
+                if (item == null || !item.enabled) continue;
+            }
+            try {
+                LocalToolRegistry.ConnectorGrant grant = new LocalToolRegistry.ConnectorGrant();
+                grant.name = item.name;
+                grant.url = item.url;
+                grant.token = secure.get(secretKey(item.id));
+                grant.read = item.read;
+                grant.write = item.write;
+                grant.execute = item.execute;
+                out.add(grant);
+            } catch (Exception ignored) { }
+        }
+        return out;
+    }
+
     private void write(List<Connector> all) {
         JSONArray values = new JSONArray();
         for (Connector item : all) values.put(item.toJson());

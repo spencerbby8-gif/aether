@@ -43,8 +43,14 @@ public final class AgentActivity {
         public final String past;
         public final long startMs;      // ms since the turn started
         public long durationMs;         // 0 while it is still running
-        public int chars;               // from "returned N chars"
+        public int chars;               // from "returned N chars" or real local output
         public boolean done;
+        /** Stable provider tool-call id for correlating live local output. */
+        public String callId = "";
+        /** Real stdout/stderr or tool result, capped by the client. */
+        public String output = "";
+        public boolean ok = true;
+        public int exitCode = -1;
 
         Step(String tool, String label, String detail, String source, long startMs) {
             this(tool, label, pastFor(tool), detail, source, startMs);
@@ -72,6 +78,10 @@ public final class AgentActivity {
                 if (detail != null && !detail.isEmpty()) o.put("detail", detail);
                 if (source != null && !source.isEmpty()) o.put("source", source);
                 if (chars > 0) o.put("chars", chars);
+                if (callId != null && !callId.isEmpty()) o.put("callId", callId);
+                if (output != null && !output.isEmpty()) o.put("output", output);
+                o.put("ok", ok);
+                if (exitCode >= 0) o.put("exitCode", exitCode);
                 o.put("done", done);
             } catch (Exception ignored) { }
             return o;
@@ -83,6 +93,10 @@ public final class AgentActivity {
                     o.optString("source", ""), o.optLong("start", 0));
             s.durationMs = o.optLong("dur", 0);
             s.chars = o.optInt("chars", 0);
+            s.callId = o.optString("callId", "");
+            s.output = o.optString("output", "");
+            s.ok = o.optBoolean("ok", true);
+            s.exitCode = o.optInt("exitCode", -1);
             s.done = o.optBoolean("done", true);
             return s;
         }
@@ -196,6 +210,47 @@ public final class AgentActivity {
         return false;
     }
 
+    /** Start a provider-requested local tool and retain its correlation id. */
+    public void startTool(String id, String name, String arguments) {
+        String safeName = name == null || name.trim().isEmpty() ? "tool" : name.trim();
+        String args = arguments == null ? "{}" : arguments;
+        feed("\ud83d\udee0\ufe0f " + safeName + "(" + args + ")");
+        Step step = open();
+        if (step != null) step.callId = id == null ? "" : id;
+    }
+
+    /** Append genuine local tool/process output. Never synthesizes progress. */
+    public void appendToolOutput(String id, String chunk) {
+        if (chunk == null || chunk.isEmpty()) return;
+        for (int i = steps.size() - 1; i >= 0; i--) {
+            Step step = steps.get(i);
+            if (id != null && id.equals(step.callId)) {
+                if (step.output.length() < 65_536) {
+                    step.output += chunk;
+                    if (step.output.length() > 65_536) step.output = step.output.substring(0, 65_536) + "\n[display truncated]";
+                }
+                return;
+            }
+        }
+    }
+
+    public void completeTool(String id, String name, String result, boolean ok, int exitCode) {
+        Step step = null;
+        for (int i = steps.size() - 1; i >= 0; i--) {
+            if (id != null && id.equals(steps.get(i).callId)) { step = steps.get(i); break; }
+        }
+        if (step == null) step = latest(name);
+        if (step == null) return;
+        if (result != null && !result.isEmpty() && step.output.isEmpty()) {
+            step.output = result.length() <= 65_536 ? result : result.substring(0, 65_536) + "\n[display truncated]";
+        }
+        step.done = true;
+        step.durationMs = now() - step.startMs;
+        step.chars = step.output.length();
+        step.ok = ok;
+        step.exitCode = exitCode;
+    }
+
     /** The answer started arriving; the activity becomes "Writing". */
     public void noteContent() {
         writing = true;
@@ -260,6 +315,17 @@ public final class AgentActivity {
         return out;
     }
 
+    /** Restore the structured local activity without replaying it as live work. */
+    public void restore(JSONArray a) {
+        steps.clear();
+        sources.clear();
+        steps.addAll(fromJson(a));
+        for (Step step : steps) if (step.source != null && !step.source.isEmpty()) sources.add(step.source);
+        finished = true;
+        writing = true;
+        reasoning = false;
+    }
+
     // ------------------------------------------------------------- internals
 
     private long now() { return System.currentTimeMillis() - t0; }
@@ -312,6 +378,11 @@ public final class AgentActivity {
         if ("fetch_page".equals(tool) || "crawl_site".equals(tool)) return host(text(args, "url"));
         if ("generate_image".equals(tool)) return clip(text(args, "prompt"), 48);
         if ("run_command".equals(tool)) return clip(text(args, "command"), 500);
+        if ("web_search".equals(tool)) return clip(text(args, "query"), 80);
+        if ("read_file".equals(tool) || "write_file".equals(tool) || "delete_file".equals(tool)) {
+            return clip(text(args, "path"), 160);
+        }
+        if (tool != null && tool.startsWith("mcp_")) return "Review connector arguments";
         if ("list_files".equals(tool) || "package_files".equals(tool)) {
             return clip(text(args, "path") != null ? text(args, "path") : text(args, "name"), 160);
         }
@@ -362,9 +433,16 @@ public final class AgentActivity {
             case "fetch_page":     return "Reading a source";
             case "crawl_site":     return "Reading sources";
             case "run_command":    return "Running a command";
+            case "list_files":     return "Inspecting workspace";
+            case "read_file":      return "Reading a file";
+            case "write_file":     return "Writing a file";
+            case "delete_file":    return "Deleting a file";
+            case "current_time":   return "Checking the time";
             case "generate_image": return "Generating an image";
             case "generate_voice": return "Generating audio";
-            default:               return "Using a tool";
+            default:
+                if (tool != null && tool.startsWith("mcp_")) return "Using a connector";
+                return "Using a tool";
         }
     }
 
@@ -398,9 +476,16 @@ public final class AgentActivity {
             case "fetch_page":     return "Read a source";
             case "crawl_site":     return "Read sources";
             case "run_command":    return "Ran a command";
+            case "list_files":     return "Inspected workspace";
+            case "read_file":      return "Read a file";
+            case "write_file":     return "Wrote a file";
+            case "delete_file":    return "Deleted a file";
+            case "current_time":   return "Checked the time";
             case "generate_image": return "Generated an image";
             case "generate_voice": return "Generated audio";
-            default:               return "Used a tool";
+            default:
+                if (tool != null && tool.startsWith("mcp_")) return "Used a connector";
+                return "Used a tool";
         }
     }
 

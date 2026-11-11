@@ -51,6 +51,19 @@ jobs:
       - name: Verify engine source integrity
         run: node scripts/verify-engine-source.mjs
 
+      - name: Run local Agent protocol and real command proofs
+        run: |
+          mkdir -p /tmp/aether-agent-proofs
+          curl -fsSL -o /tmp/aether-agent-proofs/json.jar https://repo1.maven.org/maven2/org/json/json/20240303/json-20240303.jar
+          SRC=android/app/src/main/java/com/aether/app
+          javac -encoding UTF-8 -cp /tmp/aether-agent-proofs/json.jar -d /tmp/aether-agent-proofs/classes \
+            "$SRC/EngineCore.java" "$SRC/ByokClient.java" "$SRC/ByokAgent.java" \
+            "$SRC/LocalToolRegistry.java" "$SRC/McpClient.java" "$SRC/core/AgentActivity.java" \
+            scripts/proofs/ByokAgentProof.java scripts/proofs/LocalToolRegistryProof.java scripts/proofs/McpClientProof.java
+          java -cp /tmp/aether-agent-proofs/classes:/tmp/aether-agent-proofs/json.jar ByokAgentProof
+          java -cp /tmp/aether-agent-proofs/classes:/tmp/aether-agent-proofs/json.jar LocalToolRegistryProof
+          java -cp /tmp/aether-agent-proofs/classes:/tmp/aether-agent-proofs/json.jar McpClientProof
+
       - name: Run engine, MCP and question protocol proofs
         run: |
           python3 scripts/proofs/engine-request-check.py
@@ -132,6 +145,11 @@ jobs:
             set -e
             if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
             set +e
+            adb shell am instrument -w -r -e class com.aether.app.LocalAgentInteractionTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee -a instrumentation.log
+            CLASS_STATUS=$?
+            set -e
+            if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
+            set +e
             adb shell am instrument -w -r -e class com.aether.app.ExhaustiveThemeTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee -a instrumentation.log
             CLASS_STATUS=$?
             set -e
@@ -141,6 +159,7 @@ jobs:
             mkdir -p screenshots/live-execution screenshots/theme-audit
             adb pull /sdcard/Android/data/com.aether.app.debug/files/screenshots/. screenshots/ || true
             adb pull /sdcard/Android/data/com.aether.app.debug/files/live-execution/. screenshots/live-execution/ || true
+            adb pull /sdcard/Android/data/com.aether.app.debug/files/local-agent-interaction/. screenshots/local-agent-interaction/ || true
             adb pull /sdcard/Android/data/com.aether.app.debug/files/theme-audit/. screenshots/theme-audit/ || true
             if [ "$TEST_STATUS" -ne 0 ]; then exit "$TEST_STATUS"; fi
             test -f screenshots/01-chat-welcome.png
@@ -155,6 +174,11 @@ jobs:
             cat screenshots/verification.json
             test -f screenshots/live-execution/light-manual-command-before-execution.png
             test -f screenshots/live-execution/light-command-folded-after-completion.png
+            test -f screenshots/local-agent-interaction/01-command-output-while-agent-continues.png
+            test -f screenshots/local-agent-interaction/02-command-output-collapsed.png
+            test -f screenshots/local-agent-interaction/03-command-output-expanded-again.png
+            test -f screenshots/local-agent-interaction/04-command-complete-and-auto-folded.png
+            grep -q '"collapseExpandVerified": true' screenshots/local-agent-interaction/verification.json
             test -f screenshots/theme-audit/light-settings-home.png
             test -f screenshots/theme-audit/midnight-settings-home.png
             test "$(find screenshots/theme-audit -name '*.png' | wc -l)" -ge 100

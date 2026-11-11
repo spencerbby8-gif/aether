@@ -46,6 +46,8 @@ public final class ChatMessage {
      * what actually happened rather than guessing from a half answer.
      */
     public String taskReport;
+    /** Structured live-tool steps, including real output for local Agent turns. */
+    public JSONArray activitySteps;
 
     public ChatMessage(String role) {
         this.role = role;
@@ -80,6 +82,7 @@ public final class ChatMessage {
         o.put("status", status == null ? STATUS_OK : status);
         if (note != null && !note.isEmpty()) o.put("note", note);
         if (taskReport != null && !taskReport.isEmpty()) o.put("taskReport", taskReport);
+        if (activitySteps != null && activitySteps.length() > 0) o.put("activitySteps", activitySteps);
         if (engine != null && !engine.isEmpty()) o.put("engine", engine);
         if (attachments != null && !attachments.isEmpty()) {
             o.put("attachments", Attachment.arrayToJson(attachments));
@@ -99,6 +102,7 @@ public final class ChatMessage {
         m.note = o.has("note") && !o.isNull("note") ? o.optString("note") : null;
         m.taskReport = o.has("taskReport") && !o.isNull("taskReport")
                 ? o.optString("taskReport") : null;
+        m.activitySteps = o.optJSONArray("activitySteps");
         m.engine = o.has("engine") && !o.isNull("engine") ? o.optString("engine") : null;
         m.toolLines.clear();
         JSONArray tools = o.optJSONArray("tools");
