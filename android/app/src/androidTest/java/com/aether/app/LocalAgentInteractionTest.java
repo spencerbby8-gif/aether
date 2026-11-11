@@ -100,6 +100,11 @@ public class LocalAgentInteractionTest {
             clickId("send_btn");
 
             assertVisible("Running commands");
+            // echo is intentionally short: by the time UiAutomator observes it,
+            // the step is complete and its output well is folded. Open it through
+            // the same real control a user taps; long commands stream while open.
+            UiObject2 initialExpand = device.wait(Until.findObject(By.desc("Expand Running a command")), 6000);
+            assertNotNull(initialExpand); initialExpand.click(); device.waitForIdle();
             assertVisible("OUTPUT");
             assertVisible("aether-android-live-output");
             assertTrue("Agent activity is not running while the model continues", activityRunning(scenario));

@@ -132,28 +132,21 @@ jobs:
             adb install -r apks/app-debug.apk
             adb install -r apks/app-debug-androidTest.apk
             adb logcat -c
-            set -o pipefail
             TEST_STATUS=0
+            run_instrumentation() {
+              CLASS_NAME="$1"
+              CLASS_LOG="$(echo "$CLASS_NAME" | tr . _).log"
+              adb shell am instrument -w -r -e class "$CLASS_NAME" com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner > "$CLASS_LOG" 2>&1
+              CLASS_STATUS=$?
+              cat "$CLASS_LOG" | tee -a instrumentation.log
+              if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
+            }
             set +e
-            adb shell am instrument -w -r -e class com.aether.app.ScreenshotTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee -a instrumentation.log
-            CLASS_STATUS=$?
+            run_instrumentation com.aether.app.ScreenshotTest
+            run_instrumentation com.aether.app.LiveExecutionHandshakeTest
+            run_instrumentation com.aether.app.LocalAgentInteractionTest
+            run_instrumentation com.aether.app.ExhaustiveThemeTest
             set -e
-            if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
-            set +e
-            adb shell am instrument -w -r -e class com.aether.app.LiveExecutionHandshakeTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee -a instrumentation.log
-            CLASS_STATUS=$?
-            set -e
-            if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
-            set +e
-            adb shell am instrument -w -r -e class com.aether.app.LocalAgentInteractionTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee -a instrumentation.log
-            CLASS_STATUS=$?
-            set -e
-            if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
-            set +e
-            adb shell am instrument -w -r -e class com.aether.app.ExhaustiveThemeTest com.aether.app.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee -a instrumentation.log
-            CLASS_STATUS=$?
-            set -e
-            if [ "$CLASS_STATUS" -ne 0 ]; then TEST_STATUS=1; fi
             adb logcat -d -v threadtime > logcat.txt || true
             rm -rf screenshots
             mkdir -p screenshots/live-execution screenshots/theme-audit
