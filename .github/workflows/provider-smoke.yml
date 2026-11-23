@@ -1,0 +1,182 @@
+name: Antigravity provider smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: Exact model ID. Leave blank for authentication and discovery only.
+        required: false
+        type: string
+
+permissions: {}
+
+jobs:
+  smoke:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check OpenAI-compatible provider
+        env:
+          PROVIDER_KEY: ${{ secrets.ANTIGRAVITY_API_KEY }}
+          PROVIDER_BASE: ${{ secrets.ANTIGRAVITY_BASE_URL }}
+          TEST_MODEL: ${{ inputs.model_id }}
+        run: |
+          node --input-type=module <<'NODE'
+          const { PROVIDER_KEY: rawKey, PROVIDER_BASE: rawBase, TEST_MODEL: rawModel } = process.env;
+          const key = (rawKey ?? '').trim();
+          const model = (rawModel ?? '').trim();
+          const maxBytes = 1_048_576;
+          let stage = 'configuration';
+
+          async function* readText(response) {
+            if (!response.body) throw new Error('missing response body');
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let bytes = 0;
+            try {
+              while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                bytes += value.byteLength;
+                if (bytes > maxBytes) throw new Error('response limit exceeded');
+                yield decoder.decode(value, { stream: true });
+              }
+              yield decoder.decode();
+            } finally {
+              await reader.cancel().catch(() => {});
+              reader.releaseLock();
+            }
+          }
+
+          async function readJson(response) {
+            let text = '';
+            for await (const chunk of readText(response)) text += chunk;
+            return JSON.parse(text);
+          }
+
+          try {
+            if (!key || !rawBase?.trim()) throw new Error('missing configuration');
+            const base = new URL(rawBase.trim());
+            if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) {
+              throw new Error('invalid HTTPS base URL');
+            }
+            base.pathname = base.pathname.replace(/\/+$/, '') + '/';
+            if (model.length > 256 || /[\r\n]/.test(model)) throw new Error('invalid model ID');
+
+            async function request(path, body, accept = 'application/json') {
+              const headers = { Authorization: `Bearer ${key}`, Accept: accept };
+              if (body) headers['Content-Type'] = 'application/json';
+              const response = await fetch(new URL(path, base), {
+                method: body ? 'POST' : 'GET', headers,
+                body: body ? JSON.stringify(body) : undefined,
+                redirect: 'error', signal: AbortSignal.timeout(60_000),
+              });
+              if (!response.ok) {
+                console.error(`Provider returned HTTP ${response.status} for this endpoint shape.`);
+                await response.body?.cancel();
+                throw new Error('provider rejected request');
+              }
+              return response;
+            }
+
+            stage = 'model discovery (/models)';
+            const catalog = await readJson(await request('models'));
+            if (!Array.isArray(catalog?.data)) throw new Error('invalid model catalog');
+            const models = catalog.data.filter(item => typeof item?.id === 'string' && item.id.length > 0);
+            console.log(`PASS: models request with configured bearer header (${models.length} model entries).`);
+            if (model) {
+              const present = models.some(item => item.id === model);
+              console.log(present
+                ? `PASS: requested model ID is advertised by the provider.`
+                : `WARN: requested model ID was not listed by the provider; continuing anyway.`);
+            }
+
+            let noKeyStatus;
+            try {
+              const noKey = await fetch(new URL('models', base), {
+                headers: { Accept: 'application/json' },
+                redirect: 'error', signal: AbortSignal.timeout(10_000),
+              });
+              noKeyStatus = noKey.status;
+              await noKey.body?.cancel();
+            } catch {
+              // Discovery still succeeded; never log the underlying fetch error.
+            }
+            if (noKeyStatus === 401 || noKeyStatus === 403) {
+              console.log('PASS: discovery was denied without the bearer key.');
+            } else {
+              console.log('INCONCLUSIVE: discovery alone did not verify key enforcement.');
+            }
+
+            if (!model) {
+              console.log('SKIP: streaming and tool-call checks require a model ID.');
+            } else {
+              stage = 'streaming chat (/chat/completions)';
+              const response = await request('chat/completions', {
+                model, stream: true, max_tokens: 512,
+                messages: [{ role: 'user', content: 'Reply with the word ready.' }],
+              }, 'text/event-stream');
+              if (!response.headers.get('content-type')?.toLowerCase().includes('text/event-stream')) {
+                await response.body?.cancel();
+                throw new Error('expected an event stream');
+              }
+              let pending = '';
+              let textSeen = false;
+              let reasoningSeen = false;
+              let complete = false;
+              function handleEvent(event) {
+                const data = event.split(/\r?\n/).filter(line => line.startsWith('data:'))
+                  .map(line => line.slice(5).trimStart()).join('\n');
+                if (!data) return;
+                if (data.trim() === '[DONE]') { complete = true; return; }
+                const message = JSON.parse(data);
+                if (message.error) throw new Error('provider stream error');
+                const delta = message.choices?.[0]?.delta;
+                if (typeof delta?.content === 'string' && delta.content.trim()) textSeen = true;
+                if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content.trim()) reasoningSeen = true;
+                if (typeof delta?.reasoning === 'string' && delta.reasoning.trim()) reasoningSeen = true;
+                if (message.choices?.[0]?.finish_reason === 'stop') complete = true;
+              }
+              for await (const chunk of readText(response)) {
+                pending += chunk;
+                let boundary;
+                while ((boundary = /\r?\n\r?\n/.exec(pending))) {
+                  handleEvent(pending.slice(0, boundary.index));
+                  pending = pending.slice(boundary.index + boundary[0].length);
+                }
+                if (complete && textSeen) break;
+              }
+              if (!textSeen || !complete) throw new Error('missing content or stream completion');
+              console.log('PASS: valid streaming content and completion marker.');
+              console.log(reasoningSeen
+                ? 'PASS: incremental reasoning content observed in the stream.'
+                : 'INFO: no reasoning deltas in this reply.');
+
+              stage = 'structured tool call (/chat/completions)';
+              const tool = 'format_label';
+              const result = await readJson(await request('chat/completions', {
+                model, stream: false, max_tokens: 512,
+                messages: [{ role: 'user', content: 'Call format_label with label set to ready.' }],
+                tools: [{ type: 'function', function: {
+                  name: tool, description: 'Format a test label.',
+                  parameters: { type: 'object', properties: { label: { type: 'string' } }, required: ['label'], additionalProperties: false },
+                } }],
+                tool_choice: { type: 'function', function: { name: tool } },
+              }));
+              const call = result.choices?.[0]?.message?.tool_calls?.[0];
+              if (call?.type !== 'function' || call.function?.name !== tool ||
+                  JSON.parse(call.function.arguments)?.label !== 'ready') {
+                throw new Error('unexpected tool call');
+              }
+              console.log('PASS: structured test tool call returned; no tool was executed.');
+            }
+          } catch {
+            // Never print provider bodies, headers, URLs, model content, or raw errors.
+            console.error(`FAIL: ${stage}. Check the provider configuration or protocol support.`);
+            process.exitCode = 1;
+          }
+          NODE
