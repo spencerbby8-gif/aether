@@ -59,10 +59,13 @@ jobs:
           javac -encoding UTF-8 -cp /tmp/aether-agent-proofs/json.jar -d /tmp/aether-agent-proofs/classes \
             "$SRC/EngineCore.java" "$SRC/ByokClient.java" "$SRC/ByokAgent.java" \
             "$SRC/LocalToolRegistry.java" "$SRC/McpClient.java" "$SRC/core/AgentActivity.java" \
-            scripts/proofs/ByokAgentProof.java scripts/proofs/LocalToolRegistryProof.java scripts/proofs/McpClientProof.java
+            "$SRC/core/ServerSentEvents.java" \
+            scripts/proofs/ByokAgentProof.java scripts/proofs/LocalToolRegistryProof.java \
+            scripts/proofs/McpClientProof.java scripts/proofs/ServerSentEventsProof.java
           java -cp /tmp/aether-agent-proofs/classes:/tmp/aether-agent-proofs/json.jar ByokAgentProof
           java -cp /tmp/aether-agent-proofs/classes:/tmp/aether-agent-proofs/json.jar LocalToolRegistryProof
           java -cp /tmp/aether-agent-proofs/classes:/tmp/aether-agent-proofs/json.jar McpClientProof
+          java -cp /tmp/aether-agent-proofs/classes:/tmp/aether-agent-proofs/json.jar ServerSentEventsProof
 
       - name: Run engine, MCP and question protocol proofs
         run: |
