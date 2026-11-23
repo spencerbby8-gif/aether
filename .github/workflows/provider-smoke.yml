@@ -26,7 +26,8 @@ jobs:
           TEST_MODEL: ${{ inputs.model_id }}
         run: |
           node --input-type=module <<'NODE'
-          const { PROVIDER_KEY: key, PROVIDER_BASE: rawBase, TEST_MODEL: rawModel } = process.env;
+          const { PROVIDER_KEY: rawKey, PROVIDER_BASE: rawBase, TEST_MODEL: rawModel } = process.env;
+          const key = (rawKey ?? '').trim();
           const model = (rawModel ?? '').trim();
           const maxBytes = 1_048_576;
           let stage = 'configuration';
@@ -58,7 +59,7 @@ jobs:
           }
 
           try {
-            if (!key?.trim() || !rawBase?.trim()) throw new Error('missing configuration');
+            if (!key || !rawBase?.trim()) throw new Error('missing configuration');
             const base = new URL(rawBase.trim());
             if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) {
               throw new Error('invalid HTTPS base URL');
@@ -82,18 +83,35 @@ jobs:
               return response;
             }
 
-            stage = 'authentication and model discovery';
+            stage = 'model discovery';
             const catalog = await readJson(await request('models'));
             if (!Array.isArray(catalog?.data)) throw new Error('invalid model catalog');
             const models = catalog.data.filter(item => typeof item?.id === 'string' && item.id.length > 0);
-            console.log(`PASS: authenticated models request (${models.length} model entries).`);
+            console.log(`PASS: models request with configured bearer header (${models.length} model entries).`);
+
+            let noKeyStatus;
+            try {
+              const noKey = await fetch(new URL('models', base), {
+                headers: { Accept: 'application/json' },
+                redirect: 'error', signal: AbortSignal.timeout(10_000),
+              });
+              noKeyStatus = noKey.status;
+              await noKey.body?.cancel();
+            } catch {
+              // Discovery still succeeded; never log the underlying fetch error.
+            }
+            if (noKeyStatus === 401 || noKeyStatus === 403) {
+              console.log('PASS: discovery was denied without the bearer key.');
+            } else {
+              console.log('INCONCLUSIVE: discovery alone did not verify key enforcement.');
+            }
 
             if (!model) {
               console.log('SKIP: streaming and tool-call checks require a model ID.');
             } else {
               stage = 'streaming chat';
               const response = await request('chat/completions', {
-                model, stream: true, max_tokens: 128,
+                model, stream: true, max_tokens: 512,
                 messages: [{ role: 'user', content: 'Reply with the word ready.' }],
               }, 'text/event-stream');
               if (!response.headers.get('content-type')?.toLowerCase().includes('text/event-stream')) {
@@ -121,6 +139,7 @@ jobs:
                   handleEvent(pending.slice(0, boundary.index));
                   pending = pending.slice(boundary.index + boundary[0].length);
                 }
+                if (complete && textSeen) break;
               }
               if (!textSeen || !complete) throw new Error('missing content or stream completion');
               console.log('PASS: valid streaming content and completion marker.');
@@ -128,7 +147,7 @@ jobs:
               stage = 'structured tool call';
               const tool = 'format_label';
               const result = await readJson(await request('chat/completions', {
-                model, stream: false, max_tokens: 256,
+                model, stream: false, max_tokens: 512,
                 messages: [{ role: 'user', content: 'Call format_label with label set to ready.' }],
                 tools: [{ type: 'function', function: {
                   name: tool, description: 'Format a test label.',
